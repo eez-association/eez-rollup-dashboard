@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.34;
 
-import {TestUSDC} from "../src/l1/TestUSDC.sol";
+import {TestUSDC} from "../src/testnet/TestUSDC.sol";
 import {IStandardBridge} from "../src/interfaces/IStandardBridge.sol";
 import {Bridge} from "eez-core-protocol/src/periphery/Bridge.sol";
 
@@ -70,124 +70,108 @@ contract TestUSDCTest {
     FaucetRemoteReceiver private receiver;
     address private constant USER = address(0xABC);
     address private constant RECIPIENT = address(0xDEF);
+    uint256 private constant CLAIM = 1_000_000_000;
 
     function setUp() public {
-        token = new TestUSDC();
         receiver = new FaucetRemoteReceiver();
         bridge = new Bridge();
         bridge.initialize(address(new FaucetTransportFixture(address(receiver))), 0, address(this));
         bridge.setCanonicalBridgeAddress(address(receiver));
-        token.registerBridge(IStandardBridge(address(bridge)));
+        token = new TestUSDC(IStandardBridge(address(bridge)), 1);
     }
 
-    function testAnyoneCanMintRepeatedlyForAnotherRecipient() public {
+    function testAnyoneCanClaimRepeatedlyForAnotherRecipient() public {
         assert(token.totalSupply() == 0);
         assert(token.decimals() == 6);
+        assert(token.MAX_REQUEST_AMOUNT() == CLAIM);
         vm.prank(USER);
-        token.mint(RECIPIENT, 1_234_567);
+        token.claim(RECIPIENT);
         vm.prank(USER);
-        token.mint(RECIPIENT, 2_000_001);
+        token.claim(RECIPIENT);
         vm.prank(address(0xBEEF));
-        token.mint(USER, 999_000_123);
-        assert(token.balanceOf(RECIPIENT) == 3_234_568);
-        assert(token.balanceOf(USER) == 999_000_123);
-        assert(token.totalSupply() == 1_002_234_691);
+        token.claim(USER);
+        assert(token.balanceOf(RECIPIENT) == 2 * CLAIM);
+        assert(token.balanceOf(USER) == CLAIM);
+        assert(token.totalSupply() == 3 * CLAIM);
     }
 
     function testRepeatedL2ClaimsUseNormalBridgeWithoutUserFundsOrHelpers() public {
-        token.mint(address(token), 7); // unrelated existing balance must survive
+        token.claim(address(token)); // unrelated existing balance must survive
         uint64 nonce = vm.getNonce(address(token));
         vm.prank(USER);
-        token.claimOnL2(RECIPIENT, 100_123_456, 1);
+        token.claimOnL2(RECIPIENT);
         vm.prank(USER);
-        token.claimOnL2(RECIPIENT, 2_000_001, 1);
+        token.claimOnL2(RECIPIENT);
         assert(token.balanceOf(USER) == 0);
         assert(token.allowance(USER, address(bridge)) == 0);
-        assert(token.balanceOf(address(token)) == 7);
-        assert(token.balanceOf(address(bridge)) == 102_123_457);
-        assert(token.totalSupply() == 102_123_464);
+        assert(token.balanceOf(address(token)) == CLAIM);
+        assert(token.balanceOf(address(bridge)) == 2 * CLAIM);
+        assert(token.totalSupply() == 3 * CLAIM);
         assert(token.allowance(address(token), address(bridge)) == 0);
-        assert(receiver.received() == 102_123_457);
+        assert(receiver.received() == 2 * CLAIM);
         assert(receiver.recipient() == RECIPIENT);
         assert(receiver.originalToken() == address(token));
         assert(vm.getNonce(address(token)) == nonce);
     }
 
     function testFailureAfterLockRollsBackMintEscrowAllowanceAndDelivery() public {
-        token.mint(address(token), 7);
+        token.claim(address(token));
         receiver.setFail(true);
         vm.expectRevert();
-        token.claimOnL2(RECIPIENT, 80_000_000, 1);
-        assert(token.totalSupply() == 7);
-        assert(token.balanceOf(address(token)) == 7);
+        token.claimOnL2(RECIPIENT);
+        assert(token.totalSupply() == CLAIM);
+        assert(token.balanceOf(address(token)) == CLAIM);
         assert(token.balanceOf(address(bridge)) == 0);
         assert(token.allowance(address(token), address(bridge)) == 0);
         assert(receiver.received() == 0);
         receiver.setFail(false);
-        token.claimOnL2(RECIPIENT, 1, 1);
-        assert(receiver.received() == 1);
+        token.claimOnL2(RECIPIENT);
+        assert(receiver.received() == CLAIM);
     }
 
-    function testOnlyCreatorCanRegisterExactlyOneL1Bridge() public {
-        TestUSDC fresh = new TestUSDC();
-        vm.prank(USER);
-        vm.expectRevert(TestUSDC.InvalidRegistration.selector);
-        fresh.registerBridge(IStandardBridge(address(bridge)));
-        fresh.registerBridge(IStandardBridge(address(bridge)));
-        vm.expectRevert(TestUSDC.InvalidRegistration.selector);
-        fresh.registerBridge(IStandardBridge(address(bridge)));
-    }
-
-    function testRejectsMissingOrL2Bridge() public {
-        TestUSDC fresh = new TestUSDC();
-        vm.expectRevert(TestUSDC.InvalidRegistration.selector);
-        fresh.registerBridge(IStandardBridge(address(0)));
-        vm.expectRevert(TestUSDC.InvalidRegistration.selector);
-        fresh.registerBridge(IStandardBridge(USER));
+    function testConstructorRejectsMissingBridgeAndWrongChain() public {
+        vm.expectRevert(TestUSDC.InvalidBridge.selector);
+        new TestUSDC(IStandardBridge(address(0)), 1);
+        vm.expectRevert(TestUSDC.InvalidBridge.selector);
+        new TestUSDC(IStandardBridge(USER), 1);
+        vm.expectRevert(TestUSDC.InvalidBridge.selector);
+        new TestUSDC(IStandardBridge(address(bridge)), 0);
         Bridge wrongSide = new Bridge();
         wrongSide.initialize(address(new FaucetTransportFixture(address(receiver))), 1, address(this));
-        vm.expectRevert(TestUSDC.InvalidRegistration.selector);
-        fresh.registerBridge(IStandardBridge(address(wrongSide)));
+        vm.expectRevert(TestUSDC.InvalidBridge.selector);
+        new TestUSDC(IStandardBridge(address(wrongSide)), 1);
     }
 
-    function testInvalidClaimsDoNotMint() public {
-        TestUSDC fresh = new TestUSDC();
-        vm.expectRevert(TestUSDC.InvalidRequest.selector);
-        fresh.claimOnL2(RECIPIENT, 1, 1);
-        vm.expectRevert(TestUSDC.InvalidRequest.selector);
-        token.claimOnL2(address(0), 1, 1);
-        vm.expectRevert(TestUSDC.InvalidRequest.selector);
-        token.claimOnL2(RECIPIENT, 0, 1);
-        vm.expectRevert(TestUSDC.InvalidRequest.selector);
-        token.claimOnL2(RECIPIENT, 1, 0);
+    function testZeroRecipientDoesNotMint() public {
         vm.expectRevert();
-        token.mint(address(0), 1);
-        assert(token.totalSupply() == 0 && fresh.totalSupply() == 0);
+        token.claim(address(0));
+        vm.expectRevert(TestUSDC.InvalidRecipient.selector);
+        token.claimOnL2(address(0));
+        assert(token.totalSupply() == 0);
     }
 
     function testSuccessfulReturnWithoutPullingTokensReverts() public {
-        TestUSDC fresh = new TestUSDC();
         address broken = address(new FaucetNonPullingBridge());
-        fresh.registerBridge(IStandardBridge(broken));
+        TestUSDC fresh = new TestUSDC(IStandardBridge(broken), 1);
         vm.expectRevert(TestUSDC.IncompleteBridge.selector);
-        fresh.claimOnL2(RECIPIENT, 10, 1);
+        fresh.claimOnL2(RECIPIENT);
         assert(fresh.totalSupply() == 0);
         assert(fresh.allowance(address(fresh), broken) == 0);
     }
 
     function testTokenCanHoldAndTransferItsOwnTokens() public {
-        token.mint(address(token), 10);
+        token.claim(address(token));
         vm.prank(address(token));
         token.transfer(RECIPIENT, 4);
-        assert(token.balanceOf(address(token)) == 6);
+        assert(token.balanceOf(address(token)) == CLAIM - 4);
         assert(token.balanceOf(RECIPIENT) == 4);
     }
 
     function testSelfTransferPreservesBalanceButTransferFromStillNeedsAllowance() public {
-        token.mint(USER, 10);
+        token.claim(USER);
         vm.prank(USER);
         token.transfer(USER, 4);
-        assert(token.balanceOf(USER) == 10);
+        assert(token.balanceOf(USER) == CLAIM);
         vm.prank(USER);
         vm.expectRevert();
         token.transferFrom(USER, USER, 4);
@@ -195,49 +179,17 @@ contract TestUSDCTest {
         token.approve(USER, 4);
         vm.prank(USER);
         token.transferFrom(USER, USER, 4);
-        assert(token.balanceOf(USER) == 10);
+        assert(token.balanceOf(USER) == CLAIM);
         assert(token.allowance(USER, USER) == 0);
-        assert(token.totalSupply() == 10);
+        assert(token.totalSupply() == CLAIM);
     }
 
-    function testThousandTokenLimitAllowsRepeatedRequests() public {
-        uint256 limit = token.MAX_REQUEST_AMOUNT();
-        assert(limit == 1_000_000_000);
-        vm.prank(USER);
-        token.mint(USER, limit);
-        vm.prank(USER);
-        token.mint(USER, limit);
-        vm.prank(USER);
-        token.claimOnL2(RECIPIENT, limit, 1);
-        vm.prank(USER);
-        token.claimOnL2(RECIPIENT, limit, 1);
-        assert(token.balanceOf(USER) == 2 * limit);
-        assert(token.balanceOf(address(bridge)) == 2 * limit);
-        assert(token.totalSupply() == 4 * limit);
-    }
-
-    function testRejectsAmountsAboveLimitWithoutMinting() public {
-        uint256 tooMuch = token.MAX_REQUEST_AMOUNT() + 1;
-        vm.expectRevert(TestUSDC.InvalidRequest.selector);
-        token.mint(USER, tooMuch);
-        vm.expectRevert(TestUSDC.InvalidRequest.selector);
-        token.claimOnL2(RECIPIENT, tooMuch, 1);
-        vm.expectRevert(TestUSDC.InvalidRequest.selector);
-        token.mint(USER, type(uint256).max);
-        vm.expectRevert(TestUSDC.InvalidRequest.selector);
-        token.claimOnL2(RECIPIENT, type(uint256).max, 1);
+    function testArbitraryAmountEntryPointsAreAbsent() public {
+        (bool mintOk,) = address(token).call(abi.encodeWithSignature("mint(address,uint256)", USER, type(uint256).max));
+        (bool bridgeOk,) = address(token).call(
+            abi.encodeWithSignature("claimOnL2(address,uint256,uint64)", USER, type(uint256).max, uint64(1))
+        );
+        assert(!mintOk && !bridgeOk);
         assert(token.totalSupply() == 0);
-        assert(token.allowance(address(token), address(bridge)) == 0);
-    }
-
-    function testFuzzExactClaim(uint96 rawAmount) public {
-        uint256 amount = uint256(rawAmount) % token.MAX_REQUEST_AMOUNT() + 1;
-        vm.prank(USER);
-        token.claimOnL2(RECIPIENT, amount, 1);
-        assert(token.totalSupply() == amount);
-        assert(token.balanceOf(address(bridge)) == amount);
-        assert(token.balanceOf(address(token)) == 0);
-        assert(token.allowance(address(token), address(bridge)) == 0);
-        assert(receiver.received() == amount);
     }
 }

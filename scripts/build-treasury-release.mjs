@@ -13,9 +13,7 @@ const pin = folder => execFileSync('git', ['-C', `contracts/lib/${folder}`, 'rev
 const pins = { core: pin('eez-core-protocol'), safe: pin('safe'), modules: pin('safe-modules') };
 const groups = [
   { root: 'contracts/legacy', names: ['Safe', 'SafeL2', 'SafeProxyFactory', 'SafeProxy', 'AllowanceModule', 'MultiSendCallOnly'] },
-  { root: 'contracts', names: ['L1Owners', 'TreasuryOwnerAction', 'TreasuryAliasReader', 'TreasuryPolicy',
-    'TreasuryBootstrap', 'SharedTestUSDC', 'SharedTreasuryBridge', 'TestUSDCClaim', 'TestUSDCFaucet', 'WrappedToken',
-    'StandardBridgeTreasuryPolicy', 'StandardBridgeDelegate', 'TestUSDC'] },
+  { root: 'contracts', names: ['L1Owners', 'TreasuryBootstrap', 'TreasuryPolicyL1', 'TreasuryPolicyL2', 'TestUSDC', 'WrappedToken'] },
 ];
 if (process.argv.includes('--check')) {
   const { build } = read(currentPath), manifest = read(`verification/builds/${build}/manifest.json`);
