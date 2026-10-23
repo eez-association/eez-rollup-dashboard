@@ -58,10 +58,11 @@ Inside `_transferTokens`, the branch is explicit:
 
 Only the local Safe can start a payment. Only the registered EEZ proxy representing
 the connected peer can call `payFromPeer`. An EOA, an unrelated proxy, or the peer's
-original address on the wrong chain cannot take this path. Both policies reject
-changed bridge counterparts during payments. Canonical asset and reciprocal peer
-bindings are checked once at activation and cannot subsequently change. Payments
-do not fetch the other policy's full configuration.
+original address on the wrong chain cannot take this path. Canonical asset,
+bridge counterpart and reciprocal peer bindings are checked once at activation.
+The policy's peer binding cannot subsequently change. Payments trust the normal
+bridge administrator to keep the configured bridge pair unchanged; they do not
+reread bridge configuration or fetch the other policy's full configuration.
 
 ## Setup and budget
 

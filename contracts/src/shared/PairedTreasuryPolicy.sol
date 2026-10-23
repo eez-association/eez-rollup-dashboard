@@ -229,9 +229,9 @@ contract PairedTreasuryPolicy {
     function _checkPayment(address recipient, uint256 amount, uint256 epoch, uint256 fromL1) private view {
         if (amount == 0 || amount > GLOBAL_LIMIT || fromL1 > amount) revert InvalidAmount();
         if (epoch != block.timestamp / PERIOD) revert StaleEpoch();
-        // The peer bindings were checked once at activation and cannot be changed.
-        // The normal bridge can still be reconfigured independently, so retain this local check.
-        if (!active || bridge.canonicalBridgeAddress() != remoteBridge) revert InvalidConfiguration();
+        // Peer and bridge bindings were validated at activation. Payments trust
+        // that the normal bridge's administrator keeps that pair unchanged.
+        if (!active) revert InvalidConfiguration();
         if (
             recipient == address(0) || recipient == safe || recipient == peerSafe || recipient == address(this)
                 || recipient == peerPolicy || recipient == address(peer) || recipient == localAliasOnPeer

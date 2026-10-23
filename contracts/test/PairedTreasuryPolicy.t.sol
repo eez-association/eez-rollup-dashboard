@@ -211,11 +211,15 @@ contract PairedTreasuryPolicyTest is OwnerFixture {
         assertEq(policy2.spent(old + 1), 100 * U);
     }
 
-    function testChangedBridgePeerRejectsPayment() public {
-        bridge1.setCanonicalBridgeAddress(address(0xBAD));
-        bytes32 beforeState = _snapshot();
-        _expectPaymentFailure(true, true, U, U, abi.encodeWithSelector(PairedTreasuryPolicy.InvalidConfiguration.selector));
-        assertEq(_snapshot(), beforeState);
+    function testPaymentsTrustSetupBridgeBindings() public {
+        vm.mockCallRevert(address(bridge1), abi.encodeCall(IStandardBridge.canonicalBridgeAddress, ()), "unexpected bridge configuration read");
+        vm.mockCallRevert(address(bridge2), abi.encodeCall(IStandardBridge.canonicalBridgeAddress, ()), "unexpected bridge configuration read");
+        _pay(true, true, 10 * U, 10 * U);
+        _pay(false, false, 10 * U, 0);
+        assertEq(usdc.balanceOf(recipient), 10 * U);
+        assertEq(wrapped.balanceOf(recipient), 10 * U);
+        assertEq(policy2.spent(block.timestamp / 600), 20 * U);
+        vm.clearMockedCalls();
     }
 
     function testFuzzChangedSplitAndReplayRejectOwnerSignatures(bool startL1) public {
