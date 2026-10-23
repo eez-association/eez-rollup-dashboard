@@ -12,7 +12,7 @@ import {IEEZProxyRegistry} from "../interfaces/IEEZProxyRegistry.sol";
 /// @dev A Safe starts the payment locally. Its policy sends its contribution first,
 /// then asks its authenticated peer to send the other contribution. The normal
 /// bridges handle crossing chains. L2 counts the total once for both entry points.
-abstract contract PairedTreasuryPolicy {
+contract PairedTreasuryPolicy {
     using SafeERC20 for IERC20;
 
     uint256 public constant PERIOD = 600;
@@ -31,6 +31,9 @@ abstract contract PairedTreasuryPolicy {
 
     address public peerPolicy; // Original address on the other chain.
     PairedTreasuryPolicy public peer; // Its authenticated proxy on this chain.
+    bool public active;
+    address public peerSafe;
+    address public localAliasOnPeer;
     mapping(uint256 epoch => uint256 amount) private globalSpent; // Written on L2 only.
     bool private entered;
 
@@ -58,6 +61,7 @@ abstract contract PairedTreasuryPolicy {
     error Reentered();
 
     event PeerConnected(address indexed policy, address indexed proxy);
+    event Activated();
     event Paid(
         address indexed token, address indexed recipient, bool onL1,
         uint256 amount, uint256 fromL1, uint256 fromL2, uint256 epoch
@@ -94,6 +98,14 @@ abstract contract PairedTreasuryPolicy {
         if ((local != 0 && local != l2RollupId_) || registry.code.length == 0 || remote == address(0)) {
             revert InvalidConfiguration();
         }
+        // Verify the local EEZ identity, not only the bridge's stored setting.
+        // Missing or reverting getters fail closed; a failed L2 read never means L1.
+        IEEZProxyRegistry eez = IEEZProxyRegistry(registry);
+        if (local == 0) {
+            if (eez.MAINNET_ROLLUP_ID() != 0) revert InvalidConfiguration();
+        } else if (eez.ROLLUP_ID() != local) {
+            revert InvalidConfiguration();
+        }
         (address original, uint64 origin) = bridge_.wrappedTokenInfo(address(token_));
         if (local == 0) {
             if (original != address(0)) revert InvalidConfiguration();
@@ -125,6 +137,28 @@ abstract contract PairedTreasuryPolicy {
         peerPolicy = otherPolicy;
         peer = PairedTreasuryPolicy(proxy);
         emit PeerConnected(otherPolicy, proxy);
+    }
+
+    /// @notice Validate and activate both policies once, after both peers are connected.
+    /// @dev Include this call in the final Safe setup batch. Its authenticated peer
+    /// activates locally without forwarding again, so no extra Safe approval is needed.
+    function activate() external {
+        bool startedHere = msg.sender == safe;
+        if (!startedHere && msg.sender != address(peer)) revert OnlyPeer();
+        if (active || peerPolicy == address(0) || bridge.canonicalBridgeAddress() != remoteBridge) {
+            revert InvalidConfiguration();
+        }
+        Configuration memory other = peer.configuration();
+        if (
+            other.peerPolicy != address(this) || other.canonicalToken != canonicalToken
+                || other.bridge != remoteBridge || other.remoteBridge != address(bridge)
+                || other.l2RollupId != l2RollupId || other.localRollupId != (localRollupId == 0 ? l2RollupId : 0)
+        ) revert InvalidConfiguration();
+        peerSafe = other.safe;
+        localAliasOnPeer = other.peerProxy;
+        active = true;
+        if (startedHere) peer.activate();
+        emit Activated();
     }
 
     /// @notice Owners sign the exact total, destination, epoch and L1 contribution.
@@ -195,16 +229,12 @@ abstract contract PairedTreasuryPolicy {
     function _checkPayment(address recipient, uint256 amount, uint256 epoch, uint256 fromL1) private view {
         if (amount == 0 || amount > GLOBAL_LIMIT || fromL1 > amount) revert InvalidAmount();
         if (epoch != block.timestamp / PERIOD) revert StaleEpoch();
-        if (peerPolicy == address(0) || bridge.canonicalBridgeAddress() != remoteBridge) revert InvalidConfiguration();
-        Configuration memory other = peer.configuration();
+        // The peer bindings were checked once at activation and cannot be changed.
+        // The normal bridge can still be reconfigured independently, so retain this local check.
+        if (!active || bridge.canonicalBridgeAddress() != remoteBridge) revert InvalidConfiguration();
         if (
-            other.peerPolicy != address(this) || other.canonicalToken != canonicalToken
-                || other.bridge != remoteBridge || other.remoteBridge != address(bridge)
-                || other.l2RollupId != l2RollupId || other.localRollupId != (localRollupId == 0 ? l2RollupId : 0)
-        ) revert InvalidConfiguration();
-        if (
-            recipient == address(0) || recipient == safe || recipient == other.safe || recipient == address(this)
-                || recipient == peerPolicy || recipient == address(peer) || recipient == other.peerProxy
+            recipient == address(0) || recipient == safe || recipient == peerSafe || recipient == address(this)
+                || recipient == peerPolicy || recipient == address(peer) || recipient == localAliasOnPeer
                 || recipient == address(bridge) || recipient == remoteBridge
         ) revert InvalidRecipient();
     }
@@ -220,7 +250,7 @@ abstract contract PairedTreasuryPolicy {
 
     function spent(uint256 epoch) external view returns (uint256) {
         if (localRollupId != 0) return globalSpent[epoch];
-        if (peerPolicy == address(0)) revert InvalidConfiguration();
+        if (!active) revert InvalidConfiguration();
         return peer.spent(epoch);
     }
 

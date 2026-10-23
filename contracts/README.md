@@ -8,9 +8,7 @@ rehearsal or deployment were run for the paired-policy change at the user's requ
 
 | Location | Purpose |
 | --- | --- |
-| `src/l1/TreasuryPolicyL1.sol` | L1 policy, funded by its local Safe allowance |
-| `src/l2/TreasuryPolicyL2.sol` | L2 policy, funded by its local Safe allowance |
-| `src/shared/PairedTreasuryPolicy.sol` | Payment flow inherited by both policies |
+| `src/shared/PairedTreasuryPolicy.sol` | One concrete contract deployed on both L1 and L2 |
 | `src/l2/L1Owners.sol` | L2 Safe owner adapter; verifies live L1 Safe signatures |
 | `src/shared/TreasuryBootstrap.sol` | Optional deployment batch helper for either chain |
 | `src/interfaces/` | Safe, allowance module, bridge and EEZ registry ABIs |
@@ -23,10 +21,14 @@ Frozen historical deployment and verification JSON is retained for saved records
 
 ## Payment flow
 
-Each policy has the same five constructor arguments: its local Safe, local
+Deploy the same `PairedTreasuryPolicy` contract twice. Its five constructor arguments are the local Safe, local
 AllowanceModule, local token, normal local bridge and the L2 EEZ rollup ID.
 L1 uses canonical USDC; L2 uses the wrapped token registered by that bridge.
-The concrete L1/L2 constructors reject deployment on the wrong bridge side.
+The constructor reads the local rollup ID from the bridge and checks it against
+that bridge's EEZ contract: `MAINNET_ROLLUP_ID()` on L1, `ROLLUP_ID()` on L2.
+Missing/reverting getters reject construction; there is no failed-call fallback to
+L1. These are EEZ rollup IDs, not EIP-155 chain IDs. The deployed bridge/manager
+identities must still be verified during deployment.
 
 The Safe owners call their local policy:
 
@@ -40,7 +42,7 @@ these fields, the local policy target, the Safe's own chain and its nonce.
 
 The implementation is deliberately local-first:
 
-1. Check the payment and the connected peer.
+1. Check the payment and that setup is active.
 2. `_transferTokens` sends this policy's contribution.
 3. `peer.payFromPeer` sends the other policy's contribution, without forwarding
    the payment again.
@@ -57,7 +59,9 @@ Inside `_transferTokens`, the branch is explicit:
 Only the local Safe can start a payment. Only the registered EEZ proxy representing
 the connected peer can call `payFromPeer`. An EOA, an unrelated proxy, or the peer's
 original address on the wrong chain cannot take this path. Both policies reject
-changed bridge counterparts, a different canonical asset, and nonreciprocal peers.
+changed bridge counterparts during payments. Canonical asset and reciprocal peer
+bindings are checked once at activation and cannot subsequently change. Payments
+do not fetch the other policy's full configuration.
 
 ## Setup and budget
 
@@ -68,7 +72,11 @@ changed bridge counterparts, a different canonical asset, and nonreciprocal peer
 4. Enable the official AllowanceModule in each Safe, add its **local policy** as
    delegate, and grant 100 tokens per ten-minute period. Use aligned epoch-based
    reset times on both chains. The policies read the module's actual allowances.
-5. Initiate payments through either Safe. Owner administration remains unrestricted;
+5. Include `activate()` in the final Safe setup batch, after both connections exist.
+   It validates and activates both policies using an authenticated peer call that
+   does not forward again. It needs no separate Safe transaction. The peer Safe and
+   local alias on the peer chain are cached for recipient checks.
+6. Initiate payments through either Safe. Owner administration remains unrestricted;
    these spending limits govern the policy payment path, not every Safe action.
 
 The shared limit remains 150 tokens per ten-minute epoch. Only the L2 policy
@@ -109,7 +117,8 @@ reverts the new mint and approval. Real Ethereum USDC has no faucet.
 
 The Solidity tests cover the fixed faucet, self-transfer behavior, local-first
 ordering, both initiating Safes/destinations, exact funding splits, peer
-permissions, shared-budget accounting, signature replay and rollback. They use
+permissions, EEZ rollup identity, one-time activation, shared-budget accounting,
+signature replay and rollback. They use
 real Safe/AllowanceModule/normal bridge contracts with a single-EVM EEZ transport
 fixture; passing them would not establish native protocol execution. They have
 **not been executed** for this change.

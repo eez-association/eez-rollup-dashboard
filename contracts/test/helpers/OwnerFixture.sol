@@ -20,6 +20,11 @@ contract ReadThroughManager is EEZBase {
         ROLLUP_ID = id;
     }
 
+    function MAINNET_ROLLUP_ID() external view returns (uint64) {
+        require(ROLLUP_ID == 0, "only L1");
+        return 0;
+    }
+
     function setPeer(ReadThroughManager other) external {
         require(address(peer) == address(0));
         peer = other;
