@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.34;
-import {TreasuryPolicyBase} from "../src/TreasuryPolicyBase.sol";
+import {TreasuryPolicyBase} from "../src/l2/TreasuryPolicyBase.sol";
 import {BidirectionalTreasuryPolicyTest} from "./BidirectionalTreasuryPolicy.t.sol";
-import {TreasuryPolicy} from "../src/TreasuryPolicy.sol";
-import {TreasuryAliasReader} from "../src/TreasuryAliasReader.sol";
+import {TreasuryPolicy} from "../src/chiado/TreasuryPolicy.sol";
+import {TreasuryAliasReader} from "../src/chiado/TreasuryAliasReader.sol";
 import {IEEZProxyRegistry} from "../src/interfaces/IEEZProxyRegistry.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 

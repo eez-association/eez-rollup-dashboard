@@ -3,7 +3,7 @@ pragma solidity 0.8.34;
 
 import {TreasuryBridge} from "./TreasuryBridge.sol";
 import {IEEZ} from "eez-core-protocol/src/interfaces/IEEZ.sol";
-import {IEEZProxyRegistry} from "./interfaces/IEEZProxyRegistry.sol";
+import {IEEZProxyRegistry} from "../interfaces/IEEZProxyRegistry.sol";
 
 /// @notice WARNING: Unaudited demo contract. Not ready for production use.
 /// Treasury bridge whose peer is fixed before other treasuries reuse it.

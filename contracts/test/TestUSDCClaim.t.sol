@@ -3,8 +3,8 @@ pragma solidity 0.8.34;
 
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Test} from "forge-std/Test.sol";
-import {SharedTestUSDC} from "../src/SharedTestUSDC.sol";
-import {TestUSDCClaim} from "../src/TestUSDCClaim.sol";
+import {SharedTestUSDC} from "../src/chiado/SharedTestUSDC.sol";
+import {TestUSDCClaim} from "../src/chiado/TestUSDCClaim.sol";
 
 contract FailedTransferFaucet is SharedTestUSDC {
     function transfer(address, uint256) public pure override returns (bool) {

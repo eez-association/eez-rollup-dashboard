@@ -2,10 +2,10 @@
 pragma solidity 0.8.34;
 
 import {TreasuryPolicyBase} from "./TreasuryPolicyBase.sol";
-import {IEEZProxyRegistry} from "./interfaces/IEEZProxyRegistry.sol";
-import {IAllowanceModule} from "./interfaces/IAllowanceModule.sol";
-import {IStandardBridge} from "./interfaces/IStandardBridge.sol";
-import {StandardBridgeDelegate} from "./StandardBridgeDelegate.sol";
+import {IEEZProxyRegistry} from "../interfaces/IEEZProxyRegistry.sol";
+import {IAllowanceModule} from "../interfaces/IAllowanceModule.sol";
+import {IStandardBridge} from "../interfaces/IStandardBridge.sol";
+import {StandardBridgeDelegate} from "../l1/StandardBridgeDelegate.sol";
 
 /// @notice A single canonical USDC budget over two Safe allowance delegates.
 /// @dev Submit either Safe through its L1 entry point so standard bridge callbacks

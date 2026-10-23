@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.34;
 
-import {TreasuryPolicyBase} from "./TreasuryPolicyBase.sol";
-import {IEEZProxyRegistry} from "./interfaces/IEEZProxyRegistry.sol";
-import {IAllowanceModule} from "./interfaces/IAllowanceModule.sol";
-import {IStandardBridge} from "./interfaces/IStandardBridge.sol";
+import {TreasuryPolicyBase} from "../l2/TreasuryPolicyBase.sol";
+import {IEEZProxyRegistry} from "../interfaces/IEEZProxyRegistry.sol";
+import {IAllowanceModule} from "../interfaces/IAllowanceModule.sol";
+import {IStandardBridge} from "../interfaces/IStandardBridge.sol";
 import {TreasuryAliasReader} from "./TreasuryAliasReader.sol";
 import {TreasuryBridge} from "./TreasuryBridge.sol";
 

@@ -4,6 +4,42 @@
 for production use, including the Ethereum mainnet integration.** Source
 verification and passing tests do not constitute a security audit.
 
+## Contract layout
+
+- `src/l1/StandardBridgeDelegate.sol`: the Ethereum Safe's bounded spending delegate.
+- `src/l1/TestUSDC.sol`: permissionless test faucet for the normal bridge; not real USDC.
+- `src/l2/StandardBridgeTreasuryPolicy.sol`: normal-bridge payment coordinator on EEZ-X.
+- `src/l2/TreasuryPolicyBase.sol`: inherited payment checks, not a separate deployment.
+- `src/l2/L1Owners.sol`: the mirror Safe's contract owner, checking live L1 signatures.
+- `src/shared/`: deployment helpers used on either chain.
+- `src/interfaces/`: shared external ABIs.
+- `src/chiado/`: retained custom-bridge demo and its legacy faucet/claim helper.
+
+### Simplified test faucet
+
+Deploy `TestUSDC` on L1, then its creator calls `registerBridge(normalL1Bridge)`
+once. Only the L1 bridge address is stored. Anyone may call
+`mint(recipient, amount)` repeatedly, or
+`claimOnL2(recipient, amount, destinationRollup)` to mint to the token contract,
+approve the normal bridge, and deposit for the recipient. Amounts use six decimals;
+both entry points accept 0 < amount <= 1,000 tokens per request. Calls remain
+permissionless and repeatable. The destination is an EEZ rollup ID, not an EIP-155
+chain ID. Initial supply is zero.
+There is no separate dispenser, fixed claim allocation, per-wallet limit or claim
+helper in this path. Failed bridging reverts minting and approval. Existing token
+balances at the token contract are preserved; no bridge approval remains afterward.
+
+The normal bridge can `transferFrom` the token contract's own balance. OpenZeppelin
+ERC20 does not reject `from == address(token)` or `from == to`; it still checks
+balances and allowances. Internal `_approve(address(this), bridge, amount)` is
+required here: an internal call to public `approve` would use the user's address.
+
+The Ethereum treasury continues to use real USDC. This test faucet is for isolated
+rehearsals or test deployments using the normal bridge. Existing Chiado UI plans
+and immutable release bundles retain their original contracts. Regenerate a new
+source release before deploying the reorganized contracts; this source change
+does not migrate a live network or change the dashboard's configured asset.
+
 The application uses `L1Owners` for live L1 owner verification and
 `TreasuryPolicy` for payments through the shared Chiado test bridge.
 `StandardBridgeTreasuryPolicy` and its bounded Ethereum delegate use the existing
@@ -87,7 +123,7 @@ bytecode and implementation bindings before the connected rehearsal.
 
 ## Owner adapter
 
-[L1Owners.sol](src/L1Owners.sol) implements `isValidSignature(bytes,bytes)` and
+[L1Owners.sol](src/l2/L1Owners.sol) implements `isValidSignature(bytes,bytes)` and
 returns `0x20c13b0b`, the interface used by Safe v1.3.0 and v1.4.1. It passes the full Safe
 transaction preimage and its hash to the L1 Safe's `checkSignatures`. That Safe
 checks its current owner list and threshold. No owner list is cached on L2.
@@ -171,7 +207,7 @@ requires a new review and fresh signatures.
 The observed shared runtime uses core `f46af7c9833ac12a54f14d52f4da1f318a0f6525`;
 the local integration continues to use the pinned `855fe06` source. The newer
 core rejects remote calls whose destination is the protocol manager itself.
-[TreasuryAliasReader.sol](src/TreasuryAliasReader.sol) performs alias derivation
+[TreasuryAliasReader.sol](src/chiado/TreasuryAliasReader.sol) performs alias derivation
 through a local L1 registry call, reached through the helper's cross-chain proxy.
 **TreasuryPolicy constructor argument 4 is the L1 helper address**, replacing
 the registry argument in the earlier private deployment. Deploy a new policy
@@ -180,7 +216,7 @@ The helper owns no funds and has no module or administrative permissions.
 This reader is specific to the Chiado bridge policy. The standard-bridge policy
 reads its alias from its Safe-bound funding delegate instead.
 
-[SharedTreasuryBridge.sol](src/SharedTreasuryBridge.sol) binds manager,
+[SharedTreasuryBridge.sol](src/chiado/SharedTreasuryBridge.sol) binds manager,
 local rollup and administrator in its constructor. The inherited first-caller
 initializer then rejects further initialization, removing a takeover window on
 the shared testnet. Counterpart configuration still precedes funding. This does
@@ -202,10 +238,10 @@ for worker persistence, deployment, retry semantics and inherited factory limits
 
 ## Payment policy
 
-[TreasuryPolicyBase.sol](src/TreasuryPolicyBase.sol) implements authorization,
+[TreasuryPolicyBase.sol](src/l2/TreasuryPolicyBase.sol) implements authorization,
 aligned allowance checks, budget accounting, exact splits and events once. Both concrete policies inherit it without an extra deployment.
-[TreasuryPolicy.sol](src/TreasuryPolicy.sol) handles Chiado's lock-then-mint bridge;
-[StandardBridgeTreasuryPolicy.sol](src/StandardBridgeTreasuryPolicy.sol) handles
+[TreasuryPolicy.sol](src/chiado/TreasuryPolicy.sol) handles Chiado's lock-then-mint bridge;
+[StandardBridgeTreasuryPolicy.sol](src/l2/StandardBridgeTreasuryPolicy.sol) handles
 the generic bridge through its bounded Ethereum delegate. Their existing
 submission paths and token custody checks remain distinct. See the
 [fixed-payment validation record](../docs/audits/2026-10-23-treasury-fixed-payments/README.md)
@@ -261,7 +297,7 @@ The isolated invoice fixture computes its own split and calls the same checked
 payment path, then requires merchant acceptance. This test-only routing does not
 add an entry point or automatic allocation to production policies.
 
-[TreasuryBridge.sol](src/TreasuryBridge.sol) inherits the pinned **test-only**
+[TreasuryBridge.sol](src/chiado/TreasuryBridge.sol) inherits the pinned **test-only**
 bridge without modifying core. The token and destination rollup are immutable.
 Only the configured L2 bridge's authenticated L1 alias can lock a deposit;
 that bridge binds the payer to its actual local caller. L1 derives the payer's
@@ -468,7 +504,7 @@ for source identity, migration coverage, rollback evidence and deployment limits
 
 ## Batched contract deployment
 
-Version 4 uses [TreasuryBootstrap](src/TreasuryBootstrap.sol) for atomic CREATE
+Version 4 uses [TreasuryBootstrap](src/shared/TreasuryBootstrap.sol) for atomic CREATE
 and CALL sequences. Each executor is created from the selected wallet, has an
 immutable owner and exact sequence check, rejects reentrancy, and permanently
 closes at completion. It has no Safe owner/module role and permits no delegatecall.
@@ -541,7 +577,7 @@ for predeployment and saved-plan compatibility.
 
 ## Configurable test-token faucet
 
-[`TestUSDCFaucet`](src/TestUSDCFaucet.sol) delivers an exact six-decimal amount to
+[`TestUSDCFaucet`](src/chiado/TestUSDCFaucet.sol) delivers an exact six-decimal amount to
 any recipient on Chiado or through the existing shared bridge to EEZ-X. It pools
 fresh `TestUSDCClaim` allocations from the immutable test token and retains excess
 for future permissionless requests. It never spends from a Safe. Request failure

@@ -2,8 +2,8 @@
 pragma solidity 0.8.34;
 
 import {Test} from "forge-std/Test.sol";
-import {SharedTestUSDC} from "../src/SharedTestUSDC.sol";
-import {TestUSDCFaucet} from "../src/TestUSDCFaucet.sol";
+import {SharedTestUSDC} from "../src/chiado/SharedTestUSDC.sol";
+import {TestUSDCFaucet} from "../src/chiado/TestUSDCFaucet.sol";
 
 contract FaucetBridgeFixture {
     address public immutable canonicalToken;

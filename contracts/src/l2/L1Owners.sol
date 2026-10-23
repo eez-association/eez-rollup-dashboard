@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.34;
 
-import {IEEZProxyRegistry} from "./interfaces/IEEZProxyRegistry.sol";
-import {ISafe} from "./interfaces/ISafe.sol";
+import {IEEZProxyRegistry} from "../interfaces/IEEZProxyRegistry.sol";
+import {ISafe} from "../interfaces/ISafe.sol";
 
 /// @notice WARNING: Unaudited demo contract. Not ready for production use.
 /// Safe v1.4.1 contract owner delegating verification to an L1 Safe.

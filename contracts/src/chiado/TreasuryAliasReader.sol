@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.34;
 
-import {IEEZProxyRegistry} from "./interfaces/IEEZProxyRegistry.sol";
+import {IEEZProxyRegistry} from "../interfaces/IEEZProxyRegistry.sol";
 
 /// @notice WARNING: Unaudited demo contract. Not ready for production use.
 /// L1 alias lookup for treasury calls originating on EEZ-X.

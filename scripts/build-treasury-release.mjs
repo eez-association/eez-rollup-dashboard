@@ -15,7 +15,7 @@ const groups = [
   { root: 'contracts/legacy', names: ['Safe', 'SafeL2', 'SafeProxyFactory', 'SafeProxy', 'AllowanceModule', 'MultiSendCallOnly'] },
   { root: 'contracts', names: ['L1Owners', 'TreasuryOwnerAction', 'TreasuryAliasReader', 'TreasuryPolicy',
     'TreasuryBootstrap', 'SharedTestUSDC', 'SharedTreasuryBridge', 'TestUSDCClaim', 'TestUSDCFaucet', 'WrappedToken',
-    'StandardBridgeTreasuryPolicy', 'StandardBridgeDelegate'] },
+    'StandardBridgeTreasuryPolicy', 'StandardBridgeDelegate', 'TestUSDC'] },
 ];
 if (process.argv.includes('--check')) {
   const { build } = read(currentPath), manifest = read(`verification/builds/${build}/manifest.json`);

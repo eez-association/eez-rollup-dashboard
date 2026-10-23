@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.34;
 
-import {IEEZProxyRegistry} from "./interfaces/IEEZProxyRegistry.sol";
-import {IAllowanceModule} from "./interfaces/IAllowanceModule.sol";
+import {IEEZProxyRegistry} from "../interfaces/IEEZProxyRegistry.sol";
+import {IAllowanceModule} from "../interfaces/IAllowanceModule.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {IStandardBridge} from "./interfaces/IStandardBridge.sol";
-import {ISafe} from "./interfaces/ISafe.sol";
+import {IStandardBridge} from "../interfaces/IStandardBridge.sol";
+import {ISafe} from "../interfaces/ISafe.sol";
 
 /// @notice WARNING: Unaudited demo contract. Not ready for production use.
 /// Shared authorization, accounting and payments for the two treasury bridge paths.

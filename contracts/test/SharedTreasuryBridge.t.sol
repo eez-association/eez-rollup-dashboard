@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.34;
 import {OwnerFixture} from "./helpers/OwnerFixture.sol";
-import {SharedTreasuryBridge} from "../src/SharedTreasuryBridge.sol";
-import {TreasuryBridge} from "../src/TreasuryBridge.sol";
+import {SharedTreasuryBridge} from "../src/chiado/SharedTreasuryBridge.sol";
+import {TreasuryBridge} from "../src/chiado/TreasuryBridge.sol";
 import {Bridge} from "eez-core-protocol/src/periphery/Bridge.sol";
 import {DevnetUSDC} from "./fixtures/DevnetUSDC.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
