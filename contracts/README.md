@@ -139,6 +139,16 @@ before starting a devnet.
 Fresh paired UI setup requires a release containing `PairedTreasuryPolicy`.
 The release builder packages deployment bytecode with its compiler inputs and
 source identities. Historical immutable bundles must not be rewritten.
+`current-build.json` selects the paired release for new Ethereum setups.
+The separate Chiado planner and infrastructure tooling use `shared-build.json`,
+which retains their compatible historical policy and bridge artifacts. A saved
+setup always selects its recorded build; publishing a paired release must not
+change its remaining deployment bytecode.
+
+Incoming peer-call recovery pages from the saved L2 submission block through the
+safe head. New mirror-setup requests also save this block. Older setup journals
+without it scan from genesis, so returning after 4,096 blocks does not silently
+lose settlement evidence. That legacy scan can require many RPC requests.
 
 The pinned upstream dependencies are recorded in the repository submodules.
 Contract checks are:

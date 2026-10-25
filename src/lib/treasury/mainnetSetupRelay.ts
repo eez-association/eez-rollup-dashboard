@@ -15,7 +15,8 @@ function event(log: Pick<Log, "address" | "topics" | "data">, address: string, n
  * The signature hash alone does not establish which source transaction consumed it. */
 export async function findIncomingCallEvidence(io: Pick<DeploymentIO, "rpc">, safe: Address, p: DeploymentPending,
   source: { blockHash: Hex; blockNumber: Hex; logs: Pick<Log, "address" | "topics" | "data">[] },
-  bindings: { registry: string; manager: string } = network) {
+  bindings: { registry: string; manager: string } = network, fromBlock: Hex = "0x0") {
+  if (!/^0x[\da-f]+$/i.test(fromBlock)) throw new Error("Invalid incoming-call recovery block");
   const calls = source.logs.flatMap(l => { const e = event(l, bindings.registry, "CrossChainCallExecuted");
     return e && same(e.proxy, p.to) && same(e.sourceAddress, p.sender) && same(e.callData, p.data) && e.value === 0n ? [e] : []; });
   if (calls.length !== 1) throw new Error("Missing unique mirror setup source call");
@@ -25,11 +26,18 @@ export async function findIncomingCallEvidence(io: Pick<DeploymentIO, "rpc">, sa
   if (origins.length !== 1) throw new Error("Ambiguous cross-chain source call; preserve this request for verification");
   const safeHead = await io.rpc<{ number: Hex } | null>("l2", "eth_getBlockByNumber", ["safe", false]);
   if (!safeHead?.number) return null;
-  const high = BigInt(safeHead.number), low = high > 4096n ? high - 4096n : 0n;
-  const incoming = await io.rpc<Log[]>("l2", "eth_getLogs", [{ address: bindings.manager, fromBlock: toHex(low), toBlock: safeHead.number,
-    topics: encodeEventTopics({ abi: transferAbi, eventName: "IncomingCrossChainCallExecuted", args: { crossChainCallHash: callHash } }) }]);
+  // Recovery must still work after a long absence. Page from the saved starting
+  // block (genesis for older setup journals), never a moving recent-block window.
+  const high = BigInt(safeHead.number), incoming: Log[] = [];
+  const topics = encodeEventTopics({ abi: transferAbi, eventName: "IncomingCrossChainCallExecuted", args: { crossChainCallHash: callHash } });
+  for (let low = BigInt(fromBlock); low <= high; low += 4096n) {
+    const end = low + 4095n < high ? low + 4095n : high;
+    incoming.push(...await io.rpc<Log[]>("l2", "eth_getLogs", [{ address: bindings.manager,
+      fromBlock: toHex(low), toBlock: toHex(end), topics }]));
+  }
   const matches: { logs: Log[]; transactionHash: Hex; blockNumber: Hex; blockHash: Hex }[] = [];
   for (const log of incoming) {
+    if (BigInt(log.blockNumber) < BigInt(fromBlock) || BigInt(log.blockNumber) > high) continue;
     const e = event(log, bindings.manager, "IncomingCrossChainCallExecuted");
     if (!e || !same(e.crossChainCallHash, callHash) || e.isStatic !== false || e.sourceRollup !== 0n || e.value !== 0n || !same(e.destination, safe) || !same(e.sourceAddress, p.sender) || !same(e.data, p.data)) continue;
     const settlement = await io.rpc<{ canonicalL2: boolean; l1BlockHash: Hex; l1BlockNumber: Hex; l2Blocks: { number: Hex; hash: Hex }[] }>("l2", "eez_getSettlementByL2Block", [log.blockHash], true);

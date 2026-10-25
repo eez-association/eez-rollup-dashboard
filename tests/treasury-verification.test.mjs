@@ -90,16 +90,17 @@ test('the worker admits only retained builds, configured chains and transaction 
 test('release bundles retain compiler inputs for every new deployment artifact',()=>{
   const builds=loadBuilds('verification/builds');const current=JSON.parse(readFileSync('src/lib/treasury/current-build.json')).build;
   const bundle=JSON.parse(readFileSync(`src/lib/treasury/builds/${current}.json`));
-  assert.equal(Object.keys(bundle.contracts).length,18);
+  assert.deepEqual(Object.keys(bundle.contracts).sort(), ['Safe','SafeL2','SafeProxyFactory','SafeProxy','AllowanceModule','MultiSendCallOnly',
+    'L1Owners','TreasuryBootstrap','PairedTreasuryPolicy','TestUSDC','WrappedToken'].sort());
   assert.equal(bundle.contracts.InvoiceMerchant, undefined);
-  for (const name of ['TreasuryPolicy','StandardBridgeTreasuryPolicy']) {
+  for (const name of ['PairedTreasuryPolicy']) {
     const abi=bundle.contracts[name].abi;
-    assert.equal(abi.find(x=>x.type==='constructor').inputs.length,8);
+    assert.equal(abi.find(x=>x.type==='constructor').inputs.length,5);
     assert(abi.some(x=>x.name==='paySplit'));
     assert(!abi.some(x=>['payRule','RulePaid','BPS_DENOMINATOR','InvalidFraction'].includes(x.name)));
     assert(!abi.some(x=>x.name==='pay' || x.name==='payRouted'));
     assert(!abi.some(x=>/invoice/i.test(x.name??'')));
-    if(name==='StandardBridgeTreasuryPolicy')assert(!abi.some(x=>/aliasReader/i.test(x.name??'')));
+    for (const method of ['PAIR_VERSION','connectPeer','activate','payFromPeer']) assert(abi.some(x=>x.name===method));
   }
   for(const [name,a] of Object.entries(bundle.contracts)){const v=builds[current].contracts[name];assert.equal(a.runtime,v.runtime);assert.equal(a.bytecode,v.bytecode);assert(builds[current].inputs[v.input]);}
   assert(bundle.contracts.SafeProxyFactory.runtime.includes(bundle.contracts.SafeProxy.bytecode.slice(2)));

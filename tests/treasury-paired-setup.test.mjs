@@ -1,5 +1,5 @@
-// Planner regressions. The paired bytecode below is deliberately
-// inert ABI-fixture data, never a compiled deployment or native-runtime test.
+// Planner regressions against the genuine packaged paired-policy release.
+// These tests do not execute the bytecode or establish native-runtime behavior.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -11,6 +11,7 @@ import { findIncomingCallEvidence } from '../src/lib/treasury/mainnetSetupRelay.
 import { transferAbi } from '../src/lib/treasury/transfers.ts';
 const read = path => JSON.parse(readFileSync(path));
 const archived = read('src/lib/treasury/deployment-artifacts.json');
+const oldMainnet = read('src/lib/treasury/mainnet-artifacts.json');
 const release = read(`src/lib/treasury/builds/${read('src/lib/treasury/current-build.json').build}.json`);
 const network = read('src/lib/treasury/mainnet-network.json');
 const a = n => getAddress(toHex(n, { size: 20 }));
@@ -18,8 +19,7 @@ const pairedAbi = parseAbi([
   'constructor(address safe_,address module_,address token_,address bridge_,uint64 l2RollupId_)',
   'function PAIR_VERSION() view returns(uint256)', 'function connectPeer(address)', 'function activate()',
 ]);
-const artifacts = { ...release, contracts: { ...archived.contracts, ...release.contracts,
-  PairedTreasuryPolicy: { abi: pairedAbi, bytecode: '0x60006000f3', runtime: '0x00', immutables: [] } } };
+const artifacts = { ...release, contracts: { ...archived.contracts, ...oldMainnet.contracts, ...release.contracts } };
 const target = { l1: { rpc: 'l1', front: 'l1-front', explorer: 'https://etherscan.io' },
   l2: { rpc: 'l2', front: 'l2-front', explorer: 'https://explorer.eez.dev' }, fees: { l1: '1', l2: '1' } };
 function fixture() {
@@ -128,23 +128,34 @@ test('peer-call evidence uses the selected network and rejects ambiguous or miss
       { type: 'uint256' }, { type: 'uint64' }, { type: 'bytes' }], [false, p.sender, 0n, destination, 0n, 8000000n, p.data]),
     blockHash: l2Hash, blockNumber: '0x30', transactionHash: h(5) };
   const source = { blockHash: l1Hash, blockNumber: '0x20', logs: [outgoing] };
-  async function evidence({ duplicate = false, omitted = false, canonical = true } = {}) {
+  async function evidence({ duplicate = false, omitted = false, canonical = true, safeHeight = '0x30', start = '0x0', ranges = [] } = {}) {
     const io = { async rpc(chain, method, params) {
       if (method === 'eth_getLogs') {
         assert.equal(params[0].address, chain === 'l1' ? bindings.registry : bindings.manager);
-        return chain === 'l1' ? (duplicate ? [outgoing, outgoing] : [outgoing]) : [incoming];
+        if (chain === 'l1') return duplicate ? [outgoing, outgoing] : [outgoing];
+        const { fromBlock, toBlock } = params[0];
+        ranges.push([fromBlock, toBlock]);
+        assert(BigInt(toBlock) - BigInt(fromBlock) < 4096n);
+        return BigInt(fromBlock) <= BigInt(incoming.blockNumber) && BigInt(toBlock) >= BigInt(incoming.blockNumber) ? [incoming] : [];
       }
-      if (method === 'eth_getBlockByNumber') return chain === 'l1'
+      if (method === 'eth_getBlockByNumber') return params[0] === 'safe' ? { number: safeHeight } : chain === 'l1'
         ? { hash: l1Hash, number: '0x20' } : { hash: l2Hash, number: '0x30' };
       if (method === 'eez_getSettlementByL2Block') return { canonicalL2: canonical, l1BlockHash: l1Hash,
         l1BlockNumber: '0x20', l2Blocks: [{ hash: l2Hash, number: '0x30' }] };
       if (method === 'eth_getTransactionReceipt') return { status: '0x1', blockHash: l2Hash, logs: omitted ? [] : [incoming] };
       assert.fail(method);
     } };
-    return findIncomingCallEvidence(io, destination, p, source, bindings);
+    return findIncomingCallEvidence(io, destination, p, source, bindings, start);
   }
   assert.equal((await evidence()).transactionHash, incoming.transactionHash);
   assert.equal(await evidence({ omitted: true }), null);
   assert.equal(await evidence({ canonical: false }), null);
   await assert.rejects(evidence({ duplicate: true }), /Ambiguous cross-chain source call/);
+  const ranges = [];
+  assert.equal((await evidence({ safeHeight: '0x2030', start: '0x20', ranges })).transactionHash, incoming.transactionHash,
+    'a payment remains recoverable after more than 4096 L2 blocks');
+  assert.deepEqual(ranges, [['0x20', '0x101f'], ['0x1020', '0x201f'], ['0x2020', '0x2030']]);
+  assert.equal(await evidence({ start: '0x31' }), null, 'never accept events before the recorded submission point');
+  assert.equal(await evidence({ safeHeight: '0x2f' }), null, 'never accept events above the safe head');
+  await assert.rejects(evidence({ start: 'latest' }), /Invalid incoming-call recovery block/);
 });

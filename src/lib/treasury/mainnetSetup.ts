@@ -49,7 +49,7 @@ export function pairedSetupAvailable(artifacts: DeploymentArtifacts) {
 }
 type Output = { key: string; address: Address; artifact?: string; hash?: Hex };
 type Review = { step: number; chain: Chain; nonce: string; owners: Address[]; threshold: number; fingerprint: string; hash: Hex; approvals: Approval[]; moduleEnabled?: boolean };
-type Pending = DeploymentPending & { outputs: Output[]; actionsHash?: Hex; executor?: Address; sequence?: string; closed?: boolean; safe?: Address; safeChain?: Chain };
+type Pending = DeploymentPending & { outputs: Output[]; actionsHash?: Hex; executor?: Address; sequence?: string; closed?: boolean; safe?: Address; safeChain?: Chain; l2StartBlock?: Hex };
 export type MainnetSetupState = { build?: string; sourceRequests?: SourceRequest[]; version: 1 | 2 | 3; identity: Hex; salt: Hex; deployer: Address; addresses: Record<string, Address>; code: TreasuryConfig["code"];
   completed: { hash: Hex; chain: Chain; number: Hex; blockHash: Hex }[]; pending?: Pending; review?: Review };
 export type MainnetTarget = DeploymentTarget & { l1: DeploymentTarget["l1"] & { explorer: string }; l2: DeploymentTarget["l2"] & { explorer: string } };
@@ -69,6 +69,7 @@ export function readMainnetSetup(raw: string | null): MainnetSetupState | null {
   if (s.pending) check(s.pending.id === String(s.completed.length) && s.pending.chain === mainnetSetupSteps[s.completed.length]?.chain
     && isAddress(s.pending.sender) && /^0x[\da-f]+$/i.test(s.pending.nonce) && /^0x(?:[\da-f]{2})+$/i.test(s.pending.data)
     && (!s.pending.hash || digest(s.pending.hash)) && (!s.pending.to || isAddress(s.pending.to)) && Array.isArray(s.pending.outputs)
+    && (s.pending.l2StartBlock === undefined || /^0x[\da-f]+$/i.test(s.pending.l2StartBlock))
     && s.pending.outputs.every(x => isAddress(x.address) && typeof x.key === "string"), "Invalid pending Ethereum setup");
   if (s.review) check(s.review.step === s.completed.length && s.review.owners.every(a => isAddress(a)) && digest(s.review.hash)
     && s.review.threshold > 0 && s.review.threshold <= s.review.owners.length && Array.isArray(s.review.approvals)
@@ -234,6 +235,7 @@ export class MainnetSetup {
     let request: Record<string, string> = { from: sender, chainId: toHex(network.chains[chain].chainId), nonce, data: pending.data, value: "0x0", ...(pending.to ? { to: pending.to } : {}) };
     let expiresAt: string | undefined;
     if (step === 5) {
+      pending.l2StartBlock = await this.io.rpc<Hex>("l2", "eth_blockNumber");
       const quote = await quoteCrossChainFees({ tx: request, from: sender, chainId: request.chainId!, wallet: provider,
         rpc: (method, params) => this.io.rpc(chain, method, params, true), maxTotalFee: BigInt(this.target.fees.l1) });
       request = quote.transaction; expiresAt = quote.expiresAt;
@@ -320,7 +322,7 @@ export class MainnetSetup {
         // The mirror executes as the synthetic incoming transaction. Match its
         // Safe hash and the same Ethereum inclusion before enabling payments.
         const { findIncomingCall } = await import("./mainnetSetupRelay.ts");
-        const incoming = await findIncomingCall(this.io, s.addresses.safeL2!, p, receipt);
+        const incoming = await findIncomingCall(this.io, s.addresses.safeL2!, p, receipt, network, p.l2StartBlock);
         if (!incoming) return { ...s, pending: p }; logs = incoming;
       }
       check(logs.some(l => same(l.address, p.safe!) && decodeSafeExecution(l)?.eventName === "ExecutionSuccess" && decodeSafeExecution(l)?.args.txHash === p.safeHash), "Missing successful Safe setup execution");

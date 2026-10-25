@@ -32,7 +32,7 @@ const endpoint = path => { const url = new URL(path, base); assert(url.origin ==
 const target = Object.fromEntries(['l1', 'l2'].map(chain => [chain, { rpc: endpoint(config[`${chain}RpcUrl`]), front: endpoint(config[`${chain}FrontUrl`]) }]));
 target.fees = { l1: config.l1FeeMaxTotalWei, l2: config.l2FeeMaxTotalWei };
 assert(config.l1FeesEnabled && config.l2FeesEnabled, 'Both network fee settings must be enabled');
-const savedBuild = existsSync(values.state) ? JSON.parse(readFileSync(values.state)).build : JSON.parse(readFileSync('src/lib/treasury/current-build.json')).build;
+const savedBuild = existsSync(values.state) ? JSON.parse(readFileSync(values.state)).build : JSON.parse(readFileSync('src/lib/treasury/shared-build.json')).build;
 const legacy = JSON.parse(readFileSync('src/lib/treasury/deployment-artifacts.json'));
 const release = savedBuild ? JSON.parse(readFileSync(`src/lib/treasury/builds/${savedBuild}.json`)) : legacy;
 const artifacts = { ...release, contracts: { ...legacy.contracts, ...release.contracts } };

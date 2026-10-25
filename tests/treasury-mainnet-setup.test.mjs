@@ -7,12 +7,12 @@ import { sharedDeploymentKey, sharedManifestKey } from '../src/lib/treasury/depl
 const json=path=>JSON.parse(readFileSync(path));
 const base=json('src/lib/treasury/deployment-artifacts.json'),current=json('src/lib/treasury/mainnet-artifacts.json'),network=json('src/lib/treasury/mainnet-network.json');
 const shared=json('src/lib/treasury/mainnet-shared-contracts.json'),release=json(`src/lib/treasury/builds/${json('src/lib/treasury/current-build.json').build}.json`);
-const artifacts={...release,contracts:{...base.contracts,...release.contracts}},addr=n=>getAddress(`0x${n.toString(16).padStart(40,'0')}`);
+const artifacts={...release,contracts:{...base.contracts,...current.contracts,...release.contracts}},addr=n=>getAddress(`0x${n.toString(16).padStart(40,'0')}`);
 const target={l1:{rpc:'http://127.0.0.1:1',front:'http://127.0.0.1:1',explorer:'https://etherscan.io'},l2:{rpc:'http://127.0.0.1:2',front:'http://127.0.0.1:2',explorer:'https://explorer.eez.dev'},fees:{l1:'1',l2:'1'}};
-function fixture(){
+function fixture(selectedArtifacts=artifacts){
  const sharedCode={ [shared.contracts.moduleL1.address.toLowerCase()]:release.contracts.AllowanceModule.runtime };
  for(const b of Object.values(shared.contracts))assert.equal(keccak256(sharedCode[b.address.toLowerCase()]),b.hash);
- const engine=new MainnetSetup(target,artifacts),safe=addr(100),singleton=addr(101),deployer=addr(200),block={number:'0xa',hash:zeroHash};
+ const engine=new MainnetSetup(target,selectedArtifacts),safe=addr(100),singleton=addr(101),deployer=addr(200),block={number:'0xa',hash:zeroHash};
  engine.validate=async()=>{};
  engine.io.rpc=async(chain,method,params)=>{
   if(method==='eth_getBlockByNumber')return block;
@@ -36,6 +36,7 @@ test('selection preserves the entered Safe, its owner threshold and a different 
  const {engine,safe,deployer}=fixture(),s=await engine.configure(addr(201),safe);
  assert.equal(s.addresses.safeL1,safe);assert.equal(s.deployer,addr(201));assert.notEqual(s.deployer,deployer);
  assert.equal(s.completed.length,0);assert.equal(s.addresses.safeL2,undefined);assert.equal(s.code.length,3);
+ assert.equal(s.version,3);
  assert.deepEqual(readMainnetSetup(JSON.stringify(s)),s);
  assert.throws(()=>readMainnetSetup(JSON.stringify({...s,identity:zeroHash})),/Invalid Ethereum setup/);
 });
@@ -44,8 +45,8 @@ test('Ethereum preparation deploys bounded authority without creating, funding o
  const artifact=artifacts.contracts.TreasuryBootstrap;
  const [actions]=decodeAbiParameters(artifact.abi.find(x=>x.type==='constructor').inputs,`0x${batch.data.slice(artifact.bytecode.length)}`);
  assert.equal(actions.length,2);assert(actions.every(x=>x.create));
- assert.deepEqual(batch.outputs.map(x=>x.key),['bootstrapL1','multiSendL1','bridgeExecutorL1']);
- const funding=actions.at(-1),a=artifacts.contracts.StandardBridgeDelegate;
+ assert.deepEqual(batch.outputs.map(x=>x.key),['bootstrapL1','multiSendL1','policyL1']);
+ const funding=actions.at(-1),a=artifacts.contracts.PairedTreasuryPolicy;
  const args=decodeAbiParameters(a.abi.find(x=>x.type==='constructor').inputs,`0x${funding.data.slice(a.bytecode.length)}`);
  assert.equal(args[0].toLowerCase(),safe.toLowerCase());assert.equal(args[1].toLowerCase(),shared.contracts.moduleL1.address.toLowerCase());assert.equal(args[2].toLowerCase(),network.contracts.usdcProxy.address.toLowerCase());
  assert.equal(args[3].toLowerCase(),network.contracts.bridgeL1.address.toLowerCase());assert.equal(args[4],1n);
@@ -61,9 +62,9 @@ test('new mirror creation and policy deployment fit separate EVM batches without
  const decoded=decodeFunctionData({abi:artifacts.contracts.TreasuryBootstrap.abi,data:budget.data});
  assert.equal(decoded.functionName,'execute');assert.equal(decoded.args[1].length,2);
  assert.deepEqual(budget.outputs.map(x=>x.key),['moduleL2','policy']);
- const policy=decoded.args[1][1],a=artifacts.contracts.StandardBridgeTreasuryPolicy;
+ const policy=decoded.args[1][1],a=artifacts.contracts.PairedTreasuryPolicy;
  const args=decodeAbiParameters(a.abi.find(x=>x.type==='constructor').inputs,`0x${policy.data.slice(a.bytecode.length)}`);
- assert.equal(args[0].toLowerCase(),safe.toLowerCase());assert.equal(args.length,8);assert.equal(args[6].toLowerCase(),network.contracts.bridgeL2.address.toLowerCase());assert.equal(args[7].toLowerCase(),s.addresses.bridgeExecutorL1.toLowerCase());
+ assert.equal(args[0].toLowerCase(),s.addresses.safeL2.toLowerCase());assert.equal(args.length,5);assert.equal(args[3].toLowerCase(),network.contracts.bridgeL2.address.toLowerCase());assert.equal(args[4],BigInt(network.rollupId));
 });
 test('pending and incomplete mainnet setup cannot select the Chiado manifest',async()=>{
  const {engine,safe,deployer}=fixture(),s=await engine.configure(deployer,safe);
@@ -127,7 +128,10 @@ function safeBatchCalls(tx){
  return calls;
 }
 test('Safe approvals preserve old batches and skip module enablement only when already enabled',async()=>{
- const {engine,safe,deployer}=fixture(),s=await engine.configure(deployer,safe);
+ // Restore the original compiled release as well as its historical setup plan.
+ const savedRelease=json('src/lib/treasury/builds/026c1f779c5c3bed2cc56f91707bb7b9eca67c240ef7cfd47ca83017cb868df1.json');
+ const {engine,safe,deployer}=fixture({...savedRelease,contracts:{...base.contracts,...savedRelease.contracts}}),s=await engine.configure(deployer,safe);
+ assert.equal(s.version,2);assert.equal(s.build,savedRelease.build);
  Object.assign(s.addresses,{moduleL1:shared.contracts.moduleL1.address,bridgeExecutorL1:addr(301),alias:addr(302),multiSendL1:addr(303)});
  s.completed=Array.from({length:4},()=>({hash:zeroHash,chain:'l1',number:'0xa',blockHash:zeroHash}));
  engine.unchanged=async()=>{};

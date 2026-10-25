@@ -6,7 +6,7 @@ import { TreasuryDeployment, deploymentIdentity, readDeployment, saveDeployment,
 import { materializeGroup, encodeGroup } from '../src/lib/treasury/deploymentGroups.ts';
 import saved from './fixtures/treasury-saved-setups.json' with { type: 'json' };
 const legacy = JSON.parse(readFileSync('src/lib/treasury/deployment-artifacts.json'));
-const { build } = JSON.parse(readFileSync('src/lib/treasury/current-build.json'));
+const { build } = JSON.parse(readFileSync('src/lib/treasury/shared-build.json'));
 const artifacts = {...legacy,...JSON.parse(readFileSync(`src/lib/treasury/builds/${build}.json`)), contracts:{...legacy.contracts,...JSON.parse(readFileSync(`src/lib/treasury/builds/${build}.json`)).contracts}};
 const address = n => getAddress(toHex(n, { size: 20 })), hash = s => keccak256(toHex(s));
 const target = { l1:{rpc:'http://localhost/l1',front:'http://localhost/l1'}, l2:{rpc:'http://localhost/l2',front:'http://localhost/l2'},fees:{l1:'1',l2:'1'}};

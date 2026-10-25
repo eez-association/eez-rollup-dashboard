@@ -68,7 +68,7 @@ export async function l1PaymentOutcome(client: TreasuryClient, intent: Intent): 
       },
     }, c.payments!.policy,
       { id: "paired-payment", chain: "l1", sender: c.payments!.pair.policyL1, to: c.payments!.alias,
-        nonce: intent.sourceNonce, data: peerData }, receipt, c);
+        nonce: intent.sourceNonce, data: peerData }, receipt, c, intent.l2StartBlock);
     if (!incoming) return { kind: "pending", hash, detail: "L1 Safe executed. Waiting for the exact peer-policy call to settle on EEZ-X." };
     return { kind: "settled", hash, contributions, execution: { l1: hash, l2: incoming.transactionHash },
       sourceBlock: String(BigInt(receipt.blockNumber)), block: String(BigInt(incoming.blockNumber)),

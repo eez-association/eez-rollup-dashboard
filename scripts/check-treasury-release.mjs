@@ -4,6 +4,12 @@ import assert from 'node:assert/strict';
 const sha = x => createHash('sha256').update(JSON.stringify(x)).digest('hex');
 const read = p => JSON.parse(readFileSync(p));
 const current = read('src/lib/treasury/current-build.json').build;
+const shared = read('src/lib/treasury/shared-build.json').build;
+const sharedBundle = read(`src/lib/treasury/builds/${shared}.json`);
+assert.equal(sharedBundle.build, shared);
+assert.equal(sharedBundle.contracts.TreasuryPolicy.abi.find(item => item.type === 'constructor').inputs.length, 8,
+  'Chiado setup requires its compatible retained policy release');
+assert(sharedBundle.contracts.SharedTreasuryBridge && sharedBundle.contracts.SharedTestUSDC);
 let count = 0;
 for (const build of readdirSync('verification/builds').filter(n => /^[a-f\d]{64}$/.test(n))) {
   const m = read(`verification/builds/${build}/manifest.json`), b = read(`src/lib/treasury/builds/${build}.json`);
