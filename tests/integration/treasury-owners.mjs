@@ -260,9 +260,9 @@ try {
   await settle('A+B remain authorized after removing C', await approval([A, B], 43n), 43n, 2n);
   assert.deepEqual((await read(network.l2.rpc, safeL2, safeArtifact.abi, 'getOwners')).map(x => x.toLowerCase()), [adapter.toLowerCase()]);
   assert.equal(await read(network.l2.rpc, safeL2, safeArtifact.abi, 'getThreshold'), 1n);
-  const { runBidirectionalPayments } = await import('./treasury-bidirectional.mjs');
-  await runBidirectionalPayments({ A, B, C, submitter, network, evidence, checkpoint, rpc, read, send, until, safeAdmin,
-    artifact, deploy, submit, eeZAbi, safeArtifact, actionArtifact, safeL1, safeL2, adapter, adapterAlias, action, manager, singletonL1, singletonL2 });
+  const { runPairedPayments } = await import('./treasury-standard-bridge.mjs');
+  await runPairedPayments({ A, B, C, submitter, network, evidence, checkpoint, rpc, read, send, until, safeAdmin,
+    artifact, deploy, submit, eeZAbi, safeArtifact, actionArtifact, safeL1, safeL2, adapter, adapterAlias, action, manager, singletonL1, singletonL2 }, evidenceFile);
   evidence.scenarioComplete = true;
   checkpoint();
 } catch (error) {

@@ -1,3 +1,4 @@
+import { validatePairedPayments } from "./pairedPolicy.ts";
 import { readPaymentDeployment, paymentVersion, recordedPaymentTransaction, verifiesL1Initiation, verifiesReverseFunding } from "./savedPayments.ts";
 import type { RecordedPayment } from "./savedPayments.ts";
 import { verifyTransferHelper, transferRollup } from "./transfers.ts";
@@ -98,10 +99,17 @@ export function parseTreasuryConfig(value: unknown): TreasuryConfig {
       requireThat(p.invoiceMerchant && url.origin === new URL(c.l2.rpc).origin && url.pathname === "/treasury-fixture/invoices" && !url.search && !url.hash && !url.username && !url.password, "Invalid invoice fixture endpoint");
     }
     requireThat(p.bridgeKind === undefined || p.bridgeKind === "standard", "Unsupported bridge profile");
-    if (p.bridgeKind === "standard") requireThat(verifiesL1Initiation(p) && verifiesReverseFunding(p) && p.safeL2Alias && isAddress(p.safeL2Alias)
-      && c.code.some(b => b.chain === "l1" && same(b.address, p.safeL2Alias!))
-      && p.bridgeExecutorL1 && isAddress(p.bridgeExecutorL1) && c.code.some(b => b.chain === "l1" && same(b.address, p.bridgeExecutorL1!)), "Missing standard bridge relay/executor identity");
-    else requireThat(p.safeL2Alias === undefined && p.bridgeExecutorL1 === undefined, "Unexpected mirror relay identity");
+    if (p.bridgeKind === "standard") {
+      requireThat(verifiesL1Initiation(p) && verifiesReverseFunding(p) && p.safeL2Alias && isAddress(p.safeL2Alias)
+        && c.code.some(b => b.chain === "l1" && same(b.address, p.safeL2Alias!)), "Missing standard bridge relay identity");
+      if (p.pair) {
+        requireThat(p.pair.version === 1 && p.version === 2 && isAddress(p.pair.policyL1) && BigInt(p.pair.policyL1) > 1n
+          && isAddress(p.pair.peerProxyL2) && BigInt(p.pair.peerProxyL2) > 1n && !p.bridgeExecutorL1 && !p.predecessor && !p.aliasReaderL1 && !p.invoiceMerchant
+          && c.code.some(b => b.chain === "l1" && same(b.address, p.pair!.policyL1))
+          && c.code.some(b => b.chain === "l2" && same(b.address, p.pair!.peerProxyL2)), "Invalid paired policy identity");
+      } else requireThat(p.bridgeExecutorL1 && isAddress(p.bridgeExecutorL1)
+        && c.code.some(b => b.chain === "l1" && same(b.address, p.bridgeExecutorL1!)), "Missing standard bridge executor identity");
+    } else requireThat(p.pair === undefined && p.safeL2Alias === undefined && p.bridgeExecutorL1 === undefined, "Unexpected mirror relay identity");
     if (verifiesL1Initiation(p)) requireThat(c.l1.front && (!c.fees || /^[1-9]\d{0,77}$/.test(c.fees.l1MaxTotalWei ?? "")), "Missing L1 Composer or fee configuration");
     requireThat(p.decimals === 6 && p.period === 600 && p.globalLimit === "150000000" && (c.environment === "isolated-devnet" ? p.assetLabel === "Devnet USDC" : c.environment === "ethereum-mainnet" ? p.assetLabel === "USDC" : p.assetLabel === "Test USDC"), "Unsupported payment configuration");
     for (const key of ["policy", "alias", "tokenL1", "tokenL2", "moduleL1", "moduleL2", "bridgeL1", "bridgeL2", "recipient"] as const)
@@ -239,6 +247,7 @@ export class TreasuryClient {
   async validatePayments() {
     const c = this.config, p = c.payments;
     if (!p) return;
+    if (p.pair) return validatePairedPayments(this);
     const bindings = [["safeL1", c.safeL1], ["safeL2", c.safeL2], ["canonicalToken", p.tokenL1], ["wrappedToken", p.tokenL2], ["allowanceL2", p.moduleL2], ["bridge", p.bridgeL2]];
     for (const [name, expected] of bindings) requireThat(same(await contractRead(this, "l2", p.policy, paymentAbi, name!) as string, expected!), "Payment policy bindings changed");
     const [limit, period, d1, d2, m1, m2] = await Promise.all([

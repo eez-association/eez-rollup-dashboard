@@ -22,14 +22,14 @@ export async function standardRollback(f,c,client,build,payment,token,directory)
       safeL1:await read('l1',p.tokenL1,tokenAbi,'balanceOf',[c.safeL1]),safeL2:await read('l2',p.tokenL2,tokenAbi,'balanceOf',[c.safeL2]),
       recipientL1:await read('l1',p.tokenL1,tokenAbi,'balanceOf',[payment.recipient]),recipientL2:await read('l2',p.tokenL2,tokenAbi,'balanceOf',[payment.recipient]),
       escrow:await read('l1',p.tokenL1,tokenAbi,'balanceOf',[p.bridgeL1]),supply:await read('l2',p.tokenL2,tokenAbi,'totalSupply'),
-      allowanceL1:await read('l1',p.moduleL1,allowanceAbi,'getTokenAllowance',[c.safeL1,p.bridgeExecutorL1,p.tokenL1]),
+      allowanceL1:await read('l1',p.moduleL1,allowanceAbi,'getTokenAllowance',[c.safeL1,p.pair.policyL1,p.tokenL1]),
       allowanceL2:await read('l2',p.moduleL2,allowanceAbi,'getTokenAllowance',[c.safeL2,p.policy,p.tokenL2]),
       spent:await read('l2',p.policy,paymentAbi,'spent',[BigInt(payment.epoch)]),
       nonceL1:await read('l1',c.safeL1,f.safeArtifact.abi,'nonce'),nonceL2:await read('l2',c.safeL2,f.safeArtifact.abi,'nonce'),
       aliasBalance:await read('l1',p.tokenL1,token,'balanceOf',[p.alias]),policyBalance:await read('l2',p.tokenL2,token,'balanceOf',[p.policy]),
-      executorBalance:await read('l1',p.tokenL1,token,'balanceOf',[p.bridgeExecutorL1]),
-      approval:await read('l1',p.tokenL1,token,'allowance',[p.alias,p.bridgeExecutorL1]),
-      bridgeApproval:await read('l1',p.tokenL1,token,'allowance',[p.bridgeExecutorL1,p.bridgeL1]),
+      policyL1Balance:await read('l1',p.tokenL1,token,'balanceOf',[p.pair.policyL1]),
+      peerProxyL2Balance:await read('l2',p.tokenL2,token,'balanceOf',[p.pair.peerProxyL2]),
+      bridgeApproval:await read('l1',p.tokenL1,token,'allowance',[p.pair.policyL1,p.bridgeL1]),
     };
   }
   let held,released=false;

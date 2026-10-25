@@ -34,7 +34,9 @@ contract FaucetRemoteReceiver {
         string calldata,
         uint8 decimals,
         uint64 source
-    ) external {
+    )
+        external
+    {
         require(origin == 0 && source == 0 && decimals == 6);
         received += amount;
         recipient = to;
@@ -114,7 +116,7 @@ contract TestUSDCTest {
         assert(vm.getNonce(address(token)) == nonce);
     }
 
-    function testFailureAfterLockRollsBackMintEscrowAllowanceAndDelivery() public {
+    function testRevertAfterLockRestoresMintEscrowAllowanceAndDelivery() public {
         token.claim(address(token));
         receiver.setFail(true);
         vm.expectRevert();
@@ -186,9 +188,8 @@ contract TestUSDCTest {
 
     function testArbitraryAmountEntryPointsAreAbsent() public {
         (bool mintOk,) = address(token).call(abi.encodeWithSignature("mint(address,uint256)", USER, type(uint256).max));
-        (bool bridgeOk,) = address(token).call(
-            abi.encodeWithSignature("claimOnL2(address,uint256,uint64)", USER, type(uint256).max, uint64(1))
-        );
+        (bool bridgeOk,) = address(token)
+            .call(abi.encodeWithSignature("claimOnL2(address,uint256,uint64)", USER, type(uint256).max, uint64(1)));
         assert(!mintOk && !bridgeOk);
         assert(token.totalSupply() == 0);
     }

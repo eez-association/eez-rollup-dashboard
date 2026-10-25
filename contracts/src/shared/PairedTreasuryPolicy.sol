@@ -63,8 +63,13 @@ contract PairedTreasuryPolicy {
     event PeerConnected(address indexed policy, address indexed proxy);
     event Activated();
     event Paid(
-        address indexed token, address indexed recipient, bool onL1,
-        uint256 amount, uint256 fromL1, uint256 fromL2, uint256 epoch
+        address indexed token,
+        address indexed recipient,
+        bool onL1,
+        uint256 amount,
+        uint256 fromL1,
+        uint256 fromL2,
+        uint256 epoch
     );
     event ContributionPaid(address indexed recipient, uint64 indexed destinationRollup, uint256 amount, uint256 epoch);
 
@@ -85,12 +90,11 @@ contract PairedTreasuryPolicy {
         entered = false;
     }
 
-    constructor(
-        address safe_, IAllowanceModule module_, IERC20 token_, IStandardBridge bridge_, uint64 l2RollupId_
-    ) {
+    constructor(address safe_, IAllowanceModule module_, IERC20 token_, IStandardBridge bridge_, uint64 l2RollupId_) {
         if (
             safe_.code.length == 0 || address(module_).code.length == 0 || address(token_).code.length == 0
-                || address(bridge_).code.length == 0 || l2RollupId_ == 0 || IERC20Metadata(address(token_)).decimals() != 6
+                || address(bridge_).code.length == 0 || l2RollupId_ == 0
+                || IERC20Metadata(address(token_)).decimals() != 6
         ) revert InvalidConfiguration();
         uint64 local = bridge_.rollupId();
         address registry = bridge_.manager();
@@ -150,9 +154,9 @@ contract PairedTreasuryPolicy {
         }
         Configuration memory other = peer.configuration();
         if (
-            other.peerPolicy != address(this) || other.canonicalToken != canonicalToken
-                || other.bridge != remoteBridge || other.remoteBridge != address(bridge)
-                || other.l2RollupId != l2RollupId || other.localRollupId != (localRollupId == 0 ? l2RollupId : 0)
+            other.peerPolicy != address(this) || other.canonicalToken != canonicalToken || other.bridge != remoteBridge
+                || other.remoteBridge != address(bridge) || other.l2RollupId != l2RollupId
+                || other.localRollupId != (localRollupId == 0 ? l2RollupId : 0)
         ) revert InvalidConfiguration();
         peerSafe = other.safe;
         localAliasOnPeer = other.peerProxy;
@@ -162,7 +166,13 @@ contract PairedTreasuryPolicy {
     }
 
     /// @notice Owners sign the exact total, destination, epoch and L1 contribution.
-    function paySplit(address recipient, uint256 amount, bool onL1, uint256 epoch, uint256 fromL1)
+    function paySplit(
+        address recipient,
+        uint256 amount,
+        bool onL1,
+        uint256 epoch,
+        uint256 fromL1
+    )
         external
         onlySafe
         nonReentrant
@@ -181,7 +191,13 @@ contract PairedTreasuryPolicy {
     }
 
     /// @notice Finish a payment started by the other policy. Never calls it back to pay again.
-    function payFromPeer(address recipient, uint256 amount, bool onL1, uint256 epoch, uint256 fromL1)
+    function payFromPeer(
+        address recipient,
+        uint256 amount,
+        bool onL1,
+        uint256 epoch,
+        uint256 fromL1
+    )
         external
         onlyPeer
         nonReentrant
@@ -206,7 +222,8 @@ contract PairedTreasuryPolicy {
             // L1 locks canonical tokens via transferFrom; L2 burns its wrapped tokens.
             if (localRollupId == 0) token.forceApprove(address(bridge), amount);
             bridge.bridgeTokens(address(token), amount, destinationRollup, recipient);
-            if (token.balanceOf(address(this)) != beforeBalance || token.allowance(address(this), address(bridge)) != 0) {
+            if (token.balanceOf(address(this)) != beforeBalance || token.allowance(address(this), address(bridge)) != 0)
+            {
                 revert ResidualFunds();
             }
         }
@@ -256,8 +273,7 @@ contract PairedTreasuryPolicy {
 
     function configuration() external view returns (Configuration memory) {
         return Configuration(
-            safe, canonicalToken, address(bridge), remoteBridge,
-            localRollupId, l2RollupId, peerPolicy, address(peer)
+            safe, canonicalToken, address(bridge), remoteBridge, localRollupId, l2RollupId, peerPolicy, address(peer)
         );
     }
 }
