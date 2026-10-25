@@ -93,7 +93,7 @@ test('new Ethereum treasuries reuse the same verified helpers across wallets and
   assert(s.code.some(b=>b.chain==='l1'&&b.address===binding.address&&b.hash===binding.hash));
  }
  assert.notEqual(first.salt,second.salt);
- assert.equal(mainnetSetupKey,`eez:treasury:ethereum-setup:${keccak256(toHex(JSON.stringify(network)))}`);
+ assert.equal(mainnetSetupKey,`eez:treasury:paired-setup:${keccak256(toHex(JSON.stringify(network)))}`);
 });
 
 test('shared helper inspection rejects missing or changed code, RPC uncertainty and reorgs',async()=>{
@@ -127,24 +127,21 @@ function safeBatchCalls(tx){
  }
  return calls;
 }
-test('Safe approvals preserve old batches and skip module enablement only when already enabled',async()=>{
- // Restore the original compiled release as well as its historical setup plan.
- const savedRelease=json('src/lib/treasury/builds/026c1f779c5c3bed2cc56f91707bb7b9eca67c240ef7cfd47ca83017cb868df1.json');
- const {engine,safe,deployer}=fixture({...savedRelease,contracts:{...base.contracts,...savedRelease.contracts}}),s=await engine.configure(deployer,safe);
- assert.equal(s.version,2);assert.equal(s.build,savedRelease.build);
- Object.assign(s.addresses,{moduleL1:shared.contracts.moduleL1.address,bridgeExecutorL1:addr(301),alias:addr(302),multiSendL1:addr(303)});
+test('paired Safe approvals skip module enablement only when already enabled',async()=>{
+ const {engine,safe,deployer}=fixture(),s=await engine.configure(deployer,safe);
+ Object.assign(s.addresses,{moduleL1:shared.contracts.moduleL1.address,policyL1:addr(301),policy:addr(302),multiSendL1:addr(303)});
  s.completed=Array.from({length:4},()=>({hash:zeroHash,chain:'l1',number:'0xa',blockHash:zeroHash}));
  engine.unchanged=async()=>{};
  const read=engine.io.read;let enabled=false;
  engine.io.read=(chain,address,name,method)=>method==='isModuleEnabled'?enabled:read(chain,address,name,method);
  const initial=await engine.review(s),before=safeBatchCalls(engine.tx(s,initial));
  assert.equal(before.length,4);
- assert.equal(decodeFunctionData({abi:artifacts.contracts.Safe.abi,data:before[0].data}).functionName,'enableModule');
+ assert.equal(decodeFunctionData({abi:artifacts.contracts.Safe.abi,data:before[1].data}).functionName,'enableModule');
  const legacy={...initial};delete legacy.moduleEnabled;assert.deepEqual(engine.tx(s,initial),engine.tx(s,legacy));
  s.review=initial;enabled=true;
  await assert.rejects(engine.currentReview(s),/Owners, threshold, Safe nonce or module configuration changed/);
  const current=await engine.review(s),after=safeBatchCalls(engine.tx(s,current));
- assert.equal(current.moduleEnabled,true);assert.deepEqual(after,before.slice(1));
+ assert.equal(current.moduleEnabled,true);assert.deepEqual(after,before.filter((_,i)=>i!==1));
  assert.notEqual(current.hash,initial.hash);s.review=current;
  assert.deepEqual(await engine.currentReview(s),current);
  assert.throws(()=>readMainnetSetup(JSON.stringify({...s,review:{...current,moduleEnabled:'true'}})),/Invalid setup approvals/);

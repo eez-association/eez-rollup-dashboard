@@ -50,7 +50,7 @@ function SafeIdentity({ address, name, explorer, safeAppUrl }: { address: Addres
   </div>;
 }
 
-export function TreasuryConnected({ deployment, wallet, payments = false, guardAction }: { deployment: TreasuryConfig; wallet: TreasuryWallet; payments?: boolean; guardAction?: TreasuryActionGuard }) {
+function PairedTreasuryConnected({ deployment, wallet, payments = false, guardAction }: { deployment: TreasuryConfig; wallet: TreasuryWallet; payments?: boolean; guardAction?: TreasuryActionGuard }) {
   const [client] = useState(() => new TreasuryClient(deployment));
   const storageKey = `eez:treasury:submission:${deployment.instance}`;
   const [restored] = useState(() => {
@@ -435,4 +435,11 @@ export function TreasuryConnected({ deployment, wallet, payments = false, guardA
     </section>}
     {payments && <TreasuryPaymentHistory history={history} deployment={deployment} />}
   </section>;
+}
+
+/** Reject retired manifests before mounting any signing or payment hooks. */
+export function TreasuryConnected(props: Parameters<typeof PairedTreasuryConnected>[0]) {
+  if (!props.deployment.payments?.pair || props.deployment.payments.bridgeKind !== "standard")
+    return <p role="alert">This dashboard supports only paired policies and normal bridges. Configure a new paired treasury.</p>;
+  return <PairedTreasuryConnected {...props} />;
 }

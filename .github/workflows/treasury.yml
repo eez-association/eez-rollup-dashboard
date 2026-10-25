@@ -47,7 +47,7 @@ jobs:
       - name: Isolated deployment and source verification
         run: |
           node tests/integration/treasury-source-verification.mjs
-          node tests/integration/treasury-deployment-batches.mjs
+          node tests/integration/treasury-paired-setup.mjs
       - name: Browser regressions
         env:
           CHROME_DEVEL_SANDBOX: /opt/google/chrome/chrome-sandbox
@@ -56,7 +56,7 @@ jobs:
           npx playwright install --with-deps chromium
           node tests/treasury-setup-completion-browser.mjs
           node tests/treasury-mainnet-setup-browser.mjs
-          node tests/treasury-faucet-browser.mjs
+          node tests/treasury-paired-asset-browser.mjs
           node tests/treasury-verification-browser.mjs
           node tests/trace-details.cjs
       - name: Frontend, service images, and service coexistence

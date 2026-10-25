@@ -1,5 +1,13 @@
 # Treasury owner and bidirectional payment integration
 
+The active dashboard now uses only the paired-policy release on both networks.
+Run `node tests/integration/treasury-paired-setup.mjs` for the current planner's
+isolated EVM deployment, activation and payment checks, and
+`node tests/treasury-paired-asset-browser.mjs` for the fixed faucet and pending
+request browser checks. Browser tests require Chromium's sandbox. The older
+shared-policy, invoice and variable-faucet walkthroughs below are historical;
+they are not active dashboard deployment paths. Native `--ui` remains gated.
+
 This scenario runs the dashboard's Safe-signing helpers and `L1Owners` through
 EEZ's native process fixture. The fixture starts a new embedded development L1,
 Composer, real proof signer, and independent L2 follower. It leases loopback ports

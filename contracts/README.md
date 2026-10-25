@@ -126,7 +126,8 @@ Safe, create/reuse its L1Owners mirror, deploy both policies, connect peers and
 grant local allowances, then activate in the final Safe batch. Signing uses the
 initiating Safe's domain and local policy. Standard-bridge submissions still go
 through Ethereum; paired L1 settlement requires the local `Paid` event and the
-exact canonical peer call. Saved version-1/2 setup plans retain their old paths.
+exact canonical peer call. Version-1/2 setup plans are retired and cannot be
+resumed through the dashboard.
 
 The scripted native runner now uses paired policies and normal bridges. Without
 a snapshot it uses the fixed TestUSDC faucet; an explicitly supplied saved USDC
@@ -139,11 +140,12 @@ before starting a devnet.
 Fresh paired UI setup requires a release containing `PairedTreasuryPolicy`.
 The release builder packages deployment bytecode with its compiler inputs and
 source identities. Historical immutable bundles must not be rewritten.
-`current-build.json` selects the paired release for new Ethereum setups.
-The separate Chiado planner and infrastructure tooling use `shared-build.json`,
-which retains their compatible historical policy and bridge artifacts. A saved
-setup always selects its recorded build; publishing a paired release must not
-change its remaining deployment bytecode.
+`current-build.json` selects the only active deployment release for both networks.
+The dashboard does not merge archived artifacts or select a separate Chiado
+release. Chiado uses the same paired planner against its configured normal
+bridges and the current fixed TestUSDC. Existing legacy records remain untouched
+but cannot deploy or sign new actions. The retired shared/custom bridge and
+variable-faucet workflows are no longer dashboard entry points.
 
 Incoming peer-call recovery pages from the saved L2 submission block through the
 safe head. New mirror-setup requests also save this block. Older setup journals

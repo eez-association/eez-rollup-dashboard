@@ -47,10 +47,10 @@ function innerCalls(engine, tx) {
   }
   return result;
 }
-test('fresh paired setup requires a packaged policy and preserves old journal labels', () => {
+test('fresh setup requires the packaged paired policy and rejects old journals', () => {
   assert.equal(pairedSetupAvailable(artifacts), true);
   assert.equal(pairedSetupAvailable({ ...release, contracts: { ...release.contracts, PairedTreasuryPolicy: undefined } }), false);
-  assert.match(mainnetSetupStepsFor({ version: 2 })[0].details.join(' '), /funding delegate/);
+  assert.throws(() => mainnetSetupStepsFor({ version: 2 }), /Legacy treasury setup is retired/);
   assert.match(mainnetSetupStepsFor({ version: 3 })[0].details.join(' '), /local treasury policy/);
   const { state } = fixture();
   assert.equal(readMainnetSetup(JSON.stringify(state)).version, 3);
@@ -96,9 +96,8 @@ test('each Safe signs one connection/allowance batch and only the final batch ac
     assert.notEqual(safeTransactionHash(tx), safeTransactionHash(engine.tx(changed, review(chain))));
   }
   assert(!innerCalls(engine, engine.tx(state, { ...review('l1'), moduleEnabled: true })).some(c => c.functionName === 'enableModule'));
-  const old = innerCalls(engine, engine.tx({ ...state, version: 2 }, review('l1')));
-  assert.equal(old.at(-1).functionName, 'bindPolicy');
-  assert(!old.some(c => c.functionName === 'connectPeer' || c.functionName === 'activate'));
+  assert.throws(() => engine.tx({ ...state, version: 2 }, review('l1')), /paired setup/);
+  assert.throws(() => readMainnetSetup(JSON.stringify({ ...state, version: 2 })), /Invalid Ethereum setup/);
 });
 test('paired signatures and Paid evidence target the initiating chain local policy', () => {
   const p = { version: 2, bridgeKind: 'standard', pair: { version: 1, policyL1: a(16), peerProxyL2: a(21) }, policy: a(17), alias: a(18),

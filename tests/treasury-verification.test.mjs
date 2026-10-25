@@ -91,7 +91,7 @@ test('release bundles retain compiler inputs for every new deployment artifact',
   const builds=loadBuilds('verification/builds');const current=JSON.parse(readFileSync('src/lib/treasury/current-build.json')).build;
   const bundle=JSON.parse(readFileSync(`src/lib/treasury/builds/${current}.json`));
   assert.deepEqual(Object.keys(bundle.contracts).sort(), ['Safe','SafeL2','SafeProxyFactory','SafeProxy','AllowanceModule','MultiSendCallOnly',
-    'L1Owners','TreasuryBootstrap','PairedTreasuryPolicy','TestUSDC','WrappedToken'].sort());
+    'L1Owners','TreasuryBootstrap','PairedTreasuryPolicy','TestUSDC','WrappedToken','Bridge'].sort());
   assert.equal(bundle.contracts.InvoiceMerchant, undefined);
   for (const name of ['PairedTreasuryPolicy']) {
     const abi=bundle.contracts[name].abi;
