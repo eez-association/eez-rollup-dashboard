@@ -44,7 +44,7 @@ model.recordedView = { ...model, mode: "physical", recordedView: null,
       await server.listen();
       url = `http://127.0.0.1:${server.httpServer.address().port}/dashboard/`;
     }
-    browser = await chromium.launch({ headless: true });
+    browser = await chromium.launch({ headless: true, chromiumSandbox: true });
     const page = await browser.newPage();
     page.setDefaultTimeout(15000);
     const errors = [];

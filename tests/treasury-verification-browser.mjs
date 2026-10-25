@@ -15,7 +15,7 @@ let unavailable = true, complete = false, sourceOnly = false, undiscovered = fal
 const server = await createServer({ configFile: false, envFile: false, plugins: [react()], server: { host: '127.0.0.1', port: 0 }, base: '/' });
 await server.listen();
 const origin = `http://127.0.0.1:${server.httpServer.address().port}`;
-const browser = await chromium.launch({ headless: true, args: ['--no-sandbox'] });
+const browser = await chromium.launch({ headless: true, chromiumSandbox: true });
 const context = await browser.newContext();
 const page = await context.newPage();
 page.setDefaultTimeout(15000);

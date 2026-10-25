@@ -88,7 +88,7 @@ async function browse(f, filter) {
   await f.panel.getByText('Loading tokens…',{exact:true}).waitFor({state:'hidden'});
 }
 (async () => {
-  const browser = await chromium.launch({headless:true,args:['--no-sandbox']});
+  const browser = await chromium.launch({headless:true,chromiumSandbox: true});
   let f = await fixture(browser,{chain:'0x1'});
   await browse(f,'Known');
   assert.equal(await f.panel.getByRole('button',{name:/^Select /}).count(),8);

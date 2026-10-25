@@ -202,7 +202,7 @@ async function fixture(browser, options = {}) {
 module.exports = { fixture, until, RAW_GAS, account, recipient, token };
 
 if (require.main === module) (async () => {
-  const browser = await chromium.launch({ headless: true, args: ['--no-sandbox'] });
+  const browser = await chromium.launch({ headless: true, chromiumSandbox: true });
   try {
     let scenarios = 0;
     for (const reverse of [false, true]) for (const erc20 of [false, true]) for (const custom of [null, 500000]) {

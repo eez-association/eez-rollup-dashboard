@@ -8,7 +8,7 @@ import { sharedDeploymentKey, sharedManifestKey, previousWalletFundingKey } from
 const origin = (process.env.EEZ_UI_URL || 'http://127.0.0.1:8080/dashboard').replace(/\/$/, '');
 const directory = process.env.EEZ_UI_EVIDENCE || '.runtime/treasury-flexible-setup';
 const accounts = ['0x000000000000000000000000000000000000a11c', '0x000000000000000000000000000000000000b0b1'].map(address => getAddress(address));
-const browser = await chromium.launch({ headless: true, args: ['--no-sandbox'] });
+const browser = await chromium.launch({ headless: true, chromiumSandbox: true });
 const context = await browser.newContext({ viewport: { width: 1440, height: 1100 } });
 const page = await context.newPage(); page.setDefaultTimeout(30_000);
 const errors = [], methods = [], chunks = [], walletCalls = [];

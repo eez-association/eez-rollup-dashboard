@@ -20,7 +20,7 @@ const config = { version: 1, environment: 'dashboard-testnet', instance: hash('w
     bridgeL1: address(17), bridgeL2: address(18), recipient: address(19), decimals: 6, period: 600, globalLimit: '150000000', assetLabel: 'Test USDC', version: 2 } };
 const server = await createServer({ configFile: false, envFile: false, plugins: [react()], server: { host: '127.0.0.1', port: 0 }, base: '/' });
 await server.listen(); const origin = `http://127.0.0.1:${server.httpServer.address().port}`;
-const browser = await chromium.launch({ headless: true, args: ['--no-sandbox'] });
+const browser = await chromium.launch({ headless: true, chromiumSandbox: true });
 const context = await browser.newContext({ viewport: { width: 1440, height: 1050 } });
 const page = await context.newPage(); page.setDefaultTimeout(15000);
 const errors = [], passed = [];

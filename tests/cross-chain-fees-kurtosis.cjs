@@ -100,7 +100,7 @@ async function fixture(source, config) {
   await settledL2(warmup.blockNumber, 600);
   for (const source of ['l1', 'l2']) evidence.fixtures[source] = await fixture(source, config);
   checkpoint();
-  const browser = await chromium.launch({ headless: true, args: ['--no-sandbox'] });
+  const browser = await chromium.launch({ headless: true, chromiumSandbox: true });
   try {
     const cases = ['l1', 'l2'].flatMap(source => [
       { source, wallet: 'Rabby', kind: 'call' },

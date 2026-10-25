@@ -652,7 +652,20 @@ under the ignored `.runtime/trace-decoder/` directory.
 
 Install the pinned Playwright dependency and Chromium once with `npm ci` and
 `npx playwright install chromium`. `npm test` covers the SDK/payment boundary and
-existing unit regressions. To test a built preview in two terminals:
+existing unit regressions. Browser tests explicitly enable Chromium's sandbox.
+On Ubuntu systems that restrict unprivileged user namespaces, an existing Google
+Chrome installation can supply its sandbox helper:
+
+```bash
+export CHROME_DEVEL_SANDBOX=/opt/google/chrome/chrome-sandbox
+```
+
+Use only an installed, root-owned sandbox helper; do not disable AppArmor or add
+`--no-sandbox` to make the tests pass. See the
+[Chromium sandbox guidance](https://chromium.googlesource.com/chromium/src/+/main/docs/security/apparmor-userns-restrictions.md).
+Without a usable sandbox the tests fail at browser launch.
+
+To test a built preview in two terminals:
 
 ```bash
 npm run build

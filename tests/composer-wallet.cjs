@@ -120,7 +120,7 @@ async function fixture(browser, options = {}) {
 }
 
 (async () => {
-  const browser = await chromium.launch({ headless: true, args: ['--no-sandbox'] });
+  const browser = await chromium.launch({ headless: true, chromiumSandbox: true });
   let passed = 0;
   try {
     const connected = await fixture(browser);

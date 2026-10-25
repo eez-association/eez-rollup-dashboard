@@ -112,7 +112,7 @@ async function until(condition, message) {
 module.exports={fixture,until,target,eoa,fresh,forward,reverse};
 
 if(require.main===module)(async()=>{
- const browser=await chromium.launch({headless:true,args:['--no-sandbox']});let scenarios=0;
+ const browser=await chromium.launch({headless:true,chromiumSandbox: true});let scenarios=0;
  try {
   for(const back of [false,true]){
    const f=await fixture(browser);await f.select(target,back);await f.send.waitFor({state:'visible'});await assert.doesNotReject(()=>f.send.click({trial:true}));

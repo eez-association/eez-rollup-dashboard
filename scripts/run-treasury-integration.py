@@ -65,7 +65,7 @@ def main():
     state.mkdir(parents=True, exist_ok=True)
     run = Path(tempfile.mkdtemp(prefix=time.strftime('%Y%m%dT%H%M%S-'), dir=state))
     print(f'Evidence: {run}', flush=True)
-    env = {key: os.environ[key] for key in ('PATH', 'HOME', 'CARGO_HOME', 'RUSTUP_HOME', 'CC', 'CXX', 'LIBCLANG_PATH') if key in os.environ}
+    env = {key: os.environ[key] for key in ('PATH', 'HOME', 'CARGO_HOME', 'RUSTUP_HOME', 'CC', 'CXX', 'LIBCLANG_PATH', 'CHROME_DEVEL_SANDBOX') if key in os.environ}
     env.update({'LLVM_SYS_221_PREFIX': '/usr/lib/llvm-22', 'CARGO_BUILD_JOBS': '4', 'NO_COLOR': '1'})
     env['PATH'] = '/usr/lib/llvm-22/bin:' + env['PATH']
     target = (args.cargo_target_dir or state / 'cargo-target').resolve()

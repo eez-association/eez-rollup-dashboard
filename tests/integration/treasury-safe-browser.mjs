@@ -15,7 +15,7 @@ const snapshot = await client.snapshot();
 const nonce = await client.read(c.l1.rpc, c.safeL1, safeAbi, 'nonce');
 const labeled = name => getAddress(Object.entries(c.ownerLabels).find(([, label]) => label === name)[0]);
 assert.equal(snapshot.owners.length, 2, 'smoke requires the initial A+B fixture');
-const browser = await chromium.launch({ headless: true, args: ['--no-sandbox'] });
+const browser = await chromium.launch({ headless: true, chromiumSandbox: true });
 const errors = [], unsafeRequests = [];
 const record = { checkedAt: new Date().toISOString(), instance: c.instance, browser: 'Chromium / Playwright read-only provider', checks: [], walletExtensionRehearsal: 'pending' };
 try {

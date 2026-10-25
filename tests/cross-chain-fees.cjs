@@ -11,7 +11,7 @@ async function displayedFees(f, price, priority) {
 }
 
 (async () => {
-  const browser = await chromium.launch({ headless: true, args: ['--no-sandbox'] });
+  const browser = await chromium.launch({ headless: true, chromiumSandbox: true });
   let scenarios = 0;
   try {
     for (const reverse of [false, true]) for (const multipleWallets of [false, true]) for (const erc20 of [false, true]) for (const walletNonce of ['0x0', '0x00', 0]) {
