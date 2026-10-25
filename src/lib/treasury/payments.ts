@@ -8,6 +8,7 @@ import type { TreasuryClient, TreasuryConfig } from "./client.ts";
 
 export type PaymentDeployment = {
   version?: 0 | 1 | 2;
+  pair?: { version: 1; policyL1: Address; peerProxyL2: Address };
   bridgeKind?: "standard"; bridgeExecutorL1?: Address; safeL2Alias?: Address;
   predecessor?: Address; aliasReaderL1?: Address; policy: Address; alias: Address; tokenL1: Address; tokenL2: Address; moduleL1: Address; moduleL2: Address;
   bridgeL1: Address; bridgeL2: Address; invoiceMerchant?: Address; invoiceControl?: string; recipient: Address; decimals: 6; period: 600; globalLimit: "150000000"; assetLabel: "Devnet USDC" | "Test USDC" | "USDC" };
@@ -89,7 +90,7 @@ export function paymentTransaction(c: TreasuryConfig, input: Payment, nonce: big
   const p = checkedPayment(input);
   if (!c.payments) throw new Error("Payments are not deployed on this deployment");
   if (p.kind === "transfer") return transferTransaction(c, p, nonce);
-  if ([c.safeL1, c.safeL2, c.payments.policy, c.payments.alias, c.payments.bridgeL1, c.payments.bridgeL2, c.payments.bridgeExecutorL1].some(a => a?.toLowerCase() === p.recipient.toLowerCase()))
+  if ([c.safeL1, c.safeL2, c.payments.policy, c.payments.alias, c.payments.bridgeL1, c.payments.bridgeL2, c.payments.bridgeExecutorL1, c.payments.pair?.policyL1, c.payments.pair?.peerProxyL2].some(a => a?.toLowerCase() === p.recipient.toLowerCase()))
     throw new Error("Payments cannot target this treasury’s contracts. Choose Move to EEZ-X Safe to transfer between your Safes.");
   if (p.kind === "invoice" && !c.payments.invoiceMerchant) throw new Error("This devnet does not support invoice payments");
   const data = p.kind === "invoice"
@@ -98,7 +99,7 @@ export function paymentTransaction(c: TreasuryConfig, input: Payment, nonce: big
   const source = p.source ?? "l2";
   if (source === "l1" && (!verifiesL1Initiation(c.payments) || !c.l1.front)) throw new Error("This policy supports initiation from EEZ-X only");
   return buildSafeTransaction({ chainId: BigInt(c[source].chainId), safe: source === "l1" ? c.safeL1 : c.safeL2,
-    to: source === "l1" ? c.payments.alias : c.payments.policy, nonce, data });
+    to: source === "l1" ? (c.payments.pair?.policyL1 ?? c.payments.alias) : c.payments.policy, nonce, data });
 }
 const min = (a: bigint, b: bigint) => a < b ? a : b;
 export const remaining = (a: readonly bigint[]) => a[0]! > a[1]! ? a[0]! - a[1]! : 0n;
@@ -141,7 +142,7 @@ export async function paymentState(client: TreasuryClient, l2Tag: "safe" | "late
   const [b1, b2, a1, a2, spent] = await Promise.all([
     contractRead(client, "l1", p.tokenL1, tokenAbi, "balanceOf", [c.safeL1], l1.number),
     contractRead(client, "l2", p.tokenL2, tokenAbi, "balanceOf", [c.safeL2], l2.number),
-    contractRead(client, "l1", p.moduleL1, allowanceAbi, "getTokenAllowance", [c.safeL1, p.bridgeKind === "standard" ? p.bridgeExecutorL1! : p.alias, p.tokenL1], l1.number),
+    contractRead(client, "l1", p.moduleL1, allowanceAbi, "getTokenAllowance", [c.safeL1, p.pair?.policyL1 ?? (p.bridgeKind === "standard" ? p.bridgeExecutorL1! : p.alias), p.tokenL1], l1.number),
     contractRead(client, "l2", p.moduleL2, allowanceAbi, "getTokenAllowance", [c.safeL2, p.policy, p.tokenL2], l2.number),
     contractRead(client, "l2", p.policy, paymentAbi, "spent", [epoch], l2.number),
   ]);
@@ -164,8 +165,9 @@ export async function paymentState(client: TreasuryClient, l2Tag: "safe" | "late
 }
 export function settledPayment(c: TreasuryConfig, p: RecordedPayment, logs: { address: Address; data: Hex; topics: [Hex, ...Hex[]] }[]): PaymentContributions | undefined {
   p = checkedRecordedPayment(p);
+  const emittingPolicy = c.payments!.pair && p.source === "l1" ? c.payments!.pair.policyL1 : c.payments!.policy;
   const events = logs.flatMap(log => {
-    if (log.address.toLowerCase() !== c.payments!.policy.toLowerCase()) return [];
+    if (log.address.toLowerCase() !== emittingPolicy.toLowerCase()) return [];
     try { return [decodeEventLog({ abi: paymentAbi, ...log })]; } catch { return []; }
   });
   const invoices = events.filter(event => event.eventName === "InvoicePaid");

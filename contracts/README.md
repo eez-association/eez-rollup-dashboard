@@ -1,8 +1,6 @@
 # Treasury contracts
 
-Unaudited demo code. This branch contains a contract-only redesign; it is not a
-live deployment or an updated dashboard release. No tests, compiler, native
-rehearsal or deployment were run for the paired-policy change at the user's request.
+Unaudited demo code for paired treasury policies and Safe owner verification.
 
 ## Files to read
 
@@ -89,7 +87,7 @@ signed split; contributions are never silently rebalanced.
 For L1 initiation, a shared-budget or peer-transfer failure can occur after the
 local transfer. Failure must propagate through the atomic EEZ execution and the
 Safe's zero-refund execution to revert the entire payment. This is a protocol
-requirement; native runtime validation of the new call graph remains outstanding.
+requirement of the native runtime.
 
 ## Testnet faucet
 
@@ -114,26 +112,36 @@ to hold its own tokens and permits self-transfers. `transferFrom` still checks
 allowance even when the sender and recipient are equal. A failed bridge call
 reverts the new mint and approval. Real Ethereum USDC has no faucet.
 
-## Validation and migration status
+## Dashboard integration and testing
 
 The Solidity tests cover the fixed faucet, self-transfer behavior, local-first
 ordering, both initiating Safes/destinations, exact funding splits, peer
 permissions, EEZ rollup identity, one-time activation, shared-budget accounting,
 signature replay and rollback. They use
 real Safe/AllowanceModule/normal bridge contracts with a single-EVM EEZ transport
-fixture; passing them would not establish native protocol execution. They have
-**not been executed** for this change.
+fixture; passing them would not establish native protocol execution.
 
-The dashboard deployment planner, saved-transaction signing, capability checks
-and settlement tracking still target the previous source release. They need a
-separate migration for two local policy addresses, peer setup, and initiating-chain
-`Paid` events. Native rehearsal scripts also target the removed policies and must
-be ported before use. Do not point the dashboard at these new contracts yet.
-The release builder's contract list is updated, but a new compiler/source bundle
-has not been generated. Historical immutable bundles must not be rewritten.
+The dashboard planner now has a version-3 paired setup: select the existing L1
+Safe, create/reuse its L1Owners mirror, deploy both policies, connect peers and
+grant local allowances, then activate in the final Safe batch. Signing uses the
+initiating Safe's domain and local policy. Standard-bridge submissions still go
+through Ethereum; paired L1 settlement requires the local `Paid` event and the
+exact canonical peer call. Saved version-1/2 setup plans retain their old paths.
+
+The scripted native runner now uses paired policies and normal bridges. Without
+a snapshot it uses the fixed TestUSDC faucet; an explicitly supplied saved USDC
+runtime snapshot selects the browser and blacklist rollback scenarios as well.
+Rollback observations follow both local policies, their allowances and the L1
+bridge approval. The runner inventories current sources independently of frozen
+release manifests. Its old `--ui` fixture remains unmigrated and is rejected
+before starting a devnet.
+
+Fresh paired UI setup requires a release containing `PairedTreasuryPolicy`.
+The release builder packages deployment bytecode with its compiler inputs and
+source identities. Historical immutable bundles must not be rewritten.
 
 The pinned upstream dependencies are recorded in the repository submodules.
-When execution is authorized and dependencies are available, contract checks are:
+Contract checks are:
 
 ```sh
 forge build --root contracts/legacy

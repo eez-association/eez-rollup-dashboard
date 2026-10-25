@@ -41,7 +41,8 @@ contract PairedTreasuryPolicyTest is OwnerFixture {
         module1 = IAllowanceModule(_deployLegacy("AllowanceModule"));
         module2 = IAllowanceModule(_deployLegacy("AllowanceModule"));
         policy1 = new PairedTreasuryPolicy(address(safeL1), module1, usdc, IStandardBridge(address(bridge1)), ROLLUP_ID);
-        policy2 = new PairedTreasuryPolicy(address(safeL2), module2, wrapped, IStandardBridge(address(bridge2)), ROLLUP_ID);
+        policy2 =
+            new PairedTreasuryPolicy(address(safeL2), module2, wrapped, IStandardBridge(address(bridge2)), ROLLUP_ID);
         _callSafe(true, address(policy1), abi.encodeCall(policy1.connectPeer, (address(policy2))));
         _callSafe(false, address(policy2), abi.encodeCall(policy2.connectPeer, (address(policy1))));
         _callSafe(true, address(safeL1), abi.encodeCall(ISafe.enableModule, (address(module1))));
@@ -63,35 +64,67 @@ contract PairedTreasuryPolicyTest is OwnerFixture {
     }
 
     function _setAllowance(bool onL1, uint256 amount) internal {
-        _callSafe(onL1, onL1 ? address(module1) : address(module2), abi.encodeCall(IAllowanceModule.setAllowance, (
-            onL1 ? address(policy1) : address(policy2), onL1 ? address(usdc) : address(wrapped),
-            uint96(amount), 10, uint32(block.timestamp / 600 * 10)
-        )));
+        _callSafe(
+            onL1,
+            onL1 ? address(module1) : address(module2),
+            abi.encodeCall(
+                IAllowanceModule.setAllowance,
+                (
+                    onL1 ? address(policy1) : address(policy2),
+                    onL1 ? address(usdc) : address(wrapped),
+                    uint96(amount),
+                    10,
+                    uint32(vm.getBlockTimestamp() / 600 * 10)
+                )
+            )
+        );
     }
 
     function _pay(bool startL1, bool onL1, uint256 amount, uint256 fromL1) internal {
         address policy = startL1 ? address(policy1) : address(policy2);
-        _callSafe(startL1, policy, abi.encodeCall(PairedTreasuryPolicy.paySplit, (
-            recipient, amount, onL1, block.timestamp / 600, fromL1
-        )));
+        _callSafe(
+            startL1,
+            policy,
+            abi.encodeCall(
+                PairedTreasuryPolicy.paySplit, (recipient, amount, onL1, vm.getBlockTimestamp() / 600, fromL1)
+            )
+        );
     }
 
     function _expectL1Failure(bytes memory) internal virtual {
         vm.expectRevert("GS013");
     }
 
-    function _signedPayment(bool startL1, bool onL1, uint256 amount, uint256 fromL1)
-        internal view returns (ISafe account, address policy, bytes memory data, bytes memory signatures)
+    function _signedPayment(
+        bool startL1,
+        bool onL1,
+        uint256 amount,
+        uint256 fromL1
+    )
+        internal
+        view
+        returns (ISafe account, address policy, bytes memory data, bytes memory signatures)
     {
         account = startL1 ? safeL1 : safeL2;
         policy = startL1 ? address(policy1) : address(policy2);
-        data = abi.encodeCall(PairedTreasuryPolicy.paySplit, (recipient, amount, onL1, block.timestamp / 600, fromL1));
+        data = abi.encodeCall(
+            PairedTreasuryPolicy.paySplit, (recipient, amount, onL1, vm.getBlockTimestamp() / 600, fromL1)
+        );
         signatures = _signTwo(keccak256(_preimage(account, policy, data, 0)), A, B);
         if (!startL1) signatures = _outer(adapter, signatures);
     }
 
-    function _expectPaymentFailure(bool startL1, bool onL1, uint256 amount, uint256 fromL1, bytes memory reason) internal {
-        (ISafe account, address policy, bytes memory data, bytes memory signatures) = _signedPayment(startL1, onL1, amount, fromL1);
+    function _expectPaymentFailure(
+        bool startL1,
+        bool onL1,
+        uint256 amount,
+        uint256 fromL1,
+        bytes memory reason
+    )
+        internal
+    {
+        (ISafe account, address policy, bytes memory data, bytes memory signatures) =
+            _signedPayment(startL1, onL1, amount, fromL1);
         // Prepare signatures and nonce reads before setting the next-call expectation.
         if (startL1) _expectL1Failure(reason);
         else vm.expectRevert("GS013");
@@ -99,26 +132,34 @@ contract PairedTreasuryPolicyTest is OwnerFixture {
     }
 
     function _snapshot() internal view returns (bytes32) {
-        return keccak256(abi.encode(
-            usdc.balanceOf(address(safeL1)), wrapped.balanceOf(address(safeL2)),
-            usdc.balanceOf(recipient), wrapped.balanceOf(recipient),
-            usdc.balanceOf(address(bridge1)), wrapped.totalSupply(),
-            module1.getTokenAllowance(address(safeL1), address(policy1), address(usdc)),
-            module2.getTokenAllowance(address(safeL2), address(policy2), address(wrapped)),
-            policy2.spent(block.timestamp / 600), safeL1.nonce(), safeL2.nonce()
-        ));
+        return keccak256(
+            abi.encode(
+                usdc.balanceOf(address(safeL1)),
+                wrapped.balanceOf(address(safeL2)),
+                usdc.balanceOf(recipient),
+                wrapped.balanceOf(recipient),
+                usdc.balanceOf(address(bridge1)),
+                wrapped.totalSupply(),
+                module1.getTokenAllowance(address(safeL1), address(policy1), address(usdc)),
+                module2.getTokenAllowance(address(safeL2), address(policy2), address(wrapped)),
+                policy2.spent(vm.getBlockTimestamp() / 600),
+                safeL1.nonce(),
+                safeL2.nonce()
+            )
+        );
     }
 
     function testFuzzExactSplitFromEitherSafeToEitherChain(bool startL1, bool onL1, uint96 raw, uint96 split) public {
         uint256 amount = bound(uint256(raw), 1, 150 * U);
-        uint256 fromL1 = bound(uint256(split), amount > 100 * U ? amount - 100 * U : 0, amount < 100 * U ? amount : 100 * U);
+        uint256 fromL1 =
+            bound(uint256(split), amount > 100 * U ? amount - 100 * U : 0, amount < 100 * U ? amount : 100 * U);
         _pay(startL1, onL1, amount, fromL1);
         assertEq(usdc.balanceOf(address(safeL1)), 1000 * U - fromL1);
         assertEq(wrapped.balanceOf(address(safeL2)), 1000 * U - (amount - fromL1));
         assertEq(usdc.balanceOf(recipient), onL1 ? amount : 0);
         assertEq(wrapped.balanceOf(recipient), onL1 ? 0 : amount);
-        assertEq(policy1.spent(block.timestamp / 600), amount);
-        assertEq(policy2.spent(block.timestamp / 600), amount);
+        assertEq(policy1.spent(vm.getBlockTimestamp() / 600), amount);
+        assertEq(policy2.spent(vm.getBlockTimestamp() / 600), amount);
         assertEq(wrapped.totalSupply(), usdc.balanceOf(address(bridge1)));
         assertEq(usdc.balanceOf(address(policy1)), 0);
         assertEq(wrapped.balanceOf(address(policy2)), 0);
@@ -137,8 +178,10 @@ contract PairedTreasuryPolicyTest is OwnerFixture {
             Vm.Log memory log = logs[i];
             if (log.topics.length != 3 || log.topics[0] != transferTopic) continue;
             address sender = address(uint160(uint256(log.topics[1])));
-            if ((log.emitter == address(usdc) && sender == address(safeL1))
-                || (log.emitter == address(wrapped) && sender == address(safeL2))) {
+            if (
+                (log.emitter == address(usdc) && sender == address(safeL1))
+                    || (log.emitter == address(wrapped) && sender == address(safeL2))
+            ) {
                 if (count == 0) firstSafe = sender;
                 ++count;
             }
@@ -150,11 +193,13 @@ contract PairedTreasuryPolicyTest is OwnerFixture {
     function testGlobalBudgetCountsBothInitiatorsAndZeroRemoteContribution() public {
         _pay(false, false, 140 * U, 90 * U);
         bytes32 beforeState = _snapshot();
-        _expectPaymentFailure(true, false, 20 * U, 10 * U, abi.encodeWithSelector(PairedTreasuryPolicy.GlobalLimit.selector));
+        _expectPaymentFailure(
+            true, false, 20 * U, 10 * U, abi.encodeWithSelector(PairedTreasuryPolicy.GlobalLimit.selector)
+        );
         assertEq(_snapshot(), beforeState);
         // L1 transfers locally first; L2 must count it even though L2 contributes zero.
         _pay(true, true, 10 * U, 10 * U);
-        assertEq(policy2.spent(block.timestamp / 600), 150 * U);
+        assertEq(policy2.spent(vm.getBlockTimestamp() / 600), 150 * U);
         beforeState = _snapshot();
         _expectPaymentFailure(false, false, U, 0, abi.encodeWithSelector(PairedTreasuryPolicy.GlobalLimit.selector));
         assertEq(_snapshot(), beforeState);
@@ -163,13 +208,15 @@ contract PairedTreasuryPolicyTest is OwnerFixture {
     function testFuzzPeerFailureRollsBackLocalTransferAndSafeNonce(bool startL1, bool onL1) public {
         _setAllowance(!startL1, 0);
         bytes32 beforeState = _snapshot();
-        _expectPaymentFailure(startL1, onL1, 120 * U, 80 * U, abi.encodeWithSelector(PairedTreasuryPolicy.Capacity.selector));
+        _expectPaymentFailure(
+            startL1, onL1, 120 * U, 80 * U, abi.encodeWithSelector(PairedTreasuryPolicy.Capacity.selector)
+        );
         assertEq(_snapshot(), beforeState);
         assertEq(usdc.allowance(address(policy1), address(bridge1)), 0);
     }
 
     function testOnlyLocalSafeAndAuthenticatedPeerCanSpend() public {
-        uint256 epoch = block.timestamp / 600;
+        uint256 epoch = vm.getBlockTimestamp() / 600;
         vm.expectRevert(PairedTreasuryPolicy.OnlySafe.selector);
         policy1.paySplit(recipient, U, true, epoch, U);
         vm.expectRevert(PairedTreasuryPolicy.OnlySafe.selector);
@@ -186,11 +233,14 @@ contract PairedTreasuryPolicyTest is OwnerFixture {
     }
 
     function testPeerConnectionRequiresSafeAndCannotBeChanged() public {
-        PairedTreasuryPolicy fresh = new PairedTreasuryPolicy(address(safeL1), module1, usdc, IStandardBridge(address(bridge1)), ROLLUP_ID);
+        PairedTreasuryPolicy fresh =
+            new PairedTreasuryPolicy(address(safeL1), module1, usdc, IStandardBridge(address(bridge1)), ROLLUP_ID);
         vm.expectRevert(PairedTreasuryPolicy.OnlySafe.selector);
         fresh.connectPeer(address(policy2));
         vm.prank(address(safeL1));
         fresh.connectPeer(address(policy2));
+        // This intentionally mismatched pair still needs the caller alias for its remote view.
+        l2.getOrCreateCrossChainProxy(address(fresh), 0);
         vm.prank(address(safeL1));
         vm.expectRevert(PairedTreasuryPolicy.InvalidConfiguration.selector);
         fresh.connectPeer(address(policy2));
@@ -200,7 +250,7 @@ contract PairedTreasuryPolicyTest is OwnerFixture {
     }
 
     function testSignedEpochAndAlignedPeriodsRemainRequired() public {
-        uint256 old = block.timestamp / 600;
+        uint256 old = vm.getBlockTimestamp() / 600;
         _pay(true, true, 100 * U, 100 * U);
         vm.warp((old + 1) * 600);
         vm.prank(address(safeL1));
@@ -212,19 +262,30 @@ contract PairedTreasuryPolicyTest is OwnerFixture {
     }
 
     function testPaymentsTrustSetupBridgeBindings() public {
-        vm.mockCallRevert(address(bridge1), abi.encodeCall(IStandardBridge.canonicalBridgeAddress, ()), "unexpected bridge configuration read");
-        vm.mockCallRevert(address(bridge2), abi.encodeCall(IStandardBridge.canonicalBridgeAddress, ()), "unexpected bridge configuration read");
+        vm.mockCallRevert(
+            address(bridge1),
+            abi.encodeCall(IStandardBridge.canonicalBridgeAddress, ()),
+            "unexpected bridge configuration read"
+        );
+        vm.mockCallRevert(
+            address(bridge2),
+            abi.encodeCall(IStandardBridge.canonicalBridgeAddress, ()),
+            "unexpected bridge configuration read"
+        );
         _pay(true, true, 10 * U, 10 * U);
         _pay(false, false, 10 * U, 0);
         assertEq(usdc.balanceOf(recipient), 10 * U);
         assertEq(wrapped.balanceOf(recipient), 10 * U);
-        assertEq(policy2.spent(block.timestamp / 600), 20 * U);
+        assertEq(policy2.spent(vm.getBlockTimestamp() / 600), 20 * U);
         vm.clearMockedCalls();
     }
 
     function testFuzzChangedSplitAndReplayRejectOwnerSignatures(bool startL1) public {
-        (ISafe account, address policy, bytes memory data, bytes memory signatures) = _signedPayment(startL1, false, 120 * U, 80 * U);
-        bytes memory changed = abi.encodeCall(PairedTreasuryPolicy.paySplit, (recipient, 120 * U, false, block.timestamp / 600, 81 * U));
+        (ISafe account, address policy, bytes memory data, bytes memory signatures) =
+            _signedPayment(startL1, false, 120 * U, 80 * U);
+        bytes memory changed = abi.encodeCall(
+            PairedTreasuryPolicy.paySplit, (recipient, 120 * U, false, vm.getBlockTimestamp() / 600, 81 * U)
+        );
         bytes32 beforeState = _snapshot();
         vm.expectRevert();
         _execute(account, policy, changed, 0, signatures);
@@ -269,18 +330,31 @@ contract PairedTreasuryPolicyTest is OwnerFixture {
     }
 
     function testPaymentsDoNotReadPeerConfigurationAgain() public {
-        vm.mockCallRevert(address(policy1.peer()), abi.encodeCall(PairedTreasuryPolicy.configuration, ()), "unexpected configuration read");
-        vm.mockCallRevert(address(policy2.peer()), abi.encodeCall(PairedTreasuryPolicy.configuration, ()), "unexpected configuration read");
+        vm.mockCallRevert(
+            address(policy1.peer()),
+            abi.encodeCall(PairedTreasuryPolicy.configuration, ()),
+            "unexpected configuration read"
+        );
+        vm.mockCallRevert(
+            address(policy2.peer()),
+            abi.encodeCall(PairedTreasuryPolicy.configuration, ()),
+            "unexpected configuration read"
+        );
         _pay(true, false, 120 * U, 80 * U);
-        assertEq(policy2.spent(block.timestamp / 600), 120 * U);
+        assertEq(policy2.spent(vm.getBlockTimestamp() / 600), 120 * U);
         vm.clearMockedCalls();
     }
 
     function testMisalignedAllowanceRejectsBeforeSpending() public {
-        uint256 epoch = block.timestamp / 600;
-        _callSafe(true, address(module1), abi.encodeCall(IAllowanceModule.setAllowance, (
-            address(policy1), address(usdc), uint96(100 * U), 11, uint32(epoch * 10)
-        )));
+        uint256 epoch = vm.getBlockTimestamp() / 600;
+        _callSafe(
+            true,
+            address(module1),
+            abi.encodeCall(
+                IAllowanceModule.setAllowance,
+                (address(policy1), address(usdc), uint96(100 * U), 11, uint32(epoch * 10))
+            )
+        );
         bytes32 beforeState = _snapshot();
         vm.prank(address(safeL1));
         vm.expectRevert(PairedTreasuryPolicy.UnalignedAllowance.selector);
@@ -289,7 +363,7 @@ contract PairedTreasuryPolicyTest is OwnerFixture {
     }
 
     function testInvalidAmountsAndInternalRecipientsReject() public {
-        uint256 epoch = block.timestamp / 600;
+        uint256 epoch = vm.getBlockTimestamp() / 600;
         vm.prank(address(safeL1));
         vm.expectRevert(PairedTreasuryPolicy.InvalidAmount.selector);
         policy1.paySplit(recipient, 0, true, epoch, 0);
@@ -305,9 +379,11 @@ contract PairedTreasuryPolicyTest is OwnerFixture {
     }
 
     function testActivationNeedsBothConnectionsAndRollsBackBothSidesOnFailure() public {
-        PairedTreasuryPolicy first = new PairedTreasuryPolicy(address(safeL1), module1, usdc, IStandardBridge(address(bridge1)), ROLLUP_ID);
-        PairedTreasuryPolicy second = new PairedTreasuryPolicy(address(safeL2), module2, wrapped, IStandardBridge(address(bridge2)), ROLLUP_ID);
-        uint256 epoch = block.timestamp / 600;
+        PairedTreasuryPolicy first =
+            new PairedTreasuryPolicy(address(safeL1), module1, usdc, IStandardBridge(address(bridge1)), ROLLUP_ID);
+        PairedTreasuryPolicy second =
+            new PairedTreasuryPolicy(address(safeL2), module2, wrapped, IStandardBridge(address(bridge2)), ROLLUP_ID);
+        uint256 epoch = vm.getBlockTimestamp() / 600;
         vm.prank(address(safeL1));
         first.connectPeer(address(second));
         vm.prank(address(safeL1));
@@ -333,5 +409,4 @@ contract PairedTreasuryPolicyTest is OwnerFixture {
         assertEq(first.peerSafe(), address(safeL2));
         assertEq(second.peerSafe(), address(safeL1));
     }
-
 }

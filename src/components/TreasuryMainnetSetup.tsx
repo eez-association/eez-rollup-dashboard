@@ -5,13 +5,15 @@ import { getAddress, isAddress } from "viem";
 import type { Hex } from "viem";
 import type { TreasuryWallet } from "./TreasuryConnected";
 import type { TreasuryConfig } from "../lib/treasury/client";
-import { MainnetSetup, mainnetManifestKey, mainnetSetupKey, mainnetSetupSteps, readMainnetSetup } from "../lib/treasury/mainnetSetup";
+import { MainnetSetup, mainnetManifestKey, mainnetSetupKey, mainnetSetupStepsFor, pairedSetupAvailable, readMainnetSetup } from "../lib/treasury/mainnetSetup";
 import type { MainnetSetupState, MainnetTarget } from "../lib/treasury/mainnetSetup";
 import styles from "./TreasuryDemo.module.css";
 
 export function TreasuryMainnetSetup({ wallet, target, onComplete }: { wallet: TreasuryWallet; target: MainnetTarget; onComplete: (c: TreasuryConfig) => void }) {
   const [state, setState] = useState<MainnetSetupState | null>(null), [engine, setEngine] = useState<MainnetSetup | null>(null);
   const [safeL1, setSafeL1] = useState(""), [safeL2, setSafeL2] = useState(""), [existingMirror, setExistingMirror] = useState(false);
+  const steps = mainnetSetupStepsFor(state);
+  const pairedReady = !!engine && pairedSetupAvailable(engine.artifacts);
   const [busy, setBusy] = useState(false), [error, setError] = useState("");
   const active = useRef(false), done = useRef(onComplete); done.current = onComplete;
   const persist = (s: MainnetSetupState) => { readMainnetSetup(JSON.stringify(s)); retainSourceRequests(localStorage, s.sourceRequests); localStorage.setItem(mainnetSetupKey, JSON.stringify(s)); setState(s); };
@@ -44,10 +46,10 @@ export function TreasuryMainnetSetup({ wallet, target, onComplete }: { wallet: T
     poll(); const timer = window.setInterval(poll, 3000); return () => clearInterval(timer);
   }, [engine, state]);
   useEffect(() => {
-    if (!engine || state?.completed.length !== mainnetSetupSteps.length || state.pending) return;
+    if (!engine || state?.completed.length !== steps.length || state.pending) return;
     void run(async s => { if (!s) return; const c = await engine.manifest(s); localStorage.setItem(mainnetManifestKey, JSON.stringify(c)); done.current(c); });
   }, [engine, state]);
-  const step = state ? mainnetSetupSteps[state.completed.length] : undefined;
+  const step = state ? steps[state.completed.length] : undefined;
   const review = state?.review;
   const signed = review?.approvals.some(a => a.owner.toLowerCase() === wallet.address?.toLowerCase());
   const owner = review?.owners.some(a => a.toLowerCase() === wallet.address?.toLowerCase());
@@ -66,12 +68,14 @@ export function TreasuryMainnetSetup({ wallet, target, onComplete }: { wallet: T
           {existingMirror && <><label htmlFor="mainnet-mirror">Mirror Safe address</label><input id="mainnet-mirror" value={safeL2} onChange={e => setSafeL2(e.target.value)} placeholder="0x…" disabled={busy}/></>}
         </div>
       </div>
-      <button className="btn btn-solid" disabled={!engine || busy || !wallet.address || !isAddress(safeL1.trim()) || existingMirror && !isAddress(safeL2.trim())} onClick={() => void run(async saved => {
+      <button className="btn btn-solid" disabled={!pairedReady || busy || !wallet.address || !isAddress(safeL1.trim()) || existingMirror && !isAddress(safeL2.trim())} onClick={() => void run(async saved => {
         if (saved) throw new Error("A treasury setup is already in progress");
+        if (!pairedReady) throw new Error("Treasury setup is awaiting an updated contract release");
         persist(await engine!.configure(getAddress(wallet.address!), getAddress(safeL1.trim()), existingMirror ? getAddress(safeL2.trim()) : undefined));
       })}>{busy ? "Checking your Safes…" : "Start setup"}</button>
+      {engine && !pairedReady && <p role="status">Treasury setup is awaiting an updated contract release.</p>}
     </section> : step ? <section className={styles.card} aria-busy={busy}>
-      <p className={styles.hint}>Step {state.completed.length + 1} of {mainnetSetupSteps.length} · {step.chain === "l1" ? "Ethereum" : "EEZ-X"}</p>
+      <p className={styles.hint}>Step {state.completed.length + 1} of {steps.length} · {step.chain === "l1" ? "Ethereum" : "EEZ-X"}</p>
       <h3>{step.label}</h3><ul>{step.details.map(text => <li key={text}>{text}</li>)}</ul>
       {state.completed.length === 2 && <p>100 USDC per Safe and 150 shared per ten minutes. Fund your Safes separately with the existing USDC asset.</p>}
       {state.pending ? <p role="status">Waiting for confirmation…{state.pending.hash && <> <a href={`${target[state.pending.chain].explorer.replace(/\/$/, "")}/tx/${state.pending.hash}`} target="_blank" rel="noreferrer">View transaction ↗</a></>}</p>
@@ -94,6 +98,6 @@ export function TreasuryMainnetSetup({ wallet, target, onComplete }: { wallet: T
       })}>{busy ? "Preparing transaction…" : "Confirm in wallet"}</button>}
     </section> : <p role="status">Verifying your treasury…</p>}
     {error && <p className={styles.error} role="alert">{error}</p>}
-    {state && state.completed.length > 0 && <section className={styles.card}><h3>Transaction history</h3><ol>{state.completed.map((tx, i) => <li key={tx.hash}><a href={`${target[tx.chain].explorer.replace(/\/$/, "")}/tx/${tx.hash}`} target="_blank" rel="noreferrer">{mainnetSetupSteps[i]!.label} ↗</a> · Confirmed</li>)}</ol></section>}
+    {state && state.completed.length > 0 && <section className={styles.card}><h3>Transaction history</h3><ol>{state.completed.map((tx, i) => <li key={tx.hash}><a href={`${target[tx.chain].explorer.replace(/\/$/, "")}/tx/${tx.hash}`} target="_blank" rel="noreferrer">{steps[i]!.label} ↗</a> · Confirmed</li>)}</ol></section>}
   </section>;
 }

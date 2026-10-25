@@ -1,3 +1,4 @@
+import { pairedPolicyAbi } from "./pairedPolicy.ts";
 import { paymentVersion, verifiesL1Initiation, verifiesReverseFunding } from "./savedPayments.ts";
 import { decodeFunctionResult, encodeFunctionData, isAddress, keccak256, parseAbi, toHex, zeroAddress } from "viem";
 import type { Abi, Address, Hex } from "viem";
@@ -115,9 +116,9 @@ export async function validateMainnet(client: TreasuryClient) {
   const [symbol, decimals, paused, l1Rollup, l2Rollup, policyRollup, origin, authority, limitL1, limitL2] = await Promise.all([
     read("l1", p.tokenL1, usdcAbi, "symbol"), read("l1", p.tokenL1, usdcAbi, "decimals"), read("l1", p.tokenL1, usdcAbi, "paused"),
     read("l1", c.registry, networkAbi, "MAINNET_ROLLUP_ID"), read("l2", c.manager, networkAbi, "ROLLUP_ID"),
-    read("l2", p.policy, policyAbi, "rollupId"), read("l2", p.bridgeL2, networkAbi, "wrappedTokenInfo", [p.tokenL2]),
+    read("l2", p.policy, p.pair ? pairedPolicyAbi : policyAbi, p.pair ? "l2RollupId" : "rollupId"), read("l2", p.bridgeL2, networkAbi, "wrappedTokenInfo", [p.tokenL2]),
     read("l2", p.tokenL2, networkAbi, "BRIDGE"),
-    read("l1", p.moduleL1, networkAbi, "getTokenAllowance", [c.safeL1, p.bridgeExecutorL1!, p.tokenL1]),
+    read("l1", p.moduleL1, networkAbi, "getTokenAllowance", [c.safeL1, p.pair?.policyL1 ?? p.bridgeExecutorL1!, p.tokenL1]),
     read("l2", p.moduleL2, networkAbi, "getTokenAllowance", [c.safeL2, p.policy, p.tokenL2]),
   ]);
   for (const limit of [limitL1, limitL2] as bigint[][])

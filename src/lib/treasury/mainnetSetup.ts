@@ -23,7 +23,7 @@ const digest = (x: unknown): x is Hex => typeof x === "string" && /^0x[\da-f]{64
 const identity = keccak256(toHex(JSON.stringify(network)));
 export const mainnetSetupKey = `eez:treasury:ethereum-setup:${identity}`;
 export const mainnetManifestKey = `${mainnetSetupKey}:manifest`;
-export const mainnetSetupSteps = [
+const legacyMainnetSetupSteps = [
   { label: "Prepare Ethereum spending", chain: "l1", details: ["Reuse the selected Ethereum Safe", "Reuse the Ethereum allowance module", "Deploy this Safe’s bounded funding delegate", "Reuse a verified Safe batch helper where available"] },
   { label: "Connect your mirror Safe", chain: "l2", details: ["Reuse or prepare shared Safe contracts on EEZ-X", "Deploy or connect the EEZ-X mirror", "Verify approvals against the current Ethereum owners", "Preserve the Ethereum Safe’s owners and threshold"] },
   { label: "Create the shared budget", chain: "l2", details: ["Deploy the shared 150-USDC policy", "Connect the existing USDC bridge", "Reuse or prepare the shared EEZ-X allowance module"] },
@@ -31,10 +31,26 @@ export const mainnetSetupSteps = [
   { label: "Approve Ethereum spending", chain: "l1", details: ["Authorize the funding delegate through the official allowance module", "Set 100 USDC per ten minutes", "Bind the delegate to this treasury policy"] },
   { label: "Approve EEZ-X spending", chain: "l1", details: ["Authorize the policy through the official allowance module", "Set 100 USDC per ten minutes", "Sign for the mirror Safe and submit through Ethereum"] },
 ] as const;
+export const mainnetSetupSteps = [
+  { label: "Prepare Ethereum policy", chain: "l1", details: ["Reuse the selected Ethereum Safe", "Reuse the normal bridge and USDC", "Deploy the local treasury policy"] },
+  { label: "Connect your mirror Safe", chain: "l2", details: ["Deploy or reuse the EEZ-X mirror", "Use the Ethereum Safe’s live owners", "Reuse verified Safe infrastructure"] },
+  { label: "Prepare EEZ-X policy", chain: "l2", details: ["Deploy the same policy contract on EEZ-X", "Use the existing wrapped USDC and normal bridge", "Prepare the local allowance module"] },
+  { label: "Connect Ethereum execution", chain: "l1", details: ["Connect live owner verification", "Prepare the mirror and policy aliases"] },
+  { label: "Approve Ethereum setup", chain: "l1", details: ["Connect the EEZ-X peer policy", "Enable the allowance module if needed", "Grant the Ethereum policy 100 USDC per ten minutes"] },
+  { label: "Approve EEZ-X setup", chain: "l1", details: ["Connect the Ethereum peer policy", "Grant the EEZ-X policy 100 USDC per ten minutes", "Validate and activate both policies in this batch"] },
+] as const;
+export function mainnetSetupStepsFor(state?: { version: number } | null) {
+  return state && state.version < 3 ? legacyMainnetSetupSteps : mainnetSetupSteps;
+}
+export function pairedSetupAvailable(artifacts: DeploymentArtifacts) {
+  const policy = artifacts.contracts.PairedTreasuryPolicy;
+  return !!artifacts.build && !!policy && policy.bytecode.length > 2 && policy.runtime.length > 2
+    && policy.abi.some(item => item.type === "function" && item.name === "PAIR_VERSION");
+}
 type Output = { key: string; address: Address; artifact?: string; hash?: Hex };
 type Review = { step: number; chain: Chain; nonce: string; owners: Address[]; threshold: number; fingerprint: string; hash: Hex; approvals: Approval[]; moduleEnabled?: boolean };
 type Pending = DeploymentPending & { outputs: Output[]; actionsHash?: Hex; executor?: Address; sequence?: string; closed?: boolean; safe?: Address; safeChain?: Chain };
-export type MainnetSetupState = { build?: string; sourceRequests?: SourceRequest[]; version: 1 | 2; identity: Hex; salt: Hex; deployer: Address; addresses: Record<string, Address>; code: TreasuryConfig["code"];
+export type MainnetSetupState = { build?: string; sourceRequests?: SourceRequest[]; version: 1 | 2 | 3; identity: Hex; salt: Hex; deployer: Address; addresses: Record<string, Address>; code: TreasuryConfig["code"];
   completed: { hash: Hex; chain: Chain; number: Hex; blockHash: Hex }[]; pending?: Pending; review?: Review };
 export type MainnetTarget = DeploymentTarget & { l1: DeploymentTarget["l1"] & { explorer: string }; l2: DeploymentTarget["l2"] & { explorer: string } };
 export function isMainnetSetupTarget(l1: string, l2: string, registry: string, manager: string, bridgeL1: string, bridgeL2: string) {
@@ -45,9 +61,10 @@ export function isMainnetSetupTarget(l1: string, l2: string, registry: string, m
 export function readMainnetSetup(raw: string | null): MainnetSetupState | null {
   if (!raw) return null;
   const s = JSON.parse(raw) as MainnetSetupState;
-  check([1, 2].includes(s.version) && (s.build === undefined || /^[a-f\d]{64}$/.test(s.build)) && s.identity === identity && digest(s.salt) && isAddress(s.deployer) && s.addresses && isAddress(s.addresses.safeL1!)
+  check([1, 2, 3].includes(s.version) && (s.build === undefined || /^[a-f\d]{64}$/.test(s.build)) && s.identity === identity && digest(s.salt) && isAddress(s.deployer) && s.addresses && isAddress(s.addresses.safeL1!)
     && Object.values(s.addresses).every(a => isAddress(a)) && Array.isArray(s.completed) && s.completed.length <= mainnetSetupSteps.length
     && s.completed.every(x => digest(x.hash) && digest(x.blockHash) && /^0x[\da-f]+$/i.test(x.number) && ["l1", "l2"].includes(x.chain))
+    && (s.version !== 3 || typeof s.build === "string")
     && Array.isArray(s.code) && s.code.every(x => isAddress(x.address) && digest(x.hash) && ["l1", "l2"].includes(x.chain)), "Invalid Ethereum setup record; preserve it for recovery");
   if (s.pending) check(s.pending.id === String(s.completed.length) && s.pending.chain === mainnetSetupSteps[s.completed.length]?.chain
     && isAddress(s.pending.sender) && /^0x[\da-f]+$/i.test(s.pending.nonce) && /^0x(?:[\da-f]{2})+$/i.test(s.pending.data)
@@ -63,6 +80,7 @@ export function loadMainnetManifest(storage: Pick<Storage, "getItem">) {
   if (!state || state.completed.length !== mainnetSetupSteps.length || state.pending) return null;
   const raw = storage.getItem(mainnetManifestKey); if (!raw) return null;
   const manifest = parseTreasuryConfig(JSON.parse(raw));
+  check(!!manifest.payments?.pair === (state.version === 3), "Treasury manifest does not match its saved setup plan");
   return manifest.instance === keccak256(toHex(`${state.salt}:${state.addresses.safeL1}:${state.addresses.safeL2}`)) ? manifest : null;
 }
 
@@ -141,7 +159,7 @@ export class MainnetSetup {
     for (const [key, binding] of Object.entries(infrastructure)) if (!addresses[key]) {
       addresses[key] = binding.address; code.push({ chain: "l2", ...binding });
     }
-    return { ...(this.artifacts.build ? { build: this.artifacts.build } : {}), version: this.artifacts.build ? 2 : 1, identity, salt: toHex(crypto.getRandomValues(new Uint8Array(32))), deployer: getAddress(deployer), addresses, code, completed: [] };
+    return { ...(this.artifacts.build ? { build: this.artifacts.build } : {}), version: pairedSetupAvailable(this.artifacts) ? 3 : this.artifacts.build ? 2 : 1, identity, salt: toHex(crypto.getRandomValues(new Uint8Array(32))), deployer: getAddress(deployer), addresses, code, completed: [] };
   }
   async unchanged(s: MainnetSetupState) {
     await this.validate();
@@ -160,14 +178,18 @@ export class MainnetSetup {
     return sender;
   }
   private tx(s: MainnetSetupState, review: Review) {
+    check(s.version !== 3 || pairedSetupAvailable(this.artifacts), "Restore this paired setup’s original contract release");
     const chain = review.chain, suffix = chain === "l1" ? "L1" : "L2", a = s.addresses, safe = a[`safe${suffix}`]!, module = a[`module${suffix}`]!;
-    const delegate = chain === "l1" ? a.bridgeExecutorL1! : a.policy!, token = chain === "l1" ? network.contracts.usdcProxy.address : network.contracts.wrappedUSDC.address;
+    const delegate = chain === "l1" ? (s.version === 3 ? a.policyL1! : a.bridgeExecutorL1!) : a.policy!, token = chain === "l1" ? network.contracts.usdcProxy.address : network.contracts.wrappedUSDC.address;
     const call = (to: Address, name: string, method: string, args: unknown[]) => ({ to, data: encodeFunctionData({ abi: this.io.abi(name), functionName: method, args }) });
     // Reusing a shared module on an existing Safe must not try to enable it twice.
     // The observed state changes the signed batch hash and is rechecked before submission.
     const calls = [...(review.moduleEnabled ? [] : [call(safe, "Safe", "enableModule", [module])]), call(module, "AllowanceModule", "addDelegate", [delegate]),
       call(module, "AllowanceModule", "setAllowance", [delegate, token, 100_000_000n, 10, 10])];
-    if (chain === "l1") calls.push(call(delegate, "StandardBridgeDelegate", "bindPolicy", [a.alias]));
+    if (s.version === 3) {
+      calls.unshift(call(delegate, "PairedTreasuryPolicy", "connectPeer", [chain === "l1" ? a.policy! : a.policyL1!]));
+      if (chain === "l2") calls.push(call(delegate, "PairedTreasuryPolicy", "activate", []));
+    } else if (chain === "l1") calls.push(call(delegate, "StandardBridgeDelegate", "bindPolicy", [a.alias]));
     return buildSafeTransaction({ chainId: BigInt(network.chains[chain].chainId), safe, to: a[`multiSend${suffix}`]!, operation: 1, nonce: BigInt(review.nonce),
       data: encodeFunctionData({ abi: this.io.abi("MultiSendCallOnly"), functionName: "multiSend", args: [packSafeCalls(calls)] }) });
   }
@@ -219,6 +241,7 @@ export class MainnetSetup {
     await this.wallet(provider, chain, sender); return { pending, request, expiresAt };
   }
   private async batch(s: MainnetSetupState, nonce: Hex) {
+    check(s.version !== 3 || pairedSetupAvailable(this.artifacts), "Restore this paired setup’s original contract release");
     const step = s.completed.length, chain = mainnetSetupSteps[step]!.chain, a = { ...s.addresses };
     const create = step < 2, key = chain === "l1" ? "bootstrapL1" : "bootstrapL2";
     const executor = create ? getContractAddress({ from: s.deployer, nonce: BigInt(nonce) }) : a[key]!;
@@ -238,7 +261,8 @@ export class MainnetSetup {
       data: encodeFunctionData({ abi: this.io.abi(name), functionName: method, args }), returnHash: zeroHash });
     if (step === 0) {
       deploy("moduleL1", "AllowanceModule"); deploy("multiSendL1", "MultiSendCallOnly");
-      deploy("bridgeExecutorL1", "StandardBridgeDelegate", [a.safeL1, a.moduleL1, network.contracts.usdcProxy.address, network.contracts.bridgeL1.address, BigInt(network.rollupId)]);
+      deploy(s.version === 3 ? "policyL1" : "bridgeExecutorL1", s.version === 3 ? "PairedTreasuryPolicy" : "StandardBridgeDelegate",
+        [a.safeL1, a.moduleL1, network.contracts.usdcProxy.address, network.contracts.bridgeL1.address, BigInt(network.rollupId)]);
     } else if (step === 1) {
       call(getAddress(network.manager), "Registry", "getOrCreateCrossChainProxy", [a.safeL1, 0n]);
       deploy("adapter", "L1Owners", [network.manager, a.safeL1]); deploy("multiSendL2", "MultiSendCallOnly");
@@ -253,7 +277,9 @@ export class MainnetSetup {
       }
     } else if (step === 2) {
       deploy("moduleL2", "AllowanceModule");
-      deploy("policy", "StandardBridgeTreasuryPolicy", [a.safeL1, a.safeL2, network.manager, a.moduleL1, a.moduleL2,
+      if (s.version === 3) deploy("policy", "PairedTreasuryPolicy", [a.safeL2, a.moduleL2,
+        network.contracts.wrappedUSDC.address, network.contracts.bridgeL2.address, BigInt(network.rollupId)]);
+      else deploy("policy", "StandardBridgeTreasuryPolicy", [a.safeL1, a.safeL2, network.manager, a.moduleL1, a.moduleL2,
         network.contracts.usdcProxy.address, network.contracts.bridgeL2.address, a.bridgeExecutorL1]);
     } else {
       for (const [key, original] of [["adapterAlias", a.adapter!], ["safeL2Alias", a.safeL2!], ["alias", a.policy!]]) {
@@ -310,6 +336,14 @@ export class MainnetSetup {
   async manifest(s: MainnetSetupState) {
     check(s.completed.length === 6 && !s.pending, "Complete setup before opening the treasury"); await this.unchanged(s);
     const a = s.addresses, code = [...s.code];
+    let pair: { version: 1; policyL1: Address; peerProxyL2: Address } | undefined;
+    if (s.version === 3) {
+      const peerProxyL2 = await this.io.read<Address>("l2", a.policy!, "PairedTreasuryPolicy", "peer");
+      const bytes = await this.io.rpc<Hex>("l2", "eth_getCode", [peerProxyL2, "latest"]);
+      check(bytes !== "0x", "Peer connection is not deployed");
+      code.push({ chain: "l2", address: peerProxyL2, hash: keccak256(bytes) });
+      pair = { version: 1, policyL1: a.policyL1!, peerProxyL2 };
+    }
     for (const b of Object.values(network.contracts)) code.push({ chain: b.chain as Chain, address: getAddress(b.address), hash: b.hash as Hex });
     for (const p of network.protocol) for (const [address, hash] of [[p.proxy, p.proxyHash], [p.implementation, p.implementationHash]]) code.push({ chain: p.chain as Chain, address: getAddress(address!), hash: hash as Hex });
     const c = parseTreasuryConfig({ version: 1, environment: "ethereum-mainnet", instance: keccak256(toHex(`${s.salt}:${a.safeL1}:${a.safeL2}`)),
@@ -320,10 +354,11 @@ export class MainnetSetup {
       safeAppUrl: `https://app.safe.global/home?safe=eth:${a.safeL1}`, code: [...new Map(code.map(b => [`${b.chain}:${b.address.toLowerCase()}`, b])).values()],
       protocol: network.protocol.map(p => ({ chain: p.chain, proxy: p.proxy, implementation: p.implementation })),
       mainnet: { rollupId: network.rollupId, usdcImplementation: network.contracts.usdcImplementation.address, bridgeImplementations: { l1: { kind: "immutable" }, l2: { kind: "immutable" } } },
-      payments: { bridgeKind: "standard", policy: a.policy, alias: a.alias, safeL2Alias: a.safeL2Alias, bridgeExecutorL1: a.bridgeExecutorL1,
+      payments: { bridgeKind: "standard", policy: a.policy, alias: a.alias, safeL2Alias: a.safeL2Alias,
+        ...(pair ? { pair } : { bridgeExecutorL1: a.bridgeExecutorL1 }),
         moduleL1: a.moduleL1, moduleL2: a.moduleL2, tokenL1: network.contracts.usdcProxy.address, tokenL2: network.contracts.wrappedUSDC.address,
         bridgeL1: network.contracts.bridgeL1.address, bridgeL2: network.contracts.bridgeL2.address, recipient: s.deployer,
-        version: this.artifacts.contracts.StandardBridgeTreasuryPolicy!.abi.some(item => item.type === "function" && item.name === "paySplit" && item.inputs.length === 5) ? 2 : 1, decimals: 6, period: 600, globalLimit: "150000000", assetLabel: "USDC" } });
+        version: pair ? 2 : (this.artifacts.contracts.StandardBridgeTreasuryPolicy!.abi.some(item => item.type === "function" && item.name === "paySplit" && item.inputs.length === 5) ? 2 : 1), decimals: 6, period: 600, globalLimit: "150000000", assetLabel: "USDC" } });
     await new TreasuryClient(c).validate(); return c;
   }
 }
