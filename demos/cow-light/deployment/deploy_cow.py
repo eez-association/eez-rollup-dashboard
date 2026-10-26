@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
-"""Restart-safe deployment of the generic GPv2 stack on EEZ mainnet L2."""
-import json, os
+"""Deploy the GPv2 stack on the selected EEZ L2 network."""
+import json, os, sys
 from pathlib import Path
 from eth_account import Account
 from web3 import Web3
 
-RPC = os.getenv("L2_RPC", "https://mainnet.eez.dev/rpc/l2")
-CHAIN_ID = int(os.getenv("L2_CHAIN_ID", "696990"))
 BASE = Path(__file__).resolve().parents[1]
-OUT = BASE / "runtime" / "cow-deployment.json"
-ART = Path(os.environ.get("COWSWAP_ARTIFACTS", "contracts/artifacts"))
+sys.path.insert(0, str(BASE))
+from network_config import load_config
+CFG = load_config()
+RPC = CFG['L2_RPC']; CHAIN_ID = CFG['L2_CHAIN_ID']
+OUT = CFG['COW_MANIFEST']; ART = CFG['COWSWAP_ARTIFACTS']
 
 def artifact(name):
     d = json.loads((ART / name).read_text())
@@ -48,6 +49,9 @@ def deploy(w3, acct, abi, bytecode, *args):
 
 def main():
     w3 = Web3(Web3.HTTPProvider(RPC, request_kwargs={"timeout": 60}))
+    CFG.check_chains(l2=w3)
+    if OUT.exists():
+        raise RuntimeError(f'GPv2 manifest already exists: {OUT}; use that deployment or a new manifest path')
     acct = Account.from_key(key())
     if not w3.is_connected() or w3.eth.chain_id != CHAIN_ID:
         raise RuntimeError(f"unexpected chain: {w3.eth.chain_id}")
@@ -58,7 +62,7 @@ def main():
     send(w3, acct, authc.functions.initializeManager(acct.address).build_transaction({"from": acct.address}))
     send(w3, acct, authc.functions.addSolver(acct.address).build_transaction({"from": acct.address}))
     settlement, sr = deploy(w3, acct, set_abi, set_bin, auth, "0x0000000000000000000000000000000000000000")
-    out = {"chainId": CHAIN_ID, "rpc": RPC, "deployer": acct.address,
+    out = {"network": CFG['NETWORK'], "l1ChainId": CFG['L1_CHAIN_ID'], "chainId": CHAIN_ID, "rpc": RPC, "deployer": acct.address,
            "authenticator": auth, "settlement": settlement,
            "vaultRelayer": w3.eth.contract(settlement, abi=set_abi).functions.vaultRelayer().call(),
            "deploymentTxs": {"authenticator": ar.transactionHash.hex(), "settlement": sr.transactionHash.hex()}}

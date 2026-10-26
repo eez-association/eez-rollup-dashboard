@@ -7,7 +7,7 @@ standard GPv2 settlement through the L2 composer. Settlement pre-interactions
 perform the complete canonical L2->L1->L2 route before GPv2 pays the wrapper
 token.
 """
-import json, os, time, fcntl, requests
+import json, os, sys, time, fcntl, requests
 from pathlib import Path
 from web3 import Web3
 from eth_account import Account
@@ -15,10 +15,13 @@ from eth_abi import encode
 from eth_utils import to_checksum_address, keccak
 
 BASE=Path(__file__).resolve().parents[1]
-L1=Web3(Web3.HTTPProvider('https://mainnet.eez.dev/rpc/l1',request_kwargs={'timeout':60}))
-L2=Web3(Web3.HTTPProvider('https://mainnet.eez.dev/rpc/l2',request_kwargs={'timeout':60}))
-L2_FRONT='https://mainnet.eez.dev/composer/l2'
-L1_CHAIN,L2_CHAIN=1,696990
+sys.path.insert(0, str(BASE))
+from network_config import load_config
+CFG=load_config()
+L1=Web3(Web3.HTTPProvider(CFG['L1_RPC'],request_kwargs={'timeout':60}))
+L2=Web3(Web3.HTTPProvider(CFG['L2_RPC'],request_kwargs={'timeout':60}))
+L2_FRONT=CFG['L2_FRONT']
+L1_CHAIN,L2_CHAIN=CFG['L1_CHAIN_ID'],CFG['L2_CHAIN_ID']
 KEY=os.getenv('SOLVER_PRIVATE_KEY')
 if not KEY and os.getenv('SOLVER_KEY_FILE'):
     for line in Path(os.environ['SOLVER_KEY_FILE']).read_text().splitlines():
@@ -26,15 +29,14 @@ if not KEY and os.getenv('SOLVER_KEY_FILE'):
             KEY=line.split('=',1)[1].strip()
 if not KEY: raise RuntimeError('protected solver key missing')
 ACCT=Account.from_key(KEY)
-BRIDGE_L2=to_checksum_address('0xBEF1406984A3e7b2889376d29D6BbD9f6ed9695a')
-MANAGER=to_checksum_address('0x4B2760F84B83d6b3829E30A7573B0172B6d6402c')
-WETH_L1=to_checksum_address('0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2')
-WETH_L2=to_checksum_address('0x96cf64E7a17D4215854fFeF17Ba531B8DD91290D')
-SETTLEMENT=to_checksum_address('0x2ee5672Aef87B35fe544C41BdfBB7C8D0F7c3478')
-RELAYER=to_checksum_address('0xa170D143d25AE000285Aa9a40E8C852aCa5F091A')
-QUEUE=Path(os.getenv('ORDER_QUEUE',BASE/'runtime'/'ui-orders.jsonl'))
+BRIDGE_L2=to_checksum_address(CFG['BRIDGE_L2'])
+WETH_L1=to_checksum_address(CFG['WETH_L1'])
+WETH_L2=to_checksum_address(CFG['WETH_L2'])
+SETTLEMENT=to_checksum_address(CFG['SETTLEMENT_L2'])
+SETTLEMENT_VIEW_ABI=[{'type':'function','name':'vaultRelayer','stateMutability':'view','inputs':[],'outputs':[{'type':'address'}]}]
+QUEUE=CFG['ORDER_QUEUE']
 QUEUE_LOCK=QUEUE.with_suffix(QUEUE.suffix+'.lock')
-WORKER_LOG=Path(os.getenv('SOLVER_LOG', BASE/'runtime'/'solver-worker.log'))
+WORKER_LOG=CFG['SOLVER_LOG']
 
 def debug(event, **fields):
     rec={'ts':int(time.time()),'event':event,**fields}
@@ -46,7 +48,7 @@ def debug(event, **fields):
 ERC20=[{'type':'function','name':'balanceOf','stateMutability':'view','inputs':[{'type':'address'}],'outputs':[{'type':'uint256'}]}, {'type':'function','name':'approve','stateMutability':'nonpayable','inputs':[{'type':'address'},{'type':'uint256'}],'outputs':[{'type':'bool'}]}, {'type':'function','name':'allowance','stateMutability':'view','inputs':[{'type':'address'},{'type':'address'}],'outputs':[{'type':'uint256'}]}, {'type':'function','name':'transfer','stateMutability':'nonpayable','inputs':[{'type':'address'},{'type':'uint256'}],'outputs':[{'type':'bool'}]}]
 BRIDGE_ABI=[{'type':'function','name':'bridgeTokens','stateMutability':'nonpayable','inputs':[{'type':'address'},{'type':'uint256'},{'type':'uint64'},{'type':'address'}],'outputs':[]}, {'type':'function','name':'getWrappedToken','stateMutability':'view','inputs':[{'type':'address'},{'type':'uint64'}],'outputs':[{'type':'address'}]}]
 PAIR_ABI=[{'type':'function','name':'token0','stateMutability':'view','inputs':[],'outputs':[{'type':'address'}]}, {'type':'function','name':'getReserves','stateMutability':'view','inputs':[],'outputs':[{'type':'uint112'},{'type':'uint112'},{'type':'uint32'}]}, {'type':'function','name':'swap','stateMutability':'nonpayable','inputs':[{'type':'uint256'},{'type':'uint256'},{'type':'address'},{'type':'bytes'}],'outputs':[]}]
-CATALOG=Path(os.getenv('TOKEN_CATALOG',BASE/'config'/'token-catalog.json'))
+CATALOG=CFG['TOKEN_CATALOG']
 
 def send(w,a,tx,chain,endpoint=None,timeout=1200):
     tx=dict(tx); tx['from']=a.address
@@ -80,7 +82,7 @@ def send(w,a,tx,chain,endpoint=None,timeout=1200):
         }
         debug('tx_submit_attempt', attempt=attempt, nonce=tx['nonce'], endpoint=endpoint, to=tx.get('to'), gas=tx.get('gas'), transaction=tx_view)
         try:
-            h=b.eth.send_raw_transaction(raw); hx=h.hex(); Path('/tmp/cow-last-hash').write_text(hx); debug('tx_submitted', hash=hx, nonce=tx['nonce'], transaction=tx_view); break
+            h=b.eth.send_raw_transaction(raw); hx=h.hex(); debug('tx_submitted', hash=hx, nonce=tx['nonce'], transaction=tx_view); break
         except Exception as exc:
             msg=str(exc)
             debug('tx_submit_error', attempt=attempt, nonce=tx['nonce'], error=msg)
@@ -128,15 +130,13 @@ def queued():
     return next((r for r in reversed(rows) if r.get('status')=='queued'),None)
 
 def token_route(token):
-    data=json.loads(CATALOG.read_text())
-    t=next((x for x in data.get('tokens',[]) if x.get('address','').lower()==token.lower()),None)
+    t=next((x for x in CFG.catalog() if x.get('address','').lower()==token.lower()),None)
     if not t: raise RuntimeError(f'no configured L1 route for token {token}')
     return to_checksum_address(t['address']),to_checksum_address(t['pair']),t.get('symbol',token[:10])
 
 def order_route(item):
     symbol=item.get('quote',{}).get('tokenSymbol','').lower()
-    data=json.loads(CATALOG.read_text())
-    t=next((x for x in data.get('tokens',[]) if x.get('symbol','').lower()==symbol),None)
+    t=next((x for x in CFG.catalog() if x.get('symbol','').lower()==symbol),None)
     if not t: raise RuntimeError(f'no configured L1 route for token symbol {symbol or "<unknown>"}')
     return token_route(t['address'])
 
@@ -160,6 +160,8 @@ def record_failure(item, reason):
       fcntl.flock(lf, fcntl.LOCK_UN)
 
 def main():
+    CFG.check_chains(l1=L1,l2=L2)
+    CFG.catalog()
     item=queued()
     if not item: print('no queued catalog-token order'); return
     order=item['order']; amount=int(order['sellAmount']); minimum=int(order['buyAmount'])
@@ -170,7 +172,8 @@ def main():
         print('failed:', reason, flush=True)
         return
     c2=L2.eth.contract(WETH_L2,abi=ERC20); user=to_checksum_address(order['receiver']); user_bal=c2.functions.balanceOf(user).call()
-    settlement_allowance=c2.functions.allowance(user, RELAYER).call()
+    relayer=L2.eth.contract(SETTLEMENT,abi=SETTLEMENT_VIEW_ABI).functions.vaultRelayer().call()
+    settlement_allowance=c2.functions.allowance(user, relayer).call()
     # A route is valid only when the user's WETH starts the canonical
     # L2->L1 leg and the resulting inbound token is observed.
     if user_bal<amount or settlement_allowance<amount:
@@ -189,15 +192,18 @@ def main():
     # transfer it to the universal route. The first bridge funds the L1 swap
     # and creates the deterministic wrapper when needed. The reusable L1 helper
     # is deployed through the canonical deterministic factory.
-    universal_state=Path(os.getenv('ROUTE_MANIFEST',BASE/'runtime'/'route-deployment.json'))
+    universal_state=CFG['ROUTE_MANIFEST']
     if universal_state.exists():
-        us=json.loads(universal_state.read_text())
+        us=CFG.read_manifest('ROUTE_MANIFEST')
         route_abi=json.loads((BASE/'contracts'/'out'/'L2UniversalV2Route.sol'/'L2UniversalV2Route.json').read_text())['abi']
         route=L2.eth.contract(us['routeL2'],abi=route_abi)
+        for name, expected in (('bridge',BRIDGE_L2),('wrappedWeth',WETH_L2),('settlement',SETTLEMENT)):
+            if getattr(route.functions,name)().call().lower()!=expected.lower():
+                raise RuntimeError(f'Route {name} does not match selected configuration')
         if route.functions.l1Helper().call().lower()!=us['l1Helper'].lower():
             reason='universal L2 route is not configured with the factory-deployed L1 helper'
             record_failure(item,reason); print('failed:',reason,flush=True); return
-        sab=json.loads(Path(os.environ['GPV2_ARTIFACT']).read_text())['abi']
+        sab=json.loads(CFG['GPV2_ARTIFACT'].read_text())['abi']
         st=L2.eth.contract(SETTLEMENT,abi=sab)
         trade=(0,1,order['receiver'],amount,minimum,int(order['validTo']),bytes.fromhex(order['appData'][2:]),int(order['feeAmount']),0,amount,bytes.fromhex(item['signature'][2:]))
         transfer='0x'+(keccak(text='transfer(address,uint256)')[:4]+encode(['address','uint256'],[route.address,amount])).hex()

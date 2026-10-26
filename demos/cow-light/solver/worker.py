@@ -5,17 +5,20 @@ The UI deliberately only authenticates and queues signed orders.  This small
 service is the missing live boundary: it serializes route execution through
 the generic catalog-token adapter and keeps the process alive across failures.
 """
-import json, os, subprocess, threading, time
+import json, os, sys, subprocess, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 BASE = Path(__file__).resolve().parents[1]
-QUEUE = Path(os.getenv("ORDER_QUEUE", BASE / "runtime" / "ui-orders.jsonl"))
+sys.path.insert(0, str(BASE))
+from network_config import load_config
+CFG = load_config()
+QUEUE = CFG['ORDER_QUEUE']
 SCRIPT = Path(os.getenv("SETTLE_SCRIPT", Path(__file__).with_name("settle_order.py")))
 LOCK = threading.Lock()
 INTERVAL = float(os.getenv("POLL_SECONDS", "5"))
 last = {"status": "starting"}
-LOG = Path(os.getenv("SOLVER_LOG", BASE / "runtime" / "solver-worker.log"))
+LOG = CFG['SOLVER_LOG']
 
 def log(event, **fields):
     rec = {"ts": int(time.time()), "event": event, **fields}
@@ -44,7 +47,7 @@ def run_once():
         if not queued(): return
         log("order_pickup", orderId=item.get("id"), validTo=item.get("order", {}).get("validTo"), buyToken=item.get("order", {}).get("buyToken"))
         try:
-            p = subprocess.run(["/usr/bin/python3", str(SCRIPT)], cwd=str(BASE),
+            p = subprocess.run([sys.executable, str(SCRIPT)], cwd=str(BASE),
                                text=True, capture_output=True, timeout=1100)
             last = {"status": "processed", "exitCode": p.returncode,
                     "stdout": p.stdout[-4000:], "stderr": p.stderr[-2000:],

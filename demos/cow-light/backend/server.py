@@ -5,7 +5,7 @@ Quotes are read-only L1 Uniswap V2 calls. Orders are EIP-712 verified and
 persisted to a queue. A live solver adapter must be explicitly configured;
 this process never signs or posts a settlement by itself.
 """
-import json, os, threading, time, uuid, requests, fcntl
+import json, os, sys, threading, time, uuid, requests, fcntl
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -15,16 +15,17 @@ from eth_account.messages import encode_typed_data
 from eth_abi import encode as abi_encode
 from eth_utils import keccak, to_checksum_address
 
-ROOT=Path(__file__).resolve().parents[1]; UI=ROOT/"ui"; CATALOG=Path(os.getenv("TOKEN_CATALOG",ROOT/"config"/"token-catalog.json"))
-QUEUE=Path(os.getenv("ORDER_QUEUE",ROOT/"runtime"/"ui-orders.jsonl")); QUEUE_LOCK=QUEUE.with_suffix(QUEUE.suffix+'.lock')
-SOLVER_LOG=Path(os.getenv("SOLVER_LOG",ROOT/"runtime"/"solver-worker.log"))
-L1_RPC=os.getenv("L1_RPC","https://mainnet.eez.dev/rpc/l1"); L2_RPC=os.getenv("L2_RPC","https://mainnet.eez.dev/rpc/l2")
-L2_FRONT=os.getenv("L2_FRONT","https://mainnet.eez.dev/composer/l2"); L1_CHAIN=int(os.getenv("L1_CHAIN_ID","1")); L2_CHAIN=int(os.getenv("L2_CHAIN_ID","696990"))
-WETH=os.getenv("WETH_L1","0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"); WETH_L2=os.getenv("WETH_L2","0x96cf64E7a17D4215854fFeF17Ba531B8DD91290D")
-SETTLEMENT=os.getenv("SETTLEMENT_L2","0x2ee5672Aef87B35fe544C41BdfBB7C8D0F7c3478"); BRIDGE_L2=os.getenv("BRIDGE_L2","0xBEF1406984A3e7b2889376d29D6BbD9f6ed9695a")
-BRIDGE_L1=os.getenv("BRIDGE_L1","0x1D6A3bFe0A302Bb2df5FDfDB8eAF5b78B91A5fBa")
-NATIVE_WETH_L2=os.getenv("NATIVE_WETH_L2","0xad3B175052E2894B5A1e2e45F3f069aDF824DbFc")
-MANAGER=os.getenv("EEZ_MANAGER_L2","0x4B2760F84B83d6b3829E30a7573b0172b6D6402c")
+ROOT=Path(__file__).resolve().parents[1]; UI=ROOT/"ui"
+sys.path.insert(0, str(ROOT))
+from network_config import load_config
+CFG=load_config()
+CATALOG=CFG['TOKEN_CATALOG']; QUEUE=CFG['ORDER_QUEUE']; QUEUE_LOCK=QUEUE.with_suffix(QUEUE.suffix+'.lock')
+SOLVER_LOG=CFG['SOLVER_LOG']
+L1_RPC=CFG['L1_RPC']; L2_RPC=CFG['L2_RPC']; L2_FRONT=CFG['L2_FRONT']
+L1_CHAIN=CFG['L1_CHAIN_ID']; L2_CHAIN=CFG['L2_CHAIN_ID']
+WETH=CFG['WETH_L1']; WETH_L2=CFG['WETH_L2']
+SETTLEMENT=CFG['SETTLEMENT_L2']; BRIDGE_L2=CFG['BRIDGE_L2']
+NATIVE_WETH_L2=CFG.get('NATIVE_WETH_L2')
 PAIR_ABI=[{"type":"function","name":"getReserves","stateMutability":"view","inputs":[],"outputs":[{"type":"uint112"},{"type":"uint112"},{"type":"uint32"}]},{"type":"function","name":"token0","stateMutability":"view","inputs":[],"outputs":[{"type":"address"}]}]
 BRIDGE_ABI=[{"type":"function","name":"getWrappedToken","stateMutability":"view","inputs":[{"type":"address"},{"type":"uint64"}],"outputs":[{"type":"address"}]}]
 TOKEN_META_ABI=[
@@ -34,14 +35,12 @@ TOKEN_META_ABI=[
 ]
 MANAGER_ABI=[{"type":"function","name":"computeCrossChainProxyAddress","stateMutability":"view","inputs":[{"type":"address"},{"type":"uint64"}],"outputs":[{"type":"address"}]}]
 SETTLEMENT_VIEW_ABI=[{"type":"function","name":"vaultRelayer","stateMutability":"view","inputs":[],"outputs":[{"type":"address"}]}]
-WRAPPER_REFERENCE_TX=os.getenv("WRAPPER_REFERENCE_TX","0xcd44e55864b785bea748872520cc045dd4ba460166de292add8ddba49aa3e5be")
-WRAPPER_PREFIX_LEN=int(os.getenv("WRAPPER_PREFIX_LEN","5587"))
 l1=Web3(Web3.HTTPProvider(L1_RPC,request_kwargs={"timeout":30})); l2=Web3(Web3.HTTPProvider(L2_RPC,request_kwargs={"timeout":30})); lock=threading.Lock()
 _wrapper_prefix=None
 def vault_relayer():
     return l2.eth.contract(Web3.to_checksum_address(SETTLEMENT),abi=SETTLEMENT_VIEW_ABI).functions.vaultRelayer().call()
 
-def catalog(): return json.loads(CATALOG.read_text()).get("tokens",[]) if CATALOG.exists() else []
+def catalog(): return CFG.catalog()
 def quote(t,amount):
     p=l1.eth.contract(Web3.to_checksum_address(t["pair"]),abi=PAIR_ABI); r0,r1,_=p.functions.getReserves().call(); t0=p.functions.token0().call()
     rin,rout=(r0,r1) if t0.lower()==WETH.lower() else (r1,r0)
@@ -60,6 +59,7 @@ def _live_wrapper_prefix():
     """
     global _wrapper_prefix
     if _wrapper_prefix is not None: return _wrapper_prefix
+    WRAPPER_REFERENCE_TX=CFG['WRAPPER_REFERENCE_TX']; WRAPPER_PREFIX_LEN=CFG['WRAPPER_PREFIX_LEN']
     r=requests.post(L2_RPC,json={"jsonrpc":"2.0","id":1,"method":"debug_traceTransaction",
         "params":[WRAPPER_REFERENCE_TX,{"tracer":"callTracer"}]},timeout=45)
     payload=r.json()
@@ -257,7 +257,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if p.path in ("/","/index.html"):
                 b=(UI/"index.html").read_bytes();self.send_response(200);self.send_header("content-type","text/html; charset=utf-8");self.send_header("content-length",str(len(b)));self.end_headers();self.wfile.write(b);return
-            if p.path=="/api/config":return self.send_json({"l1ChainId":L1_CHAIN,"l2ChainId":L2_CHAIN,"l1Rpc":L1_RPC,"l2Front":L2_FRONT,"settlement":SETTLEMENT,"vaultRelayer":vault_relayer(),"wethL1":WETH,"wethL2":WETH_L2,"nativeWethL2":NATIVE_WETH_L2,"bridgeL2":BRIDGE_L2})
+            if p.path=="/api/config":return self.send_json({"network":CFG['NETWORK'],"l1NativeSymbol":CFG['L1_NATIVE_SYMBOL'],"l2NativeSymbol":CFG['L2_NATIVE_SYMBOL'],"l1Explorer":CFG.get('L1_EXPLORER'),"l2Explorer":CFG.get('L2_EXPLORER'),"l1ChainId":L1_CHAIN,"l2ChainId":L2_CHAIN,"l1Rpc":L1_RPC,"l2Front":L2_FRONT,"settlement":SETTLEMENT,"vaultRelayer":vault_relayer(),"wethL1":WETH,"wethL2":WETH_L2,"nativeWethL2":NATIVE_WETH_L2,"bridgeL2":BRIDGE_L2})
             if p.path=="/api/health":
                 # Keep this endpoint read-only and bounded: it is used by the UI
                 # as an operator signal, not as a transaction submission path.
@@ -315,5 +315,7 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as e:return self.send_json({"error":str(e)},400)
 
 if __name__=="__main__":
+    CFG.check_chains(l1=l1,l2=l2)
+    catalog()
     port=int(os.getenv("PORT","8787"));print(f"EEZ CoW Light UI: http://127.0.0.1:{port}",flush=True)
     ThreadingHTTPServer((os.getenv("HOST","127.0.0.1"),port),Handler).serve_forever()

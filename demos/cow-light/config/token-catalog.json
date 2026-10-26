@@ -1,4 +1,5 @@
 {
+  "chainId": 1,
   "generatedAt": 1792221284,
   "rpc": "https://mainnet.eez.dev/rpc/l1",
   "factory": "0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f",

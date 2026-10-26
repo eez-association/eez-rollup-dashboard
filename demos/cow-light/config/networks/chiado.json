@@ -1,0 +1,23 @@
+{
+  "L1_CHAIN_ID": 10200,
+  "L2_CHAIN_ID": 906969,
+  "L2_ROLLUP_ID": 1,
+  "L1_NATIVE_SYMBOL": "XDAI",
+  "L2_NATIVE_SYMBOL": "XDAI",
+  "L1_RPC": null,
+  "L2_RPC": null,
+  "L2_FRONT": null,
+  "L1_EXPLORER": "https://gnosis-chiado.blockscout.com",
+  "L2_EXPLORER": null,
+  "WETH_L1": null,
+  "WETH_L2": null,
+  "SETTLEMENT_L2": null,
+  "BRIDGE_L1": null,
+  "BRIDGE_L2": null,
+  "EEZ_MANAGER_L2": null,
+  "NATIVE_WETH_L2": null,
+  "DETERMINISTIC_FACTORY_L1": null,
+  "TOKEN_CATALOG": "config/token-catalog.chiado.json",
+  "WRAPPER_REFERENCE_TX": null,
+  "WRAPPER_PREFIX_LEN": null
+}
