@@ -13,6 +13,11 @@ export interface TraceCrossing {
   sourceAddress?: string; targetAddress?: string; remoteTx?: string | null;
   evidence: string[]; resultKind?: string | null;
 }
+/** Experimental: an ERC20 Transfer event seen in both the trace and the committed receipt. */
+export interface TraceTokenTransfer {
+  kind: "transfer" | "mint" | "burn"; token: string; from: string; to: string;
+  amount: string; symbol: string | null; decimals: number | null; eventId: string; evidence: string;
+}
 export interface TraceNode {
   id: number; kind: "call" | "ghost"; frameId: string | null; chain: TraceChain;
   role: string; protocol: boolean; inFlow?: boolean; callType: string; contract: string;
@@ -27,6 +32,7 @@ export interface TraceNode {
   remoteChain?: TraceChain; remoteAddress?: string;
   abiSource?: string | null; abiProvider?: string | null;
   impl?: { contract: string; address: string; frameId: string };
+  tokenTransfers?: TraceTokenTransfer[];
 }
 export interface TraceTransaction {
   chain: TraceChain; hash: string; block: number | null; index: number | null;

@@ -1,9 +1,10 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useDecodedTrace } from "../../hooks/useDecodedTrace";
 import { config } from "../../config";
 import { ExplorerLink } from "../ExplorerLink";
 import { TraceDiagram, textValue } from "./TraceDiagram";
-import type { TraceChain, TraceGas, TraceNode, TraceResult, TraceSource } from "../../../trace-decoder/service/types";
+import { TokenDetails } from "./TokenTransfers";
+import type { TraceChain, TraceGas, TraceModel, TraceNode, TraceResult, TraceSource } from "../../../trace-decoder/service/types";
 import styles from "./TraceDetailView.module.css";
 import visualizerStyles from "../visualizer/ExecutionDebugger.module.css";
 
@@ -13,7 +14,7 @@ function download(result: TraceResult) {
   link.href = url; link.download = result.model.txHash + ".trace.json"; link.click();
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
-function CallInspector({ node }: { node: TraceNode | undefined }) {
+function CallInspector({ node, model, tokens }: { node: TraceNode | undefined; model: TraceModel; tokens: boolean }) {
   if (!node) return <aside className={styles.inspector}><h2>Call details</h2><p className={styles.muted}>Select a call to inspect its arguments, return value, and cross-chain evidence.</p></aside>;
   const chain = node.chain === "L1" ? "l1" : "l2", crossing = node.crossing || node.outgoing;
   return <aside className={styles.inspector} aria-label="Selected call details">
@@ -36,6 +37,7 @@ function CallInspector({ node }: { node: TraceNode | undefined }) {
     </div>) : <p className={styles.muted}>No decoded arguments.</p>}
     <h3>Return value</h3><p className={node.ret.status === "revert" ? styles.failure : styles.muted}>{node.ret.reason || node.ret.status}</p>
     {node.ret.items?.map((item, index) => <pre key={index}>{item.name ? item.name + ": " : ""}{textValue(item.value)}</pre>)}
+    {tokens && <TokenDetails model={model} chain={node.chain} transfers={node.tokenTransfers ?? []} />}
     {crossing && <><h3>Cross-chain execution</h3><p>{crossing.from} → {crossing.to} · {crossing.status}</p>
       {crossing.remoteTx && <ExplorerLink value={crossing.remoteTx} type="tx" chain={crossing.to === "L1" ? "l1" : "l2"} />}
       {crossing.evidence.length > 0 && <ul>{crossing.evidence.map((evidence, index) => <li key={index}>{evidence}</li>)}</ul>}
@@ -80,10 +82,35 @@ export function TraceDetailView({ hash, source, ready, onBack }: {
   const trace = useDecodedTrace(hash, source, ready);
   const [query, setQuery] = useState(hash);
   const [chain, setChain] = useState<TraceSource>(source);
-  const [view, setView] = useState<"flow" | "sequence" | "raw">("flow");
+  const [view, setView] = useState<"map" | "flow" | "sequence" | "raw">("map");
   const [transaction, setTransaction] = useState("");
   const [selected, setSelected] = useState<number | null>(null);
   const [recorded, setRecorded] = useState(false);
+  // Experimental token notes stay off until the viewer opts in.
+  const [tokens, setTokens] = useState(false);
+  const viewer = useRef<HTMLElement>(null);
+  const fullscreenButton = useRef<HTMLButtonElement>(null);
+  const [fullscreen, setFullscreen] = useState(false);
+  const [fullscreenError, setFullscreenError] = useState("");
+  const [showDetails, setShowDetails] = useState(true);
+  useEffect(() => {
+    const changed = () => {
+      const active = document.fullscreenElement === viewer.current;
+      setFullscreen(active);
+      if (!active) fullscreenButton.current?.focus({ preventScroll: true });
+    };
+    document.addEventListener("fullscreenchange", changed);
+    return () => document.removeEventListener("fullscreenchange", changed);
+  }, []);
+  const toggleFullscreen = async () => {
+    setFullscreenError("");
+    try {
+      if (document.fullscreenElement === viewer.current) await document.exitFullscreen();
+      else await viewer.current?.requestFullscreen();
+    } catch {
+      setFullscreenError("Fullscreen is unavailable in this browser. Hide call details to give the trace more room.");
+    }
+  };
   const linkedModel = trace.result?.model;
   const model = recorded && linkedModel?.recordedView ? linkedModel.recordedView : linkedModel;
   const gas = model?.gas ?? linkedModel?.gas;
@@ -144,13 +171,31 @@ export function TraceDetailView({ hash, source, ready, onBack }: {
           <button className={styles.textButton} onClick={() => { setTransaction(tx.chain + ":" + tx.hash); setSelected(null); }}><strong>{tx.label}</strong><span>{tx.requested ? "Requested · " : ""}{tx.status}{!tx.traced ? " · trace unavailable" : ""}</span></button>
           <ExplorerLink value={tx.hash} type="tx" chain={tx.chain === "L1" ? "l1" : "l2"} />
         </div>)}</div>
-        {transaction && <button className="btn btn-sm btn-outline" onClick={() => setTransaction("")}>Show connected flow</button>}
       </section>
       {model.settlements.length > 0 && <section className={styles.settlements} aria-label="Observed settlement">
         <h2>L1 posting observed</h2><p className={styles.muted}>This is a snapshot of the verified posting. Open Blocks & settlement for current safety and finality.</p>
         {model.settlements.map(item => <div key={item.id}><ExplorerLink value={item.l1Tx} type="tx" chain="l1" />
           <span>L2 blocks {item.firstL2Block}–{item.lastL2Block}</span></div>)}
       </section>}
+      <section ref={viewer} className={styles.viewer} aria-label="Trace viewer">
+      <div className={styles.viewerToolbar}>
+        <nav className={styles.tabs} aria-label="Trace views">{(["map", "flow", "sequence", "raw"] as const).map(item =>
+          <button key={item} className={"btn btn-sm " + (view === item ? "btn-solid" : "btn-outline")} aria-pressed={view === item} onClick={() => setView(item)}>
+            {item === "map" ? "Call map" : item === "flow" ? "Lanes" : item === "sequence" ? "Sequence" : "Decoded data"}</button>)}</nav>
+        <div className={styles.actions}>
+          {view !== "raw" && <button className="btn btn-sm btn-outline" aria-expanded={showDetails}
+            onClick={() => setShowDetails(value => !value)}>{showDetails ? "Hide call details" : "Show call details"}</button>}
+          <button ref={fullscreenButton} className="btn btn-sm btn-outline" aria-pressed={fullscreen}
+            onClick={toggleFullscreen} title={fullscreen ? "Return to the dashboard (Esc)" : "Use the whole screen for the trace"}>
+            {fullscreen ? "Exit fullscreen" : "Fullscreen"}</button>
+        </div>
+      </div>
+      {transaction && view !== "raw" && <div className={styles.actions} aria-label="Transaction filter">
+        <span className={styles.muted}>Showing calls for {transaction.split(":")[0]} transaction {transaction.split(":")[1]}</span>
+        <button className="btn btn-sm btn-outline" onClick={() => setTransaction("")}>Show connected flow</button>
+      </div>}
+      {fullscreenError && <p className={styles.warning} role="alert">{fullscreenError}</p>}
+      {fullscreen && trace.result.partial && <p className={styles.warning} role="status">Some evidence is missing. This diagram shows the available data.</p>}
       {linkedModel?.recordedView && <nav className={styles.tabs} aria-label="Trace presentation">
         <button className={"btn btn-sm " + (!recorded ? "btn-solid" : "btn-outline")} aria-pressed={!recorded} onClick={() => setRecorded(false)}>Linked flow</button>
         <button className={"btn btn-sm " + (recorded ? "btn-solid" : "btn-outline")} aria-pressed={recorded} onClick={() => setRecorded(true)}>Recorded traces</button>
@@ -159,12 +204,10 @@ export function TraceDetailView({ hash, source, ready, onBack }: {
       {!!model.matchingNotes?.length && <details><summary>Call association notes ({model.matchingNotes.length})</summary>
         <ul>{model.matchingNotes.map((item, index) => <li key={index}><code>{item.code}</code>: {item.message}</li>)}</ul>
       </details>}
-      <nav className={styles.tabs} aria-label="Trace views">{(["flow", "sequence", "raw"] as const).map(item =>
-        <button key={item} className={"btn btn-sm " + (view === item ? "btn-solid" : "btn-outline")} aria-pressed={view === item} onClick={() => setView(item)}>
-          {item === "flow" ? "Call flow" : item === "sequence" ? "Sequence" : "Decoded data"}</button>)}</nav>
       {view === "raw" ? <section className={styles.raw}><h2>Decoded flow model</h2><pre>{JSON.stringify(model, null, 2)}</pre></section>
-        : <div className={styles.workspace}><TraceDiagram key={model.mode || "combined"} model={model} view={view} transaction={transaction} selected={selected} onSelect={setSelected} />
-          <CallInspector node={selected === null ? undefined : model.nodes[selected]} /></div>}
+        : <div className={styles.workspace} data-details={showDetails}><TraceDiagram key={model.mode || "combined"} model={model} view={view} transaction={transaction} selected={selected} onSelect={setSelected} tokens={tokens} onTokens={setTokens} />
+          {showDetails && <CallInspector node={selected === null ? undefined : model.nodes[selected]} model={model} tokens={tokens} />}</div>}
+      </section>
       {gas && <GasSummary gas={gas} />}
     </>}
   </main>;

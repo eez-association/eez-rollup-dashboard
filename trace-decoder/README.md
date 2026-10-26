@@ -10,7 +10,19 @@ read-only Node.js API. The API runs as the internal `trace-decoder` Compose serv
 The CLI and standalone HTML viewer remain available for offline inspection.
 The native dashboard defaults to **Linked flow** and offers **Recorded traces**
 when exact links are verified. Recorded sequence numbers are independent per
-chain. Prepared results without an expected L2 delivery are labeled separately
+chain. The native **Call map** shows branching calls in chain bands and fits its
+width automatically. **Fit width** keeps the overview responsive; **100%** restores
+readable labels with scrolling. **Show local reads** reveals successful local reads
+hidden by default; failed calls, missing execution, cross-chain reads and prepared
+results remain visible. Searching also reveals matching local reads.
+The native call flow connects visible callers to their children, numbers
+calls, and highlights connections for the selected call. Dashed connectors mark
+uncertain or missing execution; recorded traces never connect independent
+transactions. Search and hidden protocol frames can promote descendants to the
+nearest visible ancestor. **Token transfers · experimental** (off by
+default) shows ERC20 Transfer events on call cards only when the same event
+appears in both the trace and the committed receipt; amounts describe events,
+not net balance changes. Prepared results without an expected L2 delivery are labeled separately
 and do not by themselves make the API result partial. Both models use curated
 public diagnostic messages; raw provider errors remain server-side.
 

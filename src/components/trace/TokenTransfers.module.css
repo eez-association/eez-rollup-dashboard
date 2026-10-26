@@ -1,0 +1,20 @@
+/* Experimental token notes: yellow for transfers, green for mints, red for burns. */
+.notes { display: grid; gap: 4px; min-width: 0; margin-top: 2px; }
+.note { display: grid; gap: 1px; min-width: 0; padding: 6px 9px; border: 1px solid var(--yellow-border); border-left: 3px solid var(--yellow); border-radius: 6px; background: var(--yellow-dim); }
+.note[data-kind="mint"], .detail[data-kind="mint"] { border-color: var(--green-border); border-left-color: var(--green); background: var(--green-dim); }
+.note[data-kind="burn"], .detail[data-kind="burn"] { border-color: var(--red-border); border-left-color: var(--red); background: var(--red-dim); }
+.note > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.title { font: 600 10px var(--sans); letter-spacing: .02em; color: var(--text); }
+.amount { font: 700 12px var(--mono); color: var(--text-bright); }
+.route { font: 10px var(--mono); color: var(--text-dim); }
+.more { font-size: 10px; color: var(--text-dim); }
+.chip { flex: none; padding: 0 6px; border-radius: 8px; background: var(--yellow-dim); color: var(--yellow); font: 700 10.5px var(--mono); }
+.chip[data-kind="mint"] { background: var(--green-dim); color: var(--green); }
+.chip[data-kind="burn"] { background: var(--red-dim); color: var(--red); }
+.detail { display: grid; gap: 12px; margin: 8px 0; padding: 14px; border: 1px solid var(--yellow-border); border-left: 4px solid var(--yellow); border-radius: 8px; background: var(--yellow-dim); }
+.detailTitle { font-size: 14px; color: var(--text-bright); }
+.field { display: grid; gap: 3px; min-width: 0; }
+.field small { color: var(--text-dim); }
+.field code { overflow-wrap: anywhere; user-select: text; }
+.detailAmount { font: 700 15px var(--mono); color: var(--text-bright); overflow-wrap: anywhere; }
+.caveat { color: var(--text-dim); font-size: 12px; line-height: 1.6; }
