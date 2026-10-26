@@ -10,6 +10,7 @@ import type { MainnetSetupState, MainnetTarget, SetupNetwork } from "../lib/trea
 import defaultNetwork from "../lib/treasury/mainnet-network.json";
 import styles from "./TreasuryDemo.module.css";
 import { TreasuryPairedHistory } from "./TreasuryPairedHistory";
+import { guardWalletRequests } from "../lib/treasury/walletRequestScope";
 
 const same = (a?: string | null, b?: string | null) => !!a && !!b && a.toLowerCase() === b.toLowerCase();
 
@@ -35,6 +36,8 @@ export function TreasuryMainnetSetup({ wallet, target, onComplete, network = def
   useEffect(() => { heading.current?.focus(); }, []);
   const [verificationError, setVerificationError] = useState(""), [verificationAttempt, setVerificationAttempt] = useState(0);
   const active = useRef(false), done = useRef(onComplete); done.current = onComplete;
+  const generation = useRef(0);
+  useEffect(() => { generation.current++; return () => { generation.current++; }; }, [mainnetSetupKey, target]);
   const persist = (s: MainnetSetupState) => { readMainnetSetup(JSON.stringify(s), network); retainSourceRequests(localStorage, s.sourceRequests); localStorage.setItem(mainnetSetupKey, JSON.stringify(s)); setState(s); };
   useEffect(() => {
     let cancelled = false;
@@ -68,19 +71,22 @@ export function TreasuryMainnetSetup({ wallet, target, onComplete, network = def
     };
     void poll(); return () => { alive = false; clearTimeout(timer); };
   }, [engine, wallet.address, state?.completed.length, steps.length]);
-  const run = async (fn: (s: MainnetSetupState | null) => Promise<void>, background = false) => {
+  const run = async (fn: (s: MainnetSetupState | null, assertActive: () => void) => Promise<void>, background = false) => {
     if (active.current) return; active.current = true;
+    const scope = generation.current;
+    const assertActive = () => { if (generation.current !== scope) throw new Error("The setup screen changed; the unsent wallet request was cancelled."); };
     if (!background) { setBusy(true); setError(""); }
     try {
       if (!navigator.locks) throw new Error("Setup requires browser Web Locks support");
       await navigator.locks.request(mainnetSetupKey, { ifAvailable: true }, async lock => {
+        assertActive();
         if (!lock) { if (background) return; throw new Error("Another tab is updating this treasury"); }
         const current = readMainnetSetup(localStorage.getItem(mainnetSetupKey), network);
         if (state?.salt !== current?.salt) { setState(current); if (!background) throw new Error("Setup changed in another tab. Review it before continuing"); return; }
-        await fn(current);
+        await fn(current, assertActive);
       });
-    } catch (e) { setError((e as Error).message); }
-    finally { active.current = false; if (!background) setBusy(false); }
+    } catch (e) { if (generation.current === scope) setError((e as Error).message); }
+    finally { active.current = false; if (!background && generation.current === scope) setBusy(false); }
   };
   useEffect(() => {
     if (!engine || !state?.pending) return;
@@ -121,11 +127,13 @@ export function TreasuryMainnetSetup({ wallet, target, onComplete, network = def
     `Your ${l1Name} Safe’s owners authorize its local policy and spending allowance in one Safe batch.`,
     `Authorize the EEZ-X Safe’s local allowance and activate both policies after their peer connections have been checked.`,
   ];
-  const switchTo = async (chain: "l1" | "l2") => {
+  const switchTo = async (chain: "l1" | "l2", assertActive: () => void) => {
+    assertActive();
     const selected = selectedWallet.current;
     if (!selected.provider) throw new Error("Connect your wallet");
     if ((!selected.chainId || BigInt(selected.chainId) !== BigInt(network.chains[chain].chainId))
       && !await (chain === "l1" ? selected.switchToL1() : selected.switchToL2())) throw new Error("Wallet network switch cancelled");
+    assertActive();
     if (selectedWallet.current.provider !== selected.provider || !same(selectedWallet.current.address, selected.address)) throw new Error("Wallet changed while switching networks");
     return selected.provider;
   };
@@ -149,12 +157,13 @@ export function TreasuryMainnetSetup({ wallet, target, onComplete, network = def
           <p id="mainnet-mirror-hint" className={styles.hint}>{existingMirror ? `Choose a mirror already connected to this ${l1Name} Safe.` : `The new mirror uses your ${l1Name} Safe’s live owners through its owner adapter.`}</p>
         </div>
       </div>
-      {wallet.address ? <button className={`btn btn-solid btn-lg ${styles.startSetup}`} disabled={!pairedReady || busy || !isAddress(safeL1.trim()) || existingMirror && !isAddress(safeL2.trim())} onClick={() => void run(async saved => {
+      {wallet.address ? <button className={`btn btn-solid btn-lg ${styles.startSetup}`} disabled={!pairedReady || busy || !isAddress(safeL1.trim()) || existingMirror && !isAddress(safeL2.trim())} onClick={() => void run(async (saved, assertActive) => {
         if (saved) throw new Error("A treasury setup is already in progress");
         if (!pairedReady) throw new Error("Treasury setup is awaiting an updated contract release");
         const selected = selectedWallet.current;
         if (!selected.address) throw new Error("Connect your deployment wallet");
         const next = await engine!.configure(getAddress(selected.address), getAddress(safeL1.trim()), existingMirror ? getAddress(safeL2.trim()) : undefined);
+        assertActive();
         if (selectedWallet.current.provider !== selected.provider || !same(selectedWallet.current.address, selected.address)) throw new Error("Wallet changed during setup. Review your selection again.");
         persist(next); setStatus("Setup reviewed. Approve each named transaction when ready.");
       })}>{busy ? "Checking your Safes…" : "Start setup"}</button> : connect}
@@ -196,10 +205,11 @@ export function TreasuryMainnetSetup({ wallet, target, onComplete, network = def
               <span><code>{address}</code>{same(address, wallet.address) && <span className={styles.hint}>Connected wallet</span>}</span>
               {review.approvals.some(a => same(a.owner, address)) && <span className={styles.badge} data-positive="true">Approved</span>}
             </li>)}</ul></details>
-            <button className={`btn ${quorum ? "btn-outline" : "btn-solid"}`} disabled={busy || !owner || signed || quorum} onClick={() => void run(async s => {
+            <button className={`btn ${quorum ? "btn-outline" : "btn-solid"}`} disabled={busy || !owner || signed || quorum} onClick={() => void run(async (s, assertActive) => {
               if (!s?.review || s.pending) throw new Error("Deployment progress changed");
-              const provider = await switchTo(s.review.chain); setStatus("Waiting for the owner signature in your wallet…");
-              const approval = await engine!.approve(s, provider);
+              const provider = await switchTo(s.review.chain, assertActive); setStatus("Waiting for the owner signature in your wallet…");
+              const approval = await engine!.approve(s, guardWalletRequests(provider, assertActive));
+              assertActive();
               if (selectedWallet.current.provider !== provider || !same(selectedWallet.current.address, approval.owner)) throw new Error("Wallet changed while signing");
               persist({ ...s, review: { ...s.review, approvals: [...s.review.approvals, approval] } }); setStatus("Owner approval saved.");
             })}>{signed ? "Owner approved" : "Approve Safe step"}</button>
@@ -208,10 +218,11 @@ export function TreasuryMainnetSetup({ wallet, target, onComplete, network = def
             {quorum && <p className={styles.hint}>Required approvals collected. Any funded connected wallet can submit this Safe batch.</p>}
           </>}
         </div>}
-        <button className={`btn ${needsOwners && !quorum ? "btn-outline" : "btn-solid"}`} disabled={busy || !engine || !wallet.provider || !wallet.address || wrongDeployer || noGas || needsOwners && !quorum} onClick={() => void run(async s => {
+        <button className={`btn ${needsOwners && !quorum ? "btn-outline" : "btn-solid"}`} disabled={busy || !engine || !wallet.provider || !wallet.address || wrongDeployer || noGas || needsOwners && !quorum} onClick={() => void run(async (s, assertActive) => {
           if (!s || s.pending || s.completed.length !== state.completed.length) throw new Error("Deployment progress changed. Review the current step.");
-          const provider = await switchTo(step.chain); setStatus(`Preparing: ${step.label}`);
-          const prepared = await engine!.prepare(s, provider, setStatus);
+          const provider = await switchTo(step.chain, assertActive); setStatus(`Preparing: ${step.label}`);
+          const prepared = await engine!.prepare(s, guardWalletRequests(provider, assertActive), setStatus);
+          assertActive();
           if (selectedWallet.current.provider !== provider || !same(selectedWallet.current.address, prepared.pending.sender)) throw new Error("Wallet changed during preparation");
           if (prepared.expiresAt && BigInt(prepared.expiresAt) <= BigInt(Math.floor(Date.now() / 1000))) throw new Error("Fee quote expired. Prepare this step again");
           const next = { ...s, pending: prepared.pending }; persist(next); setStatus("Confirm the transaction in your wallet.");

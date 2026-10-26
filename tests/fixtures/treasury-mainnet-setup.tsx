@@ -54,5 +54,7 @@ export async function mountUX(fixture: any) {
     return <main style={{maxWidth:1100,margin:'24px auto',padding:20}}><TreasuryMainnetSetup target={fixture.target} wallet={{address,chainId:'0x1',provider:address?provider:null,
       walletOptions:[{id:'fixture',name:'MetaMask'}],connect:async()=>control.select(fixture.owners[0]),switchToL1:async()=>true,switchToL2:async()=>true} as any} onComplete={()=>{}} /></main>;
   }
-  createRoot(document.getElementById('root')!).render(<Harness/>);
+  const root = createRoot(document.getElementById('root')!);
+  (control as any).unmount = () => root.unmount();
+  root.render(<Harness/>);
 }

@@ -11,7 +11,7 @@ const requests = [1, 2, 3].map(n => ({ build: 'ab'.repeat(32), chainId: n === 1 
 const key = 'eez:treasury:source-outbox';
 const outbox = JSON.stringify({ sourceRequests: requests });
 const delivered = [], errors = [], passed = [];
-let unavailable = true, complete = false, sourceOnly = false, undiscovered = false;
+let unavailable = true, complete = false, sourceOnly = false, undiscovered = false, sourceMissing = false, retryCalls = 0;
 const server = await createServer({ configFile: false, envFile: false, plugins: [react()], server: { host: '127.0.0.1', port: 0 }, base: '/' });
 await server.listen();
 const origin = `http://127.0.0.1:${server.httpServer.address().port}`;
@@ -24,13 +24,13 @@ await context.route('**/*', async route => {
   const url = new URL(route.request().url());
   if (url.origin !== origin) { errors.push(`Unexpected external request: ${url.pathname}`); return route.abort(); }
   if (url.pathname === '/verification-fixture') return route.fulfill({ contentType: 'text/html', body: '<!doctype html><div id="root"></div><script type="module">import RefreshRuntime from "/@react-refresh";RefreshRuntime.injectIntoGlobalHook(window);window.$RefreshReg$=()=>{};window.$RefreshSig$=()=>type=>type;window.__vite_plugin_react_preamble_installed__=true;</script>' });
-  if (/\/jobs\/[a-f\d]{64}\/retry$/.test(url.pathname)) return route.fulfill({ status: 202, json: {} });
+  if (/\/jobs\/[a-f\d]{64}\/retry$/.test(url.pathname)) { retryCalls++; return route.fulfill({ status: 202, json: {} }); }
   if (url.pathname !== '/treasury-verification/jobs') return route.fallback();
   const request = route.request().postDataJSON(), index = requests.findIndex(r => r.transactionHash === request.transactionHash);
   assert(index >= 0); assert.deepEqual(request, requests[index]);
   delivered.push(index);
   if (unavailable && index === 0) return route.fulfill({ status: 400, json: { error: 'Wait for a successful canonical receipt' } });
-  const status = undiscovered && index === 2 ? 'pending' : sourceOnly ? 'sourcify-verified' : complete || index < 2 ? 'verified' : 'pending';
+  const status = sourceMissing ? 'source-unavailable' : undiscovered && index === 2 ? 'pending' : sourceOnly ? 'sourcify-verified' : complete || index < 2 ? 'verified' : 'pending';
   return route.fulfill({ json: { id: String(index + 1).repeat(64), status, contracts: undiscovered && index === 2 ? [] : [{ address: `0x${String(index + 1).repeat(40)}`, name: `Contract ${index + 1}`, status }] } });
 });
 try {
@@ -66,6 +66,15 @@ try {
 
   await details.getByRole('button', { name: 'Retry source publication', exact: true }).click();
   await page.waitForFunction(() => !document.querySelector('button:disabled'));
+  sourceMissing = true;
+  await page.evaluate(() => window.dispatchEvent(new Event('treasury-source-request')));
+  await details.getByRole('button', { name: 'Recheck source inputs', exact: true }).waitFor();
+  const beforeRetry = retryCalls;
+  await details.getByRole('button', { name: 'Recheck source inputs', exact: true }).click();
+  await page.waitForFunction(() => !document.querySelector('button:disabled'));
+  assert.equal(retryCalls, beforeRetry, 'Unadmitted source requests have no persistent job to retry');
+  passed.push('missing-source intents are rechecked without retrying nonexistent job IDs');
+  sourceMissing = false;
   undiscovered = true;
   await page.evaluate(() => window.dispatchEvent(new Event('treasury-source-request')));
   await details.locator('summary').filter({ hasText: /^Publishing to explorers · 0 of 2 verified$/ }).waitFor();

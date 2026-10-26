@@ -6,6 +6,7 @@ import { approveOwnerAddition, l1OwnerState, ownerAddition, ownerAdditionOutcome
 import type { OwnerReview, OwnerSubmission } from "../lib/treasury/owners";
 import type { TreasuryWallet } from "./TreasuryConnected";
 import styles from "./TreasuryDemo.module.css";
+import { guardWalletRequests } from "../lib/treasury/walletRequestScope";
 
 /** Existing L1 owners authorize adding an address entered in the form. */
 export function TreasuryOwners({ client, wallet, currentThreshold, paymentPending, onPendingChange, onOwnersChanged, guardAction }: { client: TreasuryClient; wallet: TreasuryWallet; currentThreshold?: number; paymentPending: boolean; onPendingChange: (pending: boolean) => void; onOwnersChanged?: () => void; guardAction?: TreasuryActionGuard }) {
@@ -26,6 +27,12 @@ export function TreasuryOwners({ client, wallet, currentThreshold, paymentPendin
   const [busy, setBusy] = useState(false);
   useEffect(() => { onPendingChange(!!pending && !complete || !!restored.error); }, [pending, complete, restored.error, onPendingChange]);
   const active = useRef(false);
+  const generation = useRef(0);
+  useEffect(() => { generation.current++; return () => { generation.current++; }; }, [client]);
+  const requestScope = () => {
+    const scope = generation.current;
+    return () => { if (generation.current !== scope) throw new Error("The owner-management screen changed. Review this action again."); };
+  };
   const currentWallet = useRef(wallet); currentWallet.current = wallet;
   const save = (next: OwnerSubmission | null) => {
     if (next) localStorage.setItem(key, JSON.stringify(next)); else localStorage.removeItem(key);
@@ -56,8 +63,10 @@ export function TreasuryOwners({ client, wallet, currentThreshold, paymentPendin
   }, [client, pending, onOwnersChanged]);
   const run = async (fn: () => Promise<void>) => {
     if (active.current) return;
+    const assertActive = requestScope();
     active.current = true; setBusy(true); setError("");
-    try { await (guardAction ? guardAction(fn) : fn()); } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    const scoped = async () => { assertActive(); await fn(); };
+    try { await (guardAction ? guardAction(scoped) : scoped()); } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
     finally { active.current = false; setBusy(false); }
   };
   const onL1 = wallet.chainId && BigInt(wallet.chainId) === BigInt(client.config.l1.chainId);
@@ -88,16 +97,20 @@ export function TreasuryOwners({ client, wallet, currentThreshold, paymentPendin
       <p>{approvals.length} of {review.before.threshold} current-owner approvals collected.</p>
       {!onL1 && <button className="btn btn-outline" disabled={busy} onClick={() => void run(async () => { if (!await wallet.switchToL1()) throw new Error("Wallet network switch was cancelled"); })}>Switch to L1 for owner management</button>}
       <button className={`btn ${approvals.length >= review.before.threshold ? "btn-outline" : "btn-solid"}`} disabled={blocked || !onL1 || !owner || signed} onClick={() => void run(async () => {
+        const assertActive = requestScope();
         const selected = currentWallet.current;
         if (!selected.provider) throw new Error("Connect an L1 owner wallet");
-        const approval = await approveOwnerAddition(client, selected.provider, review);
+        const approval = await approveOwnerAddition(client, guardWalletRequests(selected.provider, assertActive), review);
+        assertActive();
         if (currentWallet.current.provider !== selected.provider || currentWallet.current.address?.toLowerCase() !== approval.owner.toLowerCase()) throw new Error("Wallet changed while signing");
         setApprovals(previous => [...previous, approval]);
       })}>Approve owner addition</button>
       <button className={`btn ${approvals.length >= review.before.threshold ? "btn-solid" : "btn-outline"}`} disabled={blocked || !onL1 || approvals.length < review.before.threshold} onClick={() => void run(async () => {
+        const assertActive = requestScope();
         const selected = currentWallet.current;
         if (!selected.provider) throw new Error("Connect a wallet to submit");
-        const prepared = await prepareOwnerAddition(client, selected.provider, review, approvals);
+        const prepared = await prepareOwnerAddition(client, guardWalletRequests(selected.provider, assertActive), review, approvals);
+        assertActive();
         if (currentWallet.current.provider !== selected.provider || currentWallet.current.address?.toLowerCase() !== prepared.pending.sender.toLowerCase()) throw new Error("Wallet changed before submission");
         save(prepared.pending); setStatus("Waiting for the wallet submission response.");
         try {

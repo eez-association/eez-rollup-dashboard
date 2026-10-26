@@ -29,5 +29,11 @@ try{
  await page.evaluate(()=>window.setupUX.release());await page.getByRole('status').getByText('Wallet cancelled. No transaction was authorized.',{exact:true}).waitFor();
  const restored=await page.evaluate(key=>JSON.parse(localStorage.getItem(key)),mainnetSetupKey);assert(!restored.pending);assert.equal(restored.review.approvals.length,2);
  assert.equal(await page.getByRole('region',{name:'Setup transaction history'}).locator('li').count(),5);
+ await mount({saved:true,state:restored});
+ await page.getByRole('button',{name:'Submit approved Safe step',exact:true}).click();
+ await page.waitForFunction(()=>!!window.setupUX.release);
+ await page.evaluate(()=>{window.setupUX.unmount();window.setupUX.release();});
+ await page.waitForTimeout(100);assert.equal(await page.evaluate(()=>window.setupUX.walletCalls),0,'Leaving during a quote must not open MetaMask later');
+ assert(!(await page.evaluate(key=>JSON.parse(localStorage.getItem(key)),mainnetSetupKey)).pending);
  assert.deepEqual(errors,[]);console.log('PASS wallet entry, change setup, progress, owner badges/quorum/nonce, L2 signing context, pre-wallet quote status, cancellation recovery and responsive history');
 }finally{await browser.close();await server.close();}

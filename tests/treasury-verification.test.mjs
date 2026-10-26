@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { encodeEventTopics, encodeAbiParameters, parseAbi, parseAbiParameters } from 'viem';
 import { VerificationWorker, creations, loadBuilds, loadAdditionalSources, publicJob } from '../scripts/verification/worker.mjs';
 import { appendSourceRequest, sourceRequests, deliverSourceRequest, retainSourceRequests } from '../src/lib/treasury/sourceVerification.ts';
-import { blockscoutApiUrl } from '../scripts/verification/network.mjs';
+import { blockscoutApiUrl, verificationEndpoint } from '../scripts/verification/network.mjs';
 const build = 'ab'.repeat(32), tx = '0x'+'12'.repeat(32), blockHash = '0x'+'34'.repeat(32), address = '0x'+'56'.repeat(20);
 const runtime = '0x60006000556001a164736f6c6343000822000a';
 const artifact = { runtime, bytecode: '0x6000', immutables: [], immutableGroups: [], input: 'source', compiler: '0.8.34+commit.80d5c536', target: 'A.sol:A' };
@@ -37,6 +37,12 @@ test('explorer website roots and explicit API bases normalize to the same Blocks
     assert.equal(blockscoutApiUrl(`https://example.invalid${path}`, '', 'http://127.0.0.1:8083'), 'https://example.invalid/explorer/api');
   assert.equal(blockscoutApiUrl('', 'https://example.invalid', ''), 'https://example.invalid/api');
   assert.equal(blockscoutApiUrl('', '', 'http://127.0.0.1:8083'), '');
+});
+test('verification routes preserve configured API query parameters without corrupting the path', () => {
+  const base = blockscoutApiUrl('https://example.invalid/explorer?key=fixture#ignored', '', '');
+  const url = new URL(verificationEndpoint(base, 'v2/smart-contracts/0x1234'));
+  assert.equal(url.pathname, '/explorer/api/v2/smart-contracts/0x1234');
+  assert.equal(url.searchParams.get('key'), 'fixture'); assert.equal(url.hash, '');
 });
 test('accepted explorer publications stay on short polls and manual retry preserves the job', async t => {
   const { state, worker } = fixture(t), job = worker.enqueue(request);

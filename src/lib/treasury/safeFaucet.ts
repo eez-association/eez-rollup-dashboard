@@ -34,11 +34,34 @@ export function readSafeFaucet(c: TreasuryConfig, raw: string | null): AssetJour
 /** Keep pre-existing single-claim journals recoverable without moving or erasing them. */
 export function readSafeFaucetClaim(c: TreasuryConfig, storage: Pick<Storage, 'getItem'>, chain: 'l1' | 'l2'): AssetJournal {
   const raw = storage.getItem(safeFaucetKey(c, chain));
+  let state: AssetJournal | undefined;
   if (raw !== null) {
-    const state = readSafeFaucet(c, raw);
+    state = readSafeFaucet(c, raw);
     if (state.pending && state.pending.kind !== chain) throw new Error('Saved faucet request belongs to the other Safe');
-    return state;
   }
   const legacy = readSafeFaucet(c, storage.getItem(safeFaucetKey(c)));
+  if (legacy.pending?.kind === chain) {
+    if (legacy.pending.hash && state?.last?.hash === legacy.pending.hash && !state.pending) return state;
+    if (state?.pending && !sameClaim(state.pending, legacy.pending)) throw new Error('Two different faucet requests are recorded for this Safe. Preserve both records for recovery.');
+    return state?.pending ? state : legacy;
+  }
+  if (state) return state;
   return legacy.pending?.kind === chain || !legacy.pending && legacy.last?.destination === chain ? legacy : readSafeFaucet(c, null);
+}
+
+function sameClaim(a: NonNullable<AssetJournal['pending']>, b: NonNullable<AssetJournal['pending']>) {
+  return (['kind', 'sender', 'nonce', 'data', 'recipient', 'token', 'to', 'build'] as const)
+    .every(key => String(a[key]).toLowerCase() === String(b[key]).toLowerCase());
+}
+
+/** Caller holds the faucet lock. Retire a legacy pending slot only after the
+ * exact request has been canonically reconciled, never because a new slot exists.
+ */
+export function saveReconciledFaucet(c: TreasuryConfig, storage: Pick<Storage, 'getItem' | 'setItem'>, chain: 'l1' | 'l2', previous: AssetJournal, next: AssetJournal) {
+  readSafeFaucet(c, JSON.stringify(next));
+  storage.setItem(safeFaucetKey(c, chain), JSON.stringify(next));
+  if (!previous.pending || next.pending || !next.last) return;
+  const legacy = readSafeFaucet(c, storage.getItem(safeFaucetKey(c)));
+  if (legacy.pending && sameClaim(legacy.pending, previous.pending))
+    storage.setItem(safeFaucetKey(c), JSON.stringify({ ...legacy, pending: undefined, last: next.last }));
 }

@@ -41,6 +41,7 @@ export function TreasurySourceVerification() {
   const sourceOnly = unique.filter(c => c.status === 'sourcify-verified').length;
   const partial = unique.filter(c => c.explorer === 'partial').length;
   const pending = jobs.some(j => !['verified','reverted','not-applicable'].includes(j.job.status));
+  const retryable = jobs.filter(({ job }) => !['verified','reverted','not-applicable','source-unavailable'].includes(job.status));
   if (!unique.length && !error) return null;
   return <details className={styles.hint} aria-label="Contract source verification">
     <summary>{error ? 'Contract source verification will retry automatically' : !pending ? 'Contract sources verified on explorers' : `Publishing to explorers · ${verified} of ${unique.length} verified${partial ? ` · ${partial} partial` : ''}`}</summary>
@@ -54,10 +55,10 @@ export function TreasurySourceVerification() {
     {jobs.map(({ job }) => job.error && <p key={job.id} role="status">{job.error}</p>)}
     {pending && <button type="button" className="btn btn-sm btn-outline" disabled={retrying} onClick={() => {
       setRetrying(true); setError('');
-      void Promise.all(jobs.filter(({ job }) => !['verified','reverted','not-applicable'].includes(job.status)).map(async ({ job }) => {
+      void Promise.all(retryable.map(async ({ job }) => {
         const response = await fetch(`${import.meta.env.BASE_URL}treasury-verification/jobs/${job.id}/retry`, { method: 'POST', signal: AbortSignal.timeout(10_000) });
         if (!response.ok) throw new Error('Verification retry is unavailable; automatic retries remain scheduled.');
       })).then(() => window.dispatchEvent(new Event('treasury-source-request'))).catch(e => setError(e.message)).finally(() => setRetrying(false));
-    }}>{retrying ? 'Requesting retry…' : 'Retry source publication'}</button>}
+    }}>{retrying ? 'Requesting retry…' : retryable.length ? 'Retry source publication' : 'Recheck source inputs'}</button>}
   </details>;
 }

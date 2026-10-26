@@ -15,20 +15,29 @@ const a = (n: number) => `0x${n.toString(16).padStart(40, '0')}`;
 export async function mount(mode = 'test') {
   const w = window as any, sender = a(3), release = await loadTreasuryArtifacts();
   w.confirmFixture = false; w.rejectNext = false; w.uncertainNext = false; w.refreshes = 0;
+  w.failTracking = ''; w.failDetection = mode === 'flaky-token'; w.holdPreparation = false;
   // UI-only fixture: genuine packaged claim calldata, controlled wallet and receipts.
   TestnetAsset.prototype.validate = async () => {};
   TestnetAsset.prototype.validateToken = async () => {};
-  TestnetAsset.prototype.rpc = async (_chain, method) => method === 'eth_getTransactionCount' ? w.readWalletNonce() : (mode === 'ordinary-token' ? '0x6000' : release.contracts.TestUSDC.runtime) as any;
+  TestnetAsset.prototype.rpc = async (_chain, method) => {
+    if (method === 'eth_getTransactionCount') return w.readWalletNonce();
+    if (w.failDetection) { w.failDetection = false; throw new Error('Temporary token RPC failure'); }
+    return (mode === 'ordinary-token' ? '0x6000' : release.contracts.TestUSDC.runtime) as any;
+  };
   TestnetAsset.prototype.read = async () => a(31) as any;
   TestnetAsset.prototype.wallet = async () => sender as any;
   TestnetAsset.prototype.prepare = async function(kind, token, recipient) {
     if (kind === 'deploy') throw new Error('Token deployment is not part of Safe setup');
     const data = this.data(kind, recipient), nonce = await this.rpc('l1', 'eth_getTransactionCount', [sender, 'pending']);
+    if (w.holdPreparation) await new Promise(resolve => { w.releasePreparation = resolve; });
     return { pending: { id: kind, kind, chain: 'l1', sender, nonce, data, recipient, build: release.build!, l2StartBlock: '0x1', token, to: token },
       request: { from: sender, to: token!, nonce, data, value: '0x0', chainId: '0x27d8' } } as any;
   };
-  TestnetAsset.prototype.reconcile = async state => !state.pending || !w.confirmFixture ? state : {
-    ...state, pending: undefined, last: { hash: state.pending.hash!, destination: state.pending.kind as 'l1' | 'l2' },
+  TestnetAsset.prototype.reconcile = async state => {
+    if (state.pending?.kind === w.failTracking) throw new Error('Temporary claim RPC failure');
+    return !state.pending || !w.confirmFixture ? state : {
+      ...state, pending: undefined, last: { hash: state.pending.hash!, destination: state.pending.kind as 'l1' | 'l2' },
+    };
   };
   const wallet = { address: sender, chainId: '0x27d8', provider: { request: async ({ method, params }: any) => {
     if (method !== 'eth_sendTransaction') throw new Error(`Unexpected wallet method ${method}`);
@@ -52,12 +61,13 @@ export async function mount(mode = 'test') {
       <output data-testid="l1-contribution">{String(fromL1)}</output><button onClick={() => setReview(!review)}>{review ? 'Edit split' : 'Review split'}</button>
     </main>;
   }
+  const root = createRoot(document.getElementById('root')!); w.unmountFixture = () => root.unmount();
   if (mode === 'setup' || mode === 'unconfigured') {
     const network = { ...networkDefault, testnet: true, chains: { ...networkDefault.chains, l1: { ...networkDefault.chains.l1, chainId: 10200 } } };
     TestnetAsset.prototype.network = async () => network;
     MainnetSetup.prototype.configure = async () => { throw new Error('Fixture stopped before deployment'); };
-    createRoot(document.getElementById('root')!).render(<TreasuryTestnet wallet={wallet as any} target={target} bridgeL1={a(1)} bridgeL2={a(2)} token={mode === 'setup' ? a(30) : ''} />);
-  } else createRoot(document.getElementById('root')!).render(<Harness />);
+    root.render(<TreasuryTestnet wallet={wallet as any} target={target} bridgeL1={a(1)} bridgeL2={a(2)} token={mode === 'setup' ? a(30) : ''} />);
+  } else root.render(<Harness />);
 }
 export function mountLegacy() {
   const container = document.createElement('div'); document.body.append(container);

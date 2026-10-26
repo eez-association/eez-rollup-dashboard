@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { keccak256, toHex } from 'viem';
 import { pairedSetupKey, pairedSetupSnapshot, pairedSetupTransactions, restartPairedSetup } from '../src/lib/treasury/pairedSetupState.ts';
 import { setupIdentity, loadMainnetManifest } from '../src/lib/treasury/mainnetSetup.ts';
-import { safeFaucetKey, readSafeFaucetClaim } from '../src/lib/treasury/safeFaucet.ts';
+import { safeFaucetKey, readSafeFaucetClaim, saveReconciledFaucet } from '../src/lib/treasury/safeFaucet.ts';
 const a = n => toHex(n, { size: 20 }), h = n => toHex(n, { size: 32 });
 const network = JSON.parse(readFileSync('src/lib/treasury/mainnet-network.json'));
 function fixture() {
@@ -50,4 +50,19 @@ test('history preserves exact chain and inclusion identities and independent fau
  }
  const legacy=fixture();legacy.map.set(safeFaucetKey(legacy.manifest),f.map.get(safeFaucetKey(f.manifest,'l2')));
  assert(readSafeFaucetClaim(legacy.manifest,legacy.storage,'l2').pending);assert(!readSafeFaucetClaim(legacy.manifest,legacy.storage,'l1').pending);
+});
+test('an empty per-Safe journal never hides an older unresolved claim, including a missing wallet hash',()=>{
+ const f=fixture(),c=f.manifest,chain='l2';
+ const pending={id:chain,kind:chain,chain:'l1',sender:a(2),nonce:'0x1',data:'0x1234',recipient:c.safeL2,token:c.payments.tokenL1,to:c.payments.tokenL1,build:'ab'.repeat(32),l2StartBlock:'0x0'};
+ const old={token:c.payments.tokenL1,pending};f.map.set(safeFaucetKey(c),JSON.stringify(old));f.map.set(safeFaucetKey(c,chain),JSON.stringify({token:old.token}));
+ assert.deepEqual(readSafeFaucetClaim(c,f.storage,chain),old);assert.match(pairedSetupSnapshot(f.storage,network).blocked,/faucet/);
+ const next={token:old.token,last:{hash:h(99),destination:chain}};
+ saveReconciledFaucet(c,f.storage,chain,old,next);
+ assert.deepEqual(readSafeFaucetClaim(c,f.storage,chain),next);assert(!JSON.parse(f.map.get(safeFaucetKey(c))).pending);
+ assert.equal(pairedSetupSnapshot(f.storage,network).blocked,'');
+});
+test('conflicting legacy and per-Safe pending claims fail closed without deleting either record',()=>{
+ const f=fixture(),c=f.manifest,pending={id:'l1',kind:'l1',chain:'l1',sender:a(2),nonce:'0x1',data:'0x1234',recipient:c.safeL1,token:c.payments.tokenL1,to:c.payments.tokenL1,build:'ab'.repeat(32),l2StartBlock:'0x0'};
+ f.map.set(safeFaucetKey(c),JSON.stringify({token:pending.token,pending}));f.map.set(safeFaucetKey(c,'l1'),JSON.stringify({token:pending.token,pending:{...pending,nonce:'0x2'}}));
+ const before=[...f.map];assert.throws(()=>readSafeFaucetClaim(c,f.storage,'l1'),/Two different/);assert.deepEqual([...f.map],before);
 });

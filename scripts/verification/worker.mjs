@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { decodeEventLog, parseAbi, isAddress, keccak256 } from 'viem';
 import { matchesRuntime } from '../../src/lib/treasury/runtimeCode.ts';
+import { verificationEndpoint } from './network.mjs';
 const hash = x => createHash('sha256').update(JSON.stringify(x)).digest('hex');
 const digest = x => typeof x === 'string' && /^0x[\da-f]{64}$/i.test(x);
 const buildId = x => typeof x === 'string' && /^[\da-f]{64}$/.test(x);
@@ -126,7 +127,7 @@ export class VerificationWorker {
     let info;
     if (network.explorerApi) {
       try {
-        info = await this.json(`${network.explorerApi}/v2/smart-contracts/${contract.address}`);
+        info = await this.json(verificationEndpoint(network.explorerApi, `v2/smart-contracts/${contract.address}`));
         if (info.is_verified === true && info.is_partially_verified === false && info.deployed_bytecode?.toLowerCase() === contract.runtime.toLowerCase()) {
           contract.explorer = 'verified'; contract.status = 'verified';
           if (typeof info.name === 'string') contract.name = info.name;
@@ -149,7 +150,7 @@ export class VerificationWorker {
           const data = new FormData(); data.append('files[0]', new Blob([JSON.stringify(input)], { type: 'application/json' }), 'input.json');
           data.append('compiler_version', `v${a.compiler}`); data.append('contract_name', a.target);
           data.append('autodetect_constructor_args', 'true');
-          await this.json(`${network.explorerApi}/v2/smart-contracts/${contract.address}/verification/via/standard-input`, { method: 'POST', body: data });
+          await this.json(verificationEndpoint(network.explorerApi, `v2/smart-contracts/${contract.address}/verification/via/standard-input`), { method: 'POST', body: data });
           contract.submittedAt = this.now(); contract.explorer = 'pending'; this.save(job);
         }
       } catch (e) { contract.error = e.message; contract.explorer = 'retrying'; }

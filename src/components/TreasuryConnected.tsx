@@ -22,6 +22,7 @@ import type { ReviewedSafeTransaction } from "../lib/treasury/safeTransactions";
 import { TreasuryFundingSplit } from "./TreasuryFundingSplit";
 import { useTreasuryFaucet } from "../hooks/useTreasuryFaucet";
 import { TreasurySafeFaucet } from "./TreasurySafeFaucet";
+import { guardWalletRequests } from "../lib/treasury/walletRequestScope";
 import { config } from "../config";
 import styles from "./TreasuryDemo.module.css";
 
@@ -54,6 +55,12 @@ function SafeIdentity({ address, name, explorer, safeAppUrl }: { address: Addres
 
 function PairedTreasuryConnected({ deployment, wallet, payments = false, guardAction }: { deployment: TreasuryConfig; wallet: TreasuryWallet; payments?: boolean; guardAction?: TreasuryActionGuard }) {
   const [client] = useState(() => new TreasuryClient(deployment));
+  const generation = useRef(0);
+  useEffect(() => { generation.current++; return () => { generation.current++; }; }, [client]);
+  const requestScope = () => {
+    const current = generation.current;
+    return () => { if (generation.current !== current) throw new Error("The treasury screen changed. Review this action again before opening the wallet."); };
+  };
   const storageKey = `eez:treasury:submission:${deployment.instance}`;
   const [restored] = useState(() => {
     try { return { intent: readIntent(deployment, localStorage.getItem(storageKey)), error: "" }; }
@@ -206,8 +213,10 @@ function PairedTreasuryConnected({ deployment, wallet, payments = false, guardAc
 
   const run = async (label: string, action: () => Promise<void>) => {
     if (refs.current.busy) return;
+    const assertActive = requestScope();
     refs.current.busy = true; setBusy(label); setError(""); setNotice("");
-    try { await (guardAction ? guardAction(action) : action()); } catch (failure) { setError(message(failure)); }
+    const scoped = async () => { assertActive(); await action(); };
+    try { await (guardAction ? guardAction(scoped) : scoped()); } catch (failure) { setError(message(failure)); }
     finally { refs.current.busy = false; setBusy(""); }
   };
   const contribution = (state: PaymentState, amount: bigint) => allocation
@@ -240,46 +249,53 @@ function PairedTreasuryConnected({ deployment, wallet, payments = false, guardAc
     } else next = { transaction: actionTransaction(deployment, value, latest.nonce), snapshot: latest, value };
     refs.current.review = next; setReview(next); setApprovals([]);
   };
-  const ensureReviewedNetwork = async (current: Review, selected: TreasuryWallet, nextStatus: string, submitting = false) => {
+  const ensureReviewedNetwork = async (current: Review, selected: TreasuryWallet, nextStatus: string, assertActive: () => void, submitting = false) => {
+    assertActive();
     if (!selected.provider || !selected.address) throw new Error("Connect a wallet first");
     const chain = submitting ? client.submissionSource(current.transaction) : client.transactionSource(current.transaction);
     const chainId = BigInt(deployment[chain].chainId);
     const network = chain === "l1" ? deployment.l1.chainId === 10200 ? "Chiado" : "Ethereum" : "EEZ-X";
     if (BigInt(await selected.provider.request({ method: "eth_chainId" }) as string) !== chainId) {
+      assertActive();
       setBusy(`Switching wallet to ${network}…`);
       if (!await (chain === "l1" ? selected.switchToL1() : selected.switchToL2()))
         throw new Error("Wallet network change cancelled. You can try again.");
       if (BigInt(await selected.provider.request({ method: "eth_chainId" }) as string) !== chainId)
         throw new Error(`Wallet is still on another network. Select ${network} and try again.`);
     }
+    assertActive();
     if (refs.current.review !== current || refs.current.intent || refs.current.wallet.provider !== selected.provider
       || refs.current.wallet.address?.toLowerCase() !== selected.address.toLowerCase())
       throw new Error("The wallet or reviewed action changed while switching networks. Try again.");
     setBusy(nextStatus);
   };
   const signing = async () => {
+    const assertActive = requestScope();
     const selected = refs.current.wallet;
     const current = refs.current.review;
     if (!current || !selected.provider || !selected.address) throw new Error("Connect an owner wallet first");
-    await ensureReviewedNetwork(current, selected, "Waiting for owner signature…");
+    await ensureReviewedNetwork(current, selected, "Waiting for owner signature…", assertActive);
     const latest = await refresh();
     if (!unchanged(current.snapshot, latest)) throw new Error("Owners or Safe nonce changed. Review the action again.");
     if (current.payment) fundingPreview(await paymentState(client), current.payment);
     if (approvals.some(a => a.owner.toLowerCase() === selected.address!.toLowerCase())) throw new Error("This owner has already approved");
-    const approval = await client.approve(selected.provider, current.transaction, latest, selected.address as Address);
+    const approval = await client.approve(guardWalletRequests(selected.provider, assertActive), current.transaction, latest, selected.address as Address);
     const after = await refresh();
+    assertActive();
     if (refs.current.review !== current || !unchanged(current.snapshot, after)
       || refs.current.wallet.provider !== selected.provider || refs.current.wallet.address?.toLowerCase() !== selected.address.toLowerCase())
       throw new Error("The wallet or reviewed action changed while signing. Try again.");
     setApprovals(existing => [...existing, approval]);
   };
   const submitting = async () => {
+    const assertActive = requestScope();
     const current = refs.current.review;
     const selected = refs.current.wallet;
     if (!current || !selected.provider || refs.current.intent) return;
-    await ensureReviewedNetwork(current, selected, "Waiting for wallet submission…", true);
+    await ensureReviewedNetwork(current, selected, "Waiting for wallet submission…", assertActive, true);
     if (current.payment) fundingPreview(await paymentState(client), current.payment);
-    const next = await client.prepare(selected.provider, current.transaction, current.snapshot, approvals, current.payment);
+    const next = await client.prepare(guardWalletRequests(selected.provider, assertActive), current.transaction, current.snapshot, approvals, current.payment);
+    assertActive();
     if (refs.current.review !== current || refs.current.wallet.provider !== selected.provider
       || refs.current.wallet.address?.toLowerCase() !== next.intent.sender.toLowerCase()) throw new Error("The wallet or review changed. Review again.");
     if (next.expiresAt) {
@@ -287,6 +303,7 @@ function PairedTreasuryConnected({ deployment, wallet, payments = false, guardAc
       setFee({ maximum: BigInt(next.request.gas!) * BigInt(price), gas: next.request.gas!, price });
     }
     if (current.payment?.kind === "invoice") await invoiceControl(deployment, "arm", next.intent);
+    assertActive();
     if (next.expiresAt && BigInt(next.expiresAt) * 1000n <= BigInt(Date.now())) throw new Error("Fee quote expired. Submit again to request fresh fees.");
     saveIntent(next.intent);
     setOutcome({ kind: "unknown", detail: "Awaiting the wallet submission response. Keep this tab open until the wallet finishes." });
@@ -351,7 +368,7 @@ function PairedTreasuryConnected({ deployment, wallet, payments = false, guardAc
         </section>;
       })}
     </div>
-    {faucet.error && <p role="alert">{faucet.error}</p>}
+    {faucet.error && <p className={styles.error} role="alert">{faucet.error}</p>}
     {!payments && <section className={styles.card} aria-label="Current Safe action"><h3>Settled demonstration value</h3>
       <strong className={styles.amount} data-testid="action-value">{snapshot?.value.toString() ?? "—"}</strong>
     </section>}
@@ -372,7 +389,7 @@ function PairedTreasuryConnected({ deployment, wallet, payments = false, guardAc
             <label htmlFor="treasury-recipient">Recipient address</label><input id="treasury-recipient" readOnly={kind === "invoice" || kind === "transfer"} value={recipient} onChange={e => setRecipient(e.target.value)} />
             <label htmlFor="treasury-destination">Recipient chain</label><select id="treasury-destination" disabled={kind === "invoice" || kind === "transfer"} value={destination} onChange={e => { const chain = e.target.value as "l1" | "l2"; setDestination(chain); setAllocation(null); }}><option value="l2">EEZ-X</option><option value="l1">{l1Name}</option></select>
             {kind === "transfer" && <p className={styles.hint}>Move USDC from your {l1Name} Safe to your EEZ-X Safe through the shared bridge. Owners approve this internal transfer directly; it does not use the payment budget.</p>}
-            {kind === "fixed" && <TreasuryFundingSplit l1Name={l1Name} split={split}
+            {kind === "fixed" && <TreasuryFundingSplit l1Name={l1Name} split={split} loading={!balances}
               onChange={fromL1 => { if (split) setAllocation({ amount: split.amount, fromL1 }); }}
               onReset={() => setAllocation(null)} />}
             {kind === "invoice" && <div className={styles.notice} aria-label="Invoice scenario">
@@ -385,7 +402,18 @@ function PairedTreasuryConnected({ deployment, wallet, payments = false, guardAc
         {!payments && <p className={styles.hint}>Updates the demonstration value on EEZ-X.</p>}
         {review && <div className={styles.route} aria-label="Reviewed Safe transaction"><p>Initiating Safe: {review.payment?.source === "l1" ? l1Name : "EEZ-X"}</p><h4>{review.payment ? `${formatUSDC(BigInt(review.payment.amount))} USDC → ${review.payment.destination === "l1" ? l1Name : "EEZ-X"}` : `Set value to ${review.value}`}</h4>
           {review.payment && review.funding && <><p>Recipient: <code>{review.payment.recipient}</code></p><p data-testid="funding-preview">{formatUSDC(review.funding.fromL1)} from {l1Name} + {formatUSDC(review.funding.fromL2)} from EEZ-X</p>
-            {review.payment.kind === "transfer" ? <p>Internal transfer: the payment budget and spending allowances stay unchanged. The batch approves exactly this amount for the bridge and clears the approval.</p> : <details className={styles.disclosure}><summary>How this payment is funded</summary><p>{review.payment.destination === "l1" && review.funding.fromL2 > 0n ? `EEZ-X Safe → policy → bridge burn → ${l1Name} escrow release → recipient. The ${l1Name} Safe pays its contribution directly.` : review.payment.destination === "l2" && review.funding.fromL1 > 0n ? `The EEZ-X Safe pays its contribution directly. ${l1Name} Safe → ${deployment.payments?.pair ? "local policy" : deployment.payments?.bridgeKind === "standard" ? "funding delegate" : "policy alias"} → bridge escrow; matching wrapped USDC is minted to the recipient on EEZ-X.` : "The Safe allowance module transfers directly to the recipient."}</p></details>}</>}
+            {review.payment.kind === "transfer" ? <p>Internal transfer: the payment budget and spending allowances stay unchanged. The batch approves exactly this amount for the bridge and clears the approval.</p> : <details className={styles.disclosure}><summary>How this payment is funded</summary>
+              <p>Contributions execute in this order:</p>
+              <ol>{(review.payment.source === "l1" ? ["l1", "l2"] as const : ["l2", "l1"] as const)
+                .filter(chain => (chain === "l1" ? review.funding!.fromL1 : review.funding!.fromL2) > 0n).map(chain => <li key={chain}>
+                  <strong className={styles.chainLabel} data-chain={chain}>{chain === "l1" ? l1Name : "EEZ-X"} Safe:</strong>{" "}
+                  {formatUSDC(chain === "l1" ? review.funding!.fromL1 : review.funding!.fromL2)} USDC{" "}
+                  {review.payment!.destination === chain ? `go directly to the recipient on ${chain === "l1" ? l1Name : "EEZ-X"}.`
+                    : chain === "l1" ? "pass through the local policy and normal bridge; matching wrapped tokens are minted to the recipient on EEZ-X."
+                    : `pass through the local policy and normal bridge; wrapped tokens are burned and canonical tokens are released to the recipient on ${l1Name}.`}
+                </li>)}</ol>
+            </details>}</>}
+
           <details className={styles.disclosure}><summary>Transaction details</summary><p>{review.payment?.source === "l1" ? l1Name : "EEZ-X"} Safe nonce {review.transaction.message.nonce.toString()} · chain {review.transaction.domain.chainId.toString()}</p><p>Target: <code>{review.transaction.message.to}</code></p>
             <p>Safe transaction hash: <code data-testid="safe-hash">{safeTransactionHash(review.transaction)}</code></p><p>{review.payment?.kind === "transfer" ? "Verified call-only batch" : "Call"} · native value 0 · Safe gas refund 0</p></details>
         </div>}
