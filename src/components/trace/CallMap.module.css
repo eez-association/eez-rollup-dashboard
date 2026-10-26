@@ -1,12 +1,13 @@
 /* Call map: absolutely positioned boxes over chain bands; arrows are one SVG layer.
    Chain and contract colour tokens come from the trace page (.page in TraceDetailView). */
-.map { position: relative; }
+.map { position: relative; display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.map > .zoom { flex-shrink: 0; }
 .zoom { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 10px 12px; border-block: 1px solid var(--border); background: var(--bg-raised); }
 .zoomHint { flex: 1; min-width: 160px; color: var(--text-dim); font-size: 11px; }
 .zoom button[aria-pressed="true"] { border-color: var(--accent-light); color: var(--text-bright); }
 @media (max-width: 650px) { .zoomHint { flex-basis: 100%; } }
 .zoom output { min-width: 44px; text-align: center; font: 12px var(--mono); color: var(--text-dim); font-variant-numeric: tabular-nums; }
-.scroller { overflow: auto; max-height: max(520px, calc(100vh - 200px)); }
+.scroller { overflow: auto; max-height: var(--trace-map-max-height, max(520px, calc(100vh - 200px))); }
 .scroller:focus-visible { outline: 2px solid var(--accent-light); outline-offset: -2px; }
 .canvas { position: relative; transform-origin: 0 0; }
 .band { position: absolute; left: 0; right: 0; background: color-mix(in srgb, var(--chain-l1) 5%, var(--bg)); }
