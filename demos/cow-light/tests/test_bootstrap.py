@@ -6,11 +6,64 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from deployment.bootstrap_chiado import Journal, require_chiado, validate_identity, l1_checkpoint
+from deployment.bootstrap_chiado import Journal, require_chiado, validate_identity, l1_checkpoint, chiado_fees, require_verified
 from network_config import load_config
+from deployment.verify_chiado import compiler_input
+from deployment.bootstrap_chiado import quote_transaction, validate_fee_quote
 
 
 class BootstrapTests(unittest.TestCase):
+    def test_cross_chain_quote_is_bound_capped_and_unexpired(self):
+        tx = quote_transaction({'type': 2, 'chainId': 10200, 'nonce': 3, 'gas': 6000000,
+            'from': '0x'+'12'*20, 'to': '0x'+'34'*20, 'data': '0x1234'})
+        canonical = json.dumps(tx, sort_keys=True, separators=(',', ':'))
+        quote = {'version': 1, 'chainId': tx['chainId'], 'nonce': tx['nonce'], 'expiresAt': hex(120),
+            'options': [{'type': '0x2', 'gas': tx['gas'], 'requestHash': 'bound', 'estimatedFee': hex(1000),
+                         'maxFeePerGas': hex(3000000000), 'maxPriorityFeePerGas': hex(2000000000)}]}
+        def digest(text):
+            self.assertEqual(text, canonical)
+            return 'bound'
+        self.assertEqual(validate_fee_quote(tx, quote, digest, 100)['maxPriorityFeePerGas'], 2000000000)
+        for key,value in [('nonce','0x4'),('chainId','0x1'),('expiresAt','0x1')]:
+            with self.assertRaises(ValueError):
+                validate_fee_quote(tx, dict(quote, **{key:value}), digest, 100)
+        for key,value in [('gas','0x5208'),('requestHash','different'),('maxFeePerGas',hex(6000000000))]:
+            modified = dict(quote, options=[dict(quote['options'][0], **{key:value})])
+            with self.assertRaises(ValueError):
+                validate_fee_quote(tx, modified, digest, 100)
+
+    def test_verification_gate_requires_full_address_specific_code_match(self):
+        valid = {'is_verified': True, 'is_partially_verified': False, 'deployed_bytecode': '0x1234'}
+        require_verified(valid, '0x1234')
+        for info in [{}, dict(valid, is_partially_verified=True), dict(valid, is_verified=False),
+                     dict(valid, deployed_bytecode='0x5678')]:
+            with self.assertRaisesRegex(ValueError, 'verification required'):
+                require_verified(info, '0x1234')
+
+    def test_verification_requires_exact_source_and_retains_settings(self):
+        with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as folder:
+            root = Path(folder)
+            (root / 'Token.sol').write_text('contract Token {}')
+            artifact = {'metadata': {'compiler': {'version': '0.8.30'},
+                'sources': {'Token.sol': {'keccak256': 'exact'}},
+                'settings': {'compilationTarget': {'Token.sol': 'Token'}, 'optimizer': {'enabled': True, 'runs': 200}}}}
+            version, target, data = compiler_input(artifact, root, lambda text: 'exact')
+            self.assertEqual(target, 'Token.sol:Token')
+            self.assertEqual(data['settings']['optimizer']['runs'], 200)
+            self.assertNotIn('compilationTarget', data['settings'])
+            with self.assertRaisesRegex(ValueError, 'hash mismatch'):
+                compiler_input(artifact, root, lambda text: 'different')
+            artifact['metadata']['sources'] = {'../outside.sol': {'keccak256': 'exact'}}
+            with self.assertRaisesRegex(ValueError, 'escapes'):
+                compiler_input(artifact, root, lambda text: 'exact')
+
+    def test_chiado_zero_tip_has_floor_and_fee_cap(self):
+        self.assertEqual(chiado_fees(7, 0), {'type': 2, 'maxFeePerGas': 1000000014,
+                                            'maxPriorityFeePerGas': 1000000000})
+        self.assertEqual(chiado_fees(10, 2000000000)['maxFeePerGas'], 2000000020)
+        with self.assertRaisesRegex(ValueError, 'safety cap'):
+            chiado_fees(3000000000, 0)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(dir=Path(__file__).parent)
         self.addCleanup(self.temp.cleanup)

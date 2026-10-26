@@ -1,0 +1,16 @@
+{
+  "COW_NETWORK": "chiado",
+  "L1_CHAIN_ID": "10200",
+  "L2_CHAIN_ID": "916969",
+  "L2_ROLLUP_ID": "1",
+  "BRIDGE_L1": "0x3B56C48139A17281B6dc669dcA88C83Ab2BeBa57",
+  "BRIDGE_L2": "0x7e0eFa3ea63018A5bCDc313C43192a5EBb2FF824",
+  "EEZ_MANAGER_L2": "0x4B2760F84B83d6b3829E30A7573B0172B6d6402C",
+  "WETH_L1": "0xc04DF6a3C039c7B9b5097387f052037B171180dB",
+  "WETH_L2": "0x65E484501FcA749605CdfbA1Fa47265C8a258BF5",
+  "TOKEN_CATALOG": "config/token-catalog.rog-916969.json",
+  "COW_MANIFEST": "runtime/chiado/deployments/rog-916969/cow-deployment.json",
+  "ROUTE_MANIFEST": "runtime/chiado/deployments/rog-916969/route-deployment.json",
+  "ORDER_QUEUE": "runtime/chiado/deployments/rog-916969/ui-orders.jsonl",
+  "SOLVER_LOG": "runtime/chiado/deployments/rog-916969/solver.log"
+}

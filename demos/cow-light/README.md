@@ -175,6 +175,15 @@ rerun the identical command later. If broadcast was interrupted or a transaction
 reverted, inspect it manually; the bootstrap intentionally will not guess a new
 nonce or retry with another signed transaction. Run one bootstrap at a time per
 deployer; file locking only protects the same deployment directory.
+Chiado submissions use EIP-1559 with a 1 gwei minimum priority fee because the
+RPC can quote only its tiny base fee. The maximum fee is twice the current base
+fee plus the priority fee, capped at 5 gwei; exceeding the cap stops execution.
+Each step checks the wallet can cover its full gas limit at that maximum fee.
+Cross-chain bridge calls additionally require `eez_quoteFee` from the L1
+Composer. The bootstrap validates the quote's exact transaction hash binding,
+chain, nonce, gas limit, expiry, fee cap and available balance, then signs its
+quoted fee fields unchanged. There is no fallback to an unquoted bridge call:
+ordinary L1 priority pricing may not cover EEZ's settlement tariff.
 
 After both wrapper addresses exist in safe L2 state, the script writes the
 token catalog and a non-secret `environment.json`. All existing demo Python
@@ -193,10 +202,37 @@ GPv2 and the route/helper are **not** deployed by the asset bootstrap; continue
 with the steps below, supplying `DETERMINISTIC_FACTORY_L1` and CoW artifacts.
 The V2 factory is not the deterministic CREATE2 deployment factory.
 
-Source verification remains required before using the deployment. This tooling
-does not automatically publish sources or constitute a security audit. Local
+For the existing ROG 916969 asset deployment, a public, non-secret configuration
+is also checked in as `config/deployments/rog-916969.json`; select it with
+`COW_DEPLOYMENT_ENV=config/deployments/rog-916969.json` to reuse the tokens/pool
+without running the bootstrap. It does not contain GPv2 or route addresses:
+those remain separate deployment prerequisites. Never use it for another EEZ
+network. The generic `chiado` profile remains free of deployment-specific assets.
+Addresses, receipt hashes, verification results and the zero-transaction rerun
+check are recorded in `deployment/records/rog-916969.json`. This is a historical
+asset-bootstrap record, not an end-to-end swap acceptance result.
+
+Source verification remains required before using the deployment. Run
+`python3 deployment/verify_chiado.py --deployment rog-916969 --submit` to submit
+the factory, liquidity setup, tokens and pair using their exact artifact metadata
+and hash-checked sources. Run again without `--submit` to check results.
+If the compiler verifier rejects an independently exact-matched deployment, use
+`--submit --via-sourcify` to request Blockscout's Sourcify import instead. Supply
+`L1_RPC` (or its shared dashboard setting) to discover nested creations from
+canonical receipts before bootstrap completion and compare explorer bytecode to
+live code. Inputs
+and submission records are retained in the deployment directory; queued or partial
+verification is not success. Wrapper source verification is separate. This tooling
+checks full, address-specific Blockscout verification against live L1 bytecode
+before initializing wrappers, and stops at this gate until verification succeeds.
+Sourcify exact matches are useful independent evidence, but do not bypass this
+explorer-publication gate. This tooling
+does not constitute a security audit. Local
 tests use a synchronous bridge adapter and do not prove live Composer behavior;
 a controlled testnet rehearsal is still required.
+When verifying bridge-created wrappers, use the bridge build's exact compiler
+settings, including its remappings. A separately built WrappedToken artifact can
+have identical executable code but different metadata; that is not an exact match.
 
 ### Mainnet: configure existing assets and liquidity
 

@@ -1,0 +1,52 @@
+{
+  "version": 1,
+  "observedDate": "2026-10-26",
+  "status": "assets-ready",
+  "l1ChainId": 10200,
+  "l2ChainId": 916969,
+  "rollupId": 1,
+  "l2GenesisHash": "0x87a3e6004e22cb18384ce96e5021ac57840ace14f81e15539510ecccf9ecf17c",
+  "l1Checkpoint": {
+    "number": 23704310,
+    "hash": "0xc9bebe2f0dbb9a5080b10a0e9e4214f09365a71e3f7fd1fd1bc7e8efbda61b3a"
+  },
+  "deployer": "0xbfD6EDf2C306d93334bF0e912A00B22bCFEa1BD9",
+  "contracts": {
+    "factoryL1": "0x273Ea4A1003c7f2c58372e24987c25A92D2855C3",
+    "liquidityL1": "0x5be3b9BB24DC5daAE169e12A5E98F49fE904dEa2",
+    "testWethL1": "0xc04DF6a3C039c7B9b5097387f052037B171180dB",
+    "testUsdL1": "0x273644746B23C218d09C9089b755C31a88454142",
+    "pairL1": "0xe9dcAAa1F31cD383E7CA08C30Bf11F1C1cF53deB",
+    "testWethL2": "0x65E484501FcA749605CdfbA1Fa47265C8a258BF5",
+    "testUsdL2": "0x96F8F77090C9B634EB90D686f6f6F17D927595DD"
+  },
+  "transactions": {
+    "factory": "0xe4bc918b0f20a5382bd804bb15998564c9b8cd43086c1cbc45bedc62b63fd745",
+    "liquidity": "0x2ff84627cb2e8c921b484a738d57b1ad29c7c0885489e76e1a2add0058886927",
+    "bridgeWeth": "0x16baabea0bea911427f9031e935df75957067825e2f0527a20c901ca79c1cb4b",
+    "bridgeUsd": "0x902c3f779f7898c28300f3f4384969d735e1f70b17ddec3803165d88e6ede51a"
+  },
+  "rejectedSubmission": {
+    "hash": "0x9d66ede742ab3831bc23d61e2bef08fb42a3061ee6c186e3a03ad91fae23a6d1",
+    "reason": "l1_tip_underfunded",
+    "recovery": "Confirmed not admitted and nonce 3 unused; archived rejection and obtained a fresh transaction-bound Composer quote before retry."
+  },
+  "checks": {
+    "allFourL1ReceiptsFinalized": true,
+    "bothWrappersPresentInSafeL2State": true,
+    "allSevenContractsFullyVerifiedOnTheirBlockscoutExplorers": true,
+    "explorerRuntimeMatchesLiveCode": true,
+    "rerunNewTransactions": 0,
+    "rerunNonceBefore": 4,
+    "rerunNonceAfter": 4,
+    "rerunBalanceUnchanged": true,
+    "bootstrapFeeXdai": "0.007925695055522109"
+  },
+  "verificationNotes": [
+    "Custom L1 contracts required Blockscout's Sourcify import; direct compiler verification failed despite independent exact runtime matches.",
+    "Wrappers reproduced with Solidity 0.8.34, optimizer runs 1, viaIR, Osaka, and the Bridge build's complete remappings; separately built WrappedToken metadata differed.",
+    "Detailed journals, exact compiler inputs, and verification responses are retained in the private local runtime deployment directory. No signing keys are published."
+  ],
+  "notDeployed": ["GPv2 settlement", "L2 route", "L1 route helper"],
+  "endToEndSwapTested": false
+}

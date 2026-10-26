@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import re
 import sys
+import time
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -14,6 +15,57 @@ from network_config import load_config, rpc_chain_id
 
 ZERO = '0x' + '00' * 20
 IMPLEMENTATION_SLOT = '0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc'
+
+
+def chiado_fees(base_fee, suggested_tip, max_fee_cap=5_000_000_000):
+    # Chiado's read RPC can return zero priority fee and only the base fee as
+    # gasPrice. Recent included transactions use a 1 gwei tip.
+    tip = max(1_000_000_000, suggested_tip)
+    maximum = 2 * base_fee + tip
+    if maximum > max_fee_cap:
+        raise ValueError('Chiado fee exceeds 5 gwei safety cap; review before retrying')
+    return {'type': 2, 'maxFeePerGas': maximum, 'maxPriorityFeePerGas': tip}
+
+
+def require_verified(info, runtime):
+    if (info.get('is_verified') is not True or info.get('is_partially_verified') is not False
+            or info.get('deployed_bytecode', '').lower() != runtime.lower()):
+        raise ValueError('Full Blockscout source verification required before wrapper initialization; run verify_chiado.py')
+
+
+def quote_transaction(tx):
+    quantities = {'type', 'chainId', 'nonce', 'gas', 'value'}
+    return {key: hex(int(tx.get(key, 0))) if key in quantities else tx[key].lower()
+            for key in ('type', 'chainId', 'from', 'to', 'nonce', 'gas', 'value', 'data')}
+
+
+def validate_fee_quote(transaction, quote, hash_text, now):
+    def quantity(value):
+        if not isinstance(value, str) or not re.fullmatch(r'0x(?:0|[1-9a-f][0-9a-f]*)', value):
+            raise ValueError('Invalid fee quote quantity')
+        return int(value, 16)
+    if quote.get('version') != 1 or quote.get('chainId') != transaction['chainId'] or quote.get('nonce') != transaction['nonce']:
+        raise ValueError('Fee quote chain/nonce mismatch')
+    expiry = quantity(quote.get('expiresAt'))
+    if not now < expiry <= now + 31:
+        raise ValueError('Fee quote expired or invalid clock')
+    options = quote.get('options', [])
+    if len(options) != 1 or options[0].get('type') != '0x2':
+        raise ValueError('Expected exactly one type-2 fee quote')
+    option = options[0]
+    if set(option) != {'type', 'gas', 'requestHash', 'estimatedFee', 'maxFeePerGas', 'maxPriorityFeePerGas'}:
+        raise ValueError('Unavailable or malformed fee quote')
+    if option['gas'] != transaction['gas']:
+        raise ValueError('Fee quote changed gas limit')
+    digest = hash_text(json.dumps(transaction, sort_keys=True, separators=(',', ':')))
+    if option['requestHash'].lower() != digest.lower():
+        raise ValueError('Fee quote transaction binding mismatch')
+    maximum, tip = quantity(option['maxFeePerGas']), quantity(option['maxPriorityFeePerGas'])
+    if maximum > 5_000_000_000 or tip > maximum:
+        raise ValueError('Quoted fee exceeds safety cap')
+    if quantity(option['estimatedFee']) > quantity(option['gas']) * maximum:
+        raise ValueError('Inconsistent quoted fee')
+    return {'type': 2, 'maxFeePerGas': maximum, 'maxPriorityFeePerGas': tip}
 
 
 def atomic_json(path, value):
@@ -169,9 +221,23 @@ def main():
 
         def send(name, build, cross_chain=False):
             def prepare():
+                fees = chiado_fees(l1.eth.get_block('latest')['baseFeePerGas'], l1.eth.max_priority_fee)
+                gas = 12000000 if name == 'liquidity' else 6000000
+                if l1.eth.get_balance(account.address) < gas * fees['maxFeePerGas']:
+                    raise ValueError('Insufficient deployment balance for maximum transaction fee')
                 tx = build({'from': account.address, 'nonce': l1.eth.get_transaction_count(account.address, 'pending'),
-                            'chainId': 10200, 'gas': 12000000 if name == 'liquidity' else 6000000,
-                            'gasPrice': l1.eth.gas_price})
+                            'chainId': 10200, 'gas': gas, **fees})
+                if (composer if cross_chain else l1).eth.estimate_gas(tx) > gas:
+                    raise ValueError('Deployment simulation exceeds configured gas limit')
+                if cross_chain:
+                    transaction = quote_transaction(tx)
+                    response = composer.provider.make_request('eez_quoteFee', [transaction, {'transactionTypes': ['0x2']}])
+                    if response.get('error') or not response.get('result'):
+                        raise ValueError('Composer fee quote unavailable; refusing unquoted submission')
+                    tx.update(validate_fee_quote(transaction, response['result'],
+                        lambda text: Web3.to_hex(Web3.keccak(text=text)), time.time()))
+                    if l1.eth.get_balance(account.address) < gas * tx['maxFeePerGas']:
+                        raise ValueError('Insufficient deployment balance for quoted cross-chain fee')
                 signed = account.sign_transaction(tx)
                 return Web3.to_hex(Web3.keccak(signed.raw_transaction)), signed.raw_transaction
             return journal.transaction(name, prepare,
@@ -192,6 +258,11 @@ def main():
         weth, token, pair = [getattr(contract.functions, name)().call() for name in ('weth', 'token', 'pair')]
         if read(l1, factory, 'getPair', ('address', 'address'), args=(weth, token)) != pair:
             raise ValueError('Factory/pair mismatch')
+        import requests
+        for address in (factory, fixture, weth, token, pair):
+            response = requests.get('https://gnosis-chiado.blockscout.com/api/v2/smart-contracts/' + address, timeout=30)
+            response.raise_for_status()
+            require_verified(response.json(), Web3.to_hex(l1.eth.get_code(address)))
         for name, asset in [('weth', weth), ('token', token)]:
             send('bridge-' + name, contract.functions.initializeWrapper(asset).build_transaction, cross_chain=True)
         wrapped = []

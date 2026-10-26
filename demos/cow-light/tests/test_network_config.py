@@ -41,6 +41,15 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual(cfg['SETTLEMENT_L2'], '0x2ee5672Aef87B35fe544C41BdfBB7C8D0F7c3478')
         self.assertEqual(len(cfg.catalog()), 100)
 
+    def test_saved_rog_asset_configuration_is_explicit_and_portable(self):
+        cfg = self.config(COW_DEPLOYMENT_ENV='config/deployments/rog-916969.json')
+        self.assertEqual(cfg['L2_CHAIN_ID'], 916969)
+        self.assertEqual(cfg['L1_CHAIN_ID'], 10200)
+        self.assertEqual(cfg.catalog()[0]['symbol'], 'ctUSD')
+        self.assertEqual(cfg['ORDER_QUEUE'], self.root / 'runtime/chiado/deployments/rog-916969/ui-orders.jsonl')
+        with self.assertRaisesRegex(ValueError, 'SETTLEMENT_L2'):
+            cfg['SETTLEMENT_L2']
+
     def test_chiado_has_no_mainnet_fallback(self):
         cfg = self.config(COW_NETWORK='chiado')
         self.assertEqual(cfg['L1_CHAIN_ID'], 10200)
