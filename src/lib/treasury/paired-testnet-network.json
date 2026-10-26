@@ -1,0 +1,48 @@
+{
+  "version": 1,
+  "source": "https://eez.dev/dashboard/config.json",
+  "protocolCommit": "abcf9d8ffc4e0ccb5df271fc19efdf9a7fb57774",
+  "registry": "0x96D6617629b90BdF275dD1d4888170aD5266FA33",
+  "manager": "0x4B2760F84B83d6b3829E30A7573B0172B6d6402C",
+  "rollupId": 1,
+  "bridges": {
+    "l1": {
+      "address": "0x79ACB6EAB88C13b4696A9F290190Dbf50Edf563F",
+      "codeHash": "0x48730554b929139e214994626b444cf4f28183016553151fdcbf99d9f259aacc",
+      "verification": "testnet-bridge.json"
+    },
+    "l2": {
+      "address": "0x79ACB6EAB88C13b4696A9F290190Dbf50Edf563F",
+      "codeHash": "0x48730554b929139e214994626b444cf4f28183016553151fdcbf99d9f259aacc",
+      "verification": "testnet-bridge.json"
+    }
+  },
+  "chains": {
+    "l1": {
+      "chainId": 10200,
+      "checkpoint": {
+        "number": "0x16983e8",
+        "hash": "0x0a148e4f0b189ffe90c1804ff22224e843126041de7855b44e65f4761f46c786"
+      },
+      "protocol": {
+        "proxy": "0x96D6617629b90BdF275dD1d4888170aD5266FA33",
+        "proxyCodeHash": "0xa704a451693b92030880086af3696b25b07f3bd3c4dddd223ff06c46ae2dc756",
+        "implementation": "0xD3412D30634a1fce5f300C58E15882a88210791c",
+        "implementationCodeHash": "0xe7c6836fb3fbe6d4db76efcd700c603fbc18537a8cfc2c6046bd416d768838ab"
+      }
+    },
+    "l2": {
+      "chainId": 699069,
+      "checkpoint": {
+        "number": "0x0",
+        "hash": "0x05227a1af51a988231b625b276c6b29594f0a93090efd93463934cd1bf6e606e"
+      },
+      "protocol": {
+        "proxy": "0x4B2760F84B83d6b3829E30A7573B0172B6d6402C",
+        "proxyCodeHash": "0x88068de4c46d94b72f5d39f17b5407c958ec6920376ff1dd366995f65564372a",
+        "implementation": "0x85e132FCe6b886dAB7a37bB91c3dE6B923040C13",
+        "implementationCodeHash": "0x86846971c30118e849ea9b1bd58ba56319489bfc95d4cf0a118fd00d9ca16ea3"
+      }
+    }
+  }
+}

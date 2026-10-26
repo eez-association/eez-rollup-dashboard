@@ -98,8 +98,8 @@ contract PairedTreasuryPolicy {
         ) revert InvalidConfiguration();
         uint64 local = bridge_.rollupId();
         address registry = bridge_.manager();
-        address remote = bridge_.canonicalBridgeAddress();
-        if ((local != 0 && local != l2RollupId_) || registry.code.length == 0 || remote == address(0)) {
+        address remote = _counterpart(bridge_);
+        if ((local != 0 && local != l2RollupId_) || registry.code.length == 0) {
             revert InvalidConfiguration();
         }
         // Verify the local EEZ identity, not only the bridge's stored setting.
@@ -149,7 +149,7 @@ contract PairedTreasuryPolicy {
     function activate() external {
         bool startedHere = msg.sender == safe;
         if (!startedHere && msg.sender != address(peer)) revert OnlyPeer();
-        if (active || peerPolicy == address(0) || bridge.canonicalBridgeAddress() != remoteBridge) {
+        if (active || peerPolicy == address(0) || _counterpart(bridge) != remoteBridge) {
             revert InvalidConfiguration();
         }
         Configuration memory other = peer.configuration();
@@ -163,6 +163,13 @@ contract PairedTreasuryPolicy {
         active = true;
         if (startedHere) peer.activate();
         emit Activated();
+    }
+
+    /// @dev Match the normal Bridge: an unset override means the same address on the peer chain.
+    /// Only read during construction and activation; payments trust the validated pair.
+    function _counterpart(IStandardBridge localBridge) private view returns (address) {
+        address remote = localBridge.canonicalBridgeAddress();
+        return remote == address(0) ? address(localBridge) : remote;
     }
 
     /// @notice Owners sign the exact total, destination, epoch and L1 contribution.

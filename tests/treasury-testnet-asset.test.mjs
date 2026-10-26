@@ -11,6 +11,23 @@ const a = n => toHex(n, { size: 20 }), h = n => toHex(n, { size: 32 });
 const target = { l1: { rpc: 'http://127.0.0.1:1', front: 'http://127.0.0.1:1', explorer: 'https://example.com' },
   l2: { rpc: 'http://127.0.0.1:2', front: 'http://127.0.0.1:2', explorer: 'https://example.com' }, fees: { l1: '100', l2: '100' } };
 const fixture = () => new TestnetAsset(target, release, a(1), a(2));
+test('existing testnet bridge accepts the same-address default and rejects a changed counterpart or code', async () => {
+  const profile = read('src/lib/treasury/paired-testnet-network.json');
+  const bridgeCode = read('verification/dependencies/testnet-bridge.json').runtime;
+  for (const [peer, code, accepted] of [[zeroAddress, bridgeCode, true], [profile.bridges.l2.address, bridgeCode, true], [a(9), bridgeCode, false], [zeroAddress, '0x6000', false]]) {
+    const d = new TestnetAsset(target, release, profile.bridges.l1.address, profile.bridges.l2.address);
+    d.read = async (_chain, _address, _abi, method) => ({manager:profile.registry, rollupId:0n, canonicalBridgeAddress:peer})[method];
+    d.rpc = async (_chain, method) => {
+      if (method === 'eth_chainId') return toHex(profile.chains.l1.chainId);
+      if (method === 'eth_getBlockByNumber') return profile.chains.l1.checkpoint;
+      if (method === 'eth_getCode') return code;
+      // Stop at the next validation stage after the real bridge checks.
+      if (method === 'eth_getStorageAt') throw new Error('reached protocol validation');
+      assert.fail(method);
+    };
+    await assert.rejects(d.validate(), accepted ? /reached protocol validation/ : /configured normal bridge pair/);
+  }
+});
 test('active release contains only the current treasury, normal bridge and fixed faucet contracts', () => {
   for (const name of ['PairedTreasuryPolicy','TestUSDC','Bridge']) assert(release.contracts[name]);
   for (const name of ['TreasuryPolicy','StandardBridgeTreasuryPolicy','StandardBridgeDelegate','TreasuryAliasReader','SharedTreasuryBridge','SharedTestUSDC','TestUSDCFaucet','TestUSDCClaim']) assert.equal(release.contracts[name], undefined);
@@ -77,7 +94,7 @@ test('testnet uses both local paired-policy constructors and never a treasury br
 });
 
 test('L2 fixed claims require the exact canonical bridge call and wrapped mint', async () => {
-  const d = fixture(), profile = read('src/lib/treasury/shared-network.json'), token = a(4), recipient = a(5), wrapped = a(7);
+  const d = fixture(), profile = read('src/lib/treasury/paired-testnet-network.json'), token = a(4), recipient = a(5), wrapped = a(7);
   const p = { id:'l2',kind:'l2',chain:'l1',sender:a(3),nonce:'0x2',data:d.data('l2',recipient),token,to:token,recipient,l2StartBlock:'0x10',hash:h(9),build:release.build };
   const journal = { token,pending:p }, callHash = h(100), peerData = '0x1234';
   const outgoing = { address:profile.registry, topics:encodeEventTopics({abi:transferAbi,eventName:'CrossChainCallExecuted',args:{crossChainCallHash:callHash,proxy:a(8)}}),

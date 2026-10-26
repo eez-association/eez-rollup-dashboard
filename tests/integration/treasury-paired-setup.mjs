@@ -2,6 +2,7 @@
 // managers. L2 Safe executions are sent locally: this does not prove EEZ relay,
 // Composer, canonical cross-chain settlement, or native rollback behavior.
 import assert from 'node:assert/strict';
+import { argv } from 'node:process';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:net';
 import { once } from 'node:events';
@@ -15,7 +16,8 @@ import { buildSafeTransaction, encodeSafeExecution, packEOAApprovals, packOwnerA
 const read = path => JSON.parse(readFileSync(path));
 const release = read(`src/lib/treasury/builds/${read('src/lib/treasury/current-build.json').build}.json`), artifacts = release.contracts;
 const [A, B] = [0xa11cen, 0xb0bn].map(n => privateKeyToAccount(toHex(n, { size: 32 })));
-const ids = { l1: 10200, l2: 906969 }, wait = ms => new Promise(r => setTimeout(r, ms));
+const pairedNetwork = read('src/lib/treasury/paired-testnet-network.json');
+const ids = { l1: pairedNetwork.chains.l1.chainId, l2: pairedNetwork.chains.l2.chainId }, wait = ms => new Promise(r => setTimeout(r, ms));
 mkdirSync('.runtime/paired-setup', { recursive: true }); const directory = mkdtempSync('.runtime/paired-setup/anvil-');
 const reservation = createServer().listen(0, '127.0.0.1'); await once(reservation, 'listening'); const port = reservation.address().port; await new Promise(r => reservation.close(r));
 const fd = openSync(`${directory}/anvil.log`, 'w'), process = spawn('anvil', ['--host','127.0.0.1','--port',String(port),'--chain-id',String(ids.l1),'--silent'], { stdio: ['ignore', fd, fd] }); closeSync(fd);
@@ -52,7 +54,7 @@ try {
   Object.assign(network, { testnet: true, registry, manager });
   for (const chain of ['l1','l2']) Object.assign(network.chains[chain], { chainId: ids[chain], number: '0x0', hash: (await rpc('eth_getBlockByNumber',['0x0',false])).hash });
   network.contracts.bridgeL1.address = bridgeL1; network.contracts.bridgeL2.address = bridgeL2; network.contracts.usdcProxy.address = tokenL1;
-  const target = { l1: { rpc:url,front:url,explorer:'https://example.com' }, l2: { rpc:url,front:url,explorer:'https://example.com' }, fees: {l1:'100',l2:'100'} };
+  const target = { l1: { rpc:url,front:url,explorer:'https://example.com' }, l2: { rpc:url,front:url,explorer:'https://example.com' }, fees: {l1:'100000000000000000',l2:'100000000000000000'} };
   const engine = new MainnetSetup(target, release, network);
   // Only network pin/Composer checks are fixture-controlled. All contract reads,
   // bytecode checks, CREATE predictions, owner reviews and executions are real.
@@ -65,7 +67,12 @@ try {
     const hash = keccak256(await rpc('eth_getCode',[address,'latest']));
     return {chain,proxy:address,implementation:address,proxyHash:hash,implementationHash:hash};
   }));
-  let state = await engine.configure(A.address, safeL1);
+  let state;
+  if (argv.includes('--browser')) {
+    const { deploymentBrowser } = await import('./treasury-deployment-browser.mjs');
+    state = await deploymentBrowser({network,target,engine,A,B,safeL1,rpc,send,evidence,directory,ids});
+  } else {
+  state = await engine.configure(A.address, safeL1);
   assert.equal(state.version,3); assert.equal(state.addresses.bridgeExecutorL1,undefined);
   for (let i = 0; i < 4; i++) {
     const chain = i === 1 || i === 2 ? 'l2' : 'l1', nonce = await rpc('eth_getTransactionCount',[A.address,'pending']);
@@ -82,6 +89,7 @@ try {
     const signatures = chain === 'l1' ? await packEOAApprovals(tx,review.owners,2,approvals) : await packOwnerApprovals(tx,state.addresses.adapter,review.owners,2,approvals);
     const receipt = await send(chain,tx.domain.verifyingContract,encodeSafeExecution(tx,signatures));
     state = { ...state, completed:[...state.completed,{chain,hash:receipt.transactionHash,number:receipt.blockNumber,blockHash:receipt.blockHash}] };
+  }
   }
   const a = state.addresses, tokenL2 = network.contracts.wrappedUSDC.address;
   for (const [chain,policy] of [['l1',a.policyL1],['l2',a.policy]]) assert.equal(await engine.io.read(chain,policy,'PairedTreasuryPolicy','active'),true);

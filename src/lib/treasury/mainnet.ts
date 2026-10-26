@@ -1,3 +1,4 @@
+import pairedTestnet from './paired-testnet-network.json' with { type: 'json' };
 import { pairedPolicyAbi } from "./pairedPolicy.ts";
 import { paymentVersion, verifiesL1Initiation, verifiesReverseFunding } from "./savedPayments.ts";
 import { decodeFunctionResult, encodeFunctionData, isAddress, keccak256, parseAbi, toHex, zeroAddress } from "viem";
@@ -28,7 +29,7 @@ function bound(c: TreasuryConfig, chain: "l1" | "l2", a: Address) {
  * Hashes are reviewed operator inputs; matching them is not a security audit. */
 export function parseMainnetBindings(c: TreasuryConfig) {
   const m = c.mainnet, p = c.payments;
-  check(c.l1.chainId === 1 && c.l2.chainId > 1 && c.l2.chainId !== 906969 && c.l2.chainId !== 10200,
+  check(c.l1.chainId === 1 && c.l2.chainId > 1 && c.l2.chainId !== 906969 && c.l2.chainId !== pairedTestnet.chains.l2.chainId && c.l2.chainId !== 10200,
     "Mainnet requires Ethereum and a separately configured Ethereum-anchored EEZ network");
   check(m && Number.isSafeInteger(m.rollupId) && m.rollupId > 0 && address(m.usdcImplementation), "Missing mainnet deployment bindings");
   check(c.safeImplementations && !c.action && p && !p.invoiceMerchant && !p.invoiceControl,

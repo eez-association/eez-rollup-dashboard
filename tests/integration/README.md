@@ -8,6 +8,15 @@ request browser checks. Browser tests require Chromium's sandbox. The older
 shared-policy, invoice and variable-faucet walkthroughs below are historical;
 they are not active dashboard deployment paths. Native `--ui` remains gated.
 
+`npm run test:treasury:browser` uses the actual setup component to deploy all
+four preparation batches and approve both Safe configuration batches, then
+checks activation, the generated manifest and all four payment routes. Every
+pending step is reloaded, and wallet cancellation must not consume a nonce or
+leave a pending request. Anvil supplies the actual contracts, receipts and Safe
+signature checks. Network discovery and fee pricing are controlled fixtures;
+the final L1 alias request is checked but sent directly to the logical L2 Safe.
+This is browser/EVM coverage, not native Composer or proof validation.
+
 This scenario runs the dashboard's Safe-signing helpers and `L1Owners` through
 EEZ's native process fixture. The fixture starts a new embedded development L1,
 Composer, real proof signer, and independent L2 follower. It leases loopback ports

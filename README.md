@@ -164,7 +164,7 @@ once. Local contributions transfer first, then the authenticated peer contribute
 Normal bridge submissions use L1 while signatures retain the initiating Safe's
 domain and nonce. Ethereum uses its existing Circle USDC and normal bridges.
 
-On **Chiado 10200 / EEZ-X 906969**, configure both normal bridge addresses in the
+On **Chiado 10200 / EEZ-X 699069**, configure both normal bridge addresses in the
 dashboard first. The treasury can deploy the current `TestUSDC` or validate an
 existing instance of that exact contract. Each explicit `claim(address)` or
 `claimOnL2(address)` sends exactly **1,000 Test USDC**; there is no arbitrary-amount
@@ -172,6 +172,12 @@ faucet, dispenser, claim helper or custom treasury bridge. Make an EEZ-X claim t
 create the wrapped representation before continuing to Safe setup. The recipient
 can be a wallet or Safe. The connected wallet pays gas on Chiado; claims and Safe
 setup are separate actions.
+
+The current testnet profile pins the public dashboard's chain checkpoints,
+protocol implementations and normal bridge bytecode. A zero bridge counterpart
+override means the same bridge address on the other chain, matching the normal
+bridge implementation. Policies validate that effective counterpart during
+construction and activation; payments do not repeat those setup checks.
 
 Deployment and claim requests are saved before the wallet sends. Reloading keeps
 unresolved requests locked and verifies their exact transaction identity before
@@ -190,6 +196,12 @@ planner batches, both Safe approval batches, activation and all four payment
 routes on an isolated Anvil EVM with read-through managers. It does not prove
 native EEZ relay or rollback behavior. The native `--ui` fixture remains gated
 pending migration; older runbooks and audit records describe historical flows.
+
+`npm run test:treasury:browser` drives all six setup steps through sandboxed
+Chromium with real planner calldata, contracts and Safe owner signatures. It
+checks wallet cancellation and reloads every pending step before confirming it.
+Its final L1 alias request is verified but executed directly on logical L2 in
+the single-EVM fixture; native transport and settlement need the native suite.
 
 Transaction history uses network logos for the route, labels transaction links
 “L1 tx:” and “L2 tx:”, and shows linked L1/L2 blocks in their own column.
@@ -447,6 +459,18 @@ npm run dev
 
 Open <http://127.0.0.1:8080/dashboard/>. The generated `.runtime/config.json` is ignored by
 Git.
+
+To test the production build with the same runtime configuration:
+
+```bash
+npm run build
+EEZ_UI_RUNTIME_CONFIG=.runtime/config.json npm run preview -- --host 127.0.0.1 --port 8083 --strictPort
+```
+
+Preview serves the browser configuration and proxies RPC/Composer requests to
+the configured upstream paths, including path-based public gateways. Public
+gateway URLs are suitable for a local preview; a deployment on that gateway's
+own server must retain its internal upstream configuration to avoid proxy loops.
 
 ## Cross-chain fee quotes
 

@@ -8,7 +8,7 @@ import { findIncomingCallEvidence } from './mainnetSetupRelay.ts';
 import { transferAbi } from './transfers.ts';
 import { probeComposer } from '../composerDiscovery.ts';
 import { quoteCrossChainFees } from '../fees/payment.mjs';
-import profile from './shared-network.json' with { type: 'json' };
+import profile from './paired-testnet-network.json' with { type: 'json' };
 
 export const CLAIM_AMOUNT = 1_000_000_000n;
 export type AssetPending = DeploymentPending & { kind: 'deploy' | 'l1' | 'l2'; token?: Address; recipient: Address; l2StartBlock: Hex; build: string };
@@ -50,8 +50,10 @@ export class TestnetAsset extends DeploymentIO {
         this.read<bigint>(chain, bridge, 'Bridge', 'rollupId'), this.read<Address>(chain, bridge, 'Bridge', 'canonicalBridgeAddress'),
       ]);
       check(BigInt(id) === BigInt(expected.chainId) && reference?.hash === expected.checkpoint.hash, 'Testnet identity changed');
-      check(this.runtimeMatches(code, 'Bridge') && same(manager, chain === 'l1' ? profile.registry : profile.manager)
-        && rollup === (chain === 'l1' ? 0n : BigInt(profile.rollupId)) && same(peer, chain === 'l1' ? this.bridgeL2 : this.bridgeL1),
+      check(same(bridge, profile.bridges[chain].address) && keccak256(code) === profile.bridges[chain].codeHash
+        && same(manager, chain === 'l1' ? profile.registry : profile.manager)
+        && rollup === (chain === 'l1' ? 0n : BigInt(profile.rollupId))
+        && same(same(peer, zeroAddress) ? bridge : peer, chain === 'l1' ? this.bridgeL2 : this.bridgeL1),
         'Use the configured normal bridge pair; retired treasury bridges are unsupported');
       const p = expected.protocol;
       const [slot, proxyCode, implementationCode] = await Promise.all([
@@ -148,7 +150,7 @@ export class TestnetAsset extends DeploymentIO {
     check(wrapped !== zeroAddress, 'Claim 1,000 Test USDC on EEZ-X to create the wrapped token first');
     const code = async (chain: 'l1' | 'l2', address: Address) => ({ chain, address, hash: keccak256(await this.rpc<Hex>(chain, 'eth_getCode', [address, 'latest'])) });
     const asset = await code('l1', token);
-    const selected: SetupNetwork = { source: 'paired-testnet', protocolCommit: this.artifacts.core, testnet: true,
+    const selected: SetupNetwork = { source: 'paired-testnet', protocolCommit: profile.protocolCommit, testnet: true,
       registry: profile.registry, manager: profile.manager, rollupId: profile.rollupId,
       chains: { l1: { chainId: profile.chains.l1.chainId, ...profile.chains.l1.checkpoint }, l2: { chainId: profile.chains.l2.chainId, ...profile.chains.l2.checkpoint } },
       protocol: (['l1', 'l2'] as const).map(chain => { const p = profile.chains[chain].protocol; return { chain, proxy: p.proxy, implementation: p.implementation, proxyHash: p.proxyCodeHash, implementationHash: p.implementationCodeHash }; }),

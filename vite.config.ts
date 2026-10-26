@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { defineConfig, type Plugin, type ProxyOptions } from "vite";
+import { defineConfig, type Plugin, type ProxyOptions, type ViteDevServer } from "vite";
 import react from "@vitejs/plugin-react";
 
 const rootDir = path.dirname(fileURLToPath(import.meta.url));
@@ -18,25 +18,26 @@ function loadRuntimeFile(): RuntimeFile {
 }
 
 function runtimeConfigPlugin(runtime: RuntimeFile): Plugin {
-  return {
-    name: "eez-runtime-config",
-    configureServer(server) {
-      const base = process.env.EEZ_UI_BASE_PATH || "/dashboard/";
-      for (const configPath of new Set(["/config.json", `${base}config.json`])) {
-        server.middlewares.use(configPath, (_req, res) => {
-          const latest = loadRuntimeFile();
-          res.statusCode = 200;
-          res.setHeader("Content-Type", "application/json");
-          res.end(JSON.stringify(latest.browser ?? runtime.browser ?? {}, null, 2));
-        });
-      }
-    },
+  const configure = (server: Pick<ViteDevServer, "middlewares">) => {
+    const base = process.env.EEZ_UI_BASE_PATH || "/dashboard/";
+    for (const configPath of new Set(["/config.json", `${base}config.json`])) {
+      server.middlewares.use(configPath, (_req, res) => {
+        const latest = loadRuntimeFile();
+        res.statusCode = 200;
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify(latest.browser ?? runtime.browser ?? {}, null, 2));
+      });
+    }
   };
+  return { name: "eez-runtime-config", configureServer: configure, configurePreviewServer: configure };
 }
 
 function rpcProxy(target: string | undefined): ProxyOptions | undefined {
   if (!target) return undefined;
-  return { target, changeOrigin: true, rewrite: () => "/" };
+  const upstream = new URL(target);
+  const endpoint = upstream.pathname + upstream.search;
+  upstream.pathname = "/"; upstream.search = ""; upstream.hash = "";
+  return { target: upstream.href, changeOrigin: true, rewrite: () => endpoint };
 }
 
 export default defineConfig(() => {

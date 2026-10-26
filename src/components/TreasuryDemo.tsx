@@ -7,7 +7,7 @@ import { isMainnetSetupTarget, loadMainnetManifest, mainnetSetupKey } from '../l
 import { parseTreasuryConfig, requireDashboardTreasury } from '../lib/treasury/client';
 import { TreasuryConnected } from './TreasuryConnected';
 import type { TreasuryWallet } from './TreasuryConnected';
-import profile from '../lib/treasury/shared-network.json';
+import profile from '../lib/treasury/paired-testnet-network.json';
 
 function TreasuryDemoView({ wallet, ready }: { wallet: TreasuryWallet; ready: boolean }) {
   const [revision, setRevision] = useState(0);

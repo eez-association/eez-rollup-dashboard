@@ -1,3 +1,4 @@
+import pairedTestnet from './paired-testnet-network.json' with { type: 'json' };
 import { validatePairedPayments } from "./pairedPolicy.ts";
 import { readPaymentDeployment, paymentVersion, recordedPaymentTransaction, verifiesL1Initiation, verifiesReverseFunding } from "./savedPayments.ts";
 import type { RecordedPayment } from "./savedPayments.ts";
@@ -72,7 +73,7 @@ export function parseTreasuryConfig(value: unknown): TreasuryConfig {
   for (const [chain, address] of [["l1", c.safeL1], ["l2", c.safeL2], ["l2", c.adapter], ...(c.action ? [["l2", c.action] as const] : [])] as const)
     requireThat(c.code.some(b => b.chain === chain && same(b.address, address)), "Missing application code identity");
   if (c.environment !== "isolated-devnet") {
-    if (c.environment === "dashboard-testnet") requireThat(c.l1.chainId === 10200 && c.l2.chainId === 906969, "Unsupported dashboard testnet pair");
+    if (c.environment === "dashboard-testnet") requireThat(c.l1.chainId === pairedTestnet.chains.l1.chainId && c.l2.chainId === (c.payments?.pair ? pairedTestnet.chains.l2.chainId : 906969), "Unsupported dashboard testnet pair");
     requireThat(c.fees && /^[1-9]\d{0,77}$/.test(c.fees.maxTotalWei), "Dashboard treasury requires a fee reservation limit");
     requireThat(Array.isArray(c.protocol) && c.protocol.length === 2, "Shared treasury requires protocol implementation bindings");
     for (const chain of ["l1", "l2"] as const) {

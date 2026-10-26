@@ -114,7 +114,8 @@ export class MainnetSetup {
       const bridge = this.network.contracts[chain === "l1" ? "bridgeL1" : "bridgeL2"];
       const [manager, rollup, counterpart, implementation] = await Promise.all([read(chain, bridge.address, "manager"), read(chain, bridge.address, "rollupId"), read(chain, bridge.address, "canonicalBridgeAddress"),
         this.io.rpc<Hex>(chain, "eth_getStorageAt", [bridge.address, EIP1967_IMPLEMENTATION_SLOT, "latest"])]);
-      check(same(manager as string, bridge.bindings.manager) && rollup === BigInt(bridge.bindings.rollupId) && same(counterpart as string, bridge.bindings.counterpart) && BigInt(implementation) === 0n, "The shared bridge connection changed");
+      const remote = same(counterpart as string, zeroAddress) ? bridge.address : counterpart as string;
+      check(same(manager as string, bridge.bindings.manager) && rollup === BigInt(bridge.bindings.rollupId) && same(remote, bridge.bindings.counterpart) && BigInt(implementation) === 0n, "The shared bridge connection changed");
     }
     const [wrapped, origin, authority, paused] = await Promise.all([read("l2", this.network.contracts.bridgeL2.address, "getWrappedToken", [this.network.contracts.usdcProxy.address, 0n]),
       read("l2", this.network.contracts.bridgeL2.address, "wrappedTokenInfo", [this.network.contracts.wrappedUSDC.address]), read("l2", this.network.contracts.wrappedUSDC.address, "BRIDGE"), this.network.testnet ? false : read("l1", this.network.contracts.usdcProxy.address, "paused")]);
@@ -313,7 +314,7 @@ export class MainnetSetup {
     const receipt = await this.io.rpc<{ status: Hex; blockNumber: Hex; blockHash: Hex; contractAddress: Address | null; logs: Log[] } | null>(p.chain, "eth_getTransactionReceipt", [p.hash]);
     if (!receipt) return { ...s, pending: p };
     const tx = await this.io.rpc<{ from: Address; to: Address | null; input: Hex; value: Hex; nonce: Hex }>(p.chain, "eth_getTransactionByHash", [p.hash]);
-    check(same(tx.from, p.sender) && (p.to ? same(tx.to ?? "", p.to) : tx.to === null) && tx.input === p.data
+    check(same(tx.from, p.sender) && (p.to ? same(tx.to ?? "", p.to) : tx.to === null) && same(tx.input, p.data)
       && BigInt(tx.value) === 0n && BigInt(tx.nonce) === BigInt(p.nonce), "The setup transaction was replaced with different work");
     const canonical = await this.io.rpc<{ hash: Hex }>(p.chain, "eth_getBlockByNumber", [receipt.blockNumber, false]);
     if (canonical?.hash !== receipt.blockHash) return { ...s, pending: p };

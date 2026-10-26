@@ -280,6 +280,44 @@ contract PairedTreasuryPolicyTest is OwnerFixture {
         vm.clearMockedCalls();
     }
 
+    function testUnsetBridgeOverrideUsesSameAddressOnPeerChain() public {
+        bridge1.setCanonicalBridgeAddress(address(0));
+        bridge2.setCanonicalBridgeAddress(address(0));
+        PairedTreasuryPolicy first =
+            new PairedTreasuryPolicy(address(safeL1), module1, usdc, IStandardBridge(address(bridge1)), ROLLUP_ID);
+        PairedTreasuryPolicy second =
+            new PairedTreasuryPolicy(address(safeL2), module2, wrapped, IStandardBridge(address(bridge2)), ROLLUP_ID);
+        assertEq(first.remoteBridge(), address(bridge1));
+        assertEq(second.remoteBridge(), address(bridge2));
+        vm.prank(address(safeL1));
+        first.connectPeer(address(second));
+        vm.prank(address(safeL2));
+        second.connectPeer(address(first));
+        // These fixtures use different bridge addresses on one EVM. They must
+        // fail activation without explicit overrides matching the other bridge.
+        vm.prank(address(safeL1));
+        vm.expectRevert(PairedTreasuryPolicy.InvalidConfiguration.selector);
+        first.activate();
+        assertFalse(first.active());
+
+        // Model the remote configuration for a bridge at the same address on
+        // another chain. This checks activation, not native cross-chain delivery.
+        PairedTreasuryPolicy.Configuration memory other = second.configuration();
+        other.bridge = address(bridge1);
+        other.remoteBridge = address(bridge1);
+        vm.mockCall(address(first.peer()), abi.encodeCall(PairedTreasuryPolicy.configuration, ()), abi.encode(other));
+        vm.mockCall(address(first.peer()), abi.encodeCall(PairedTreasuryPolicy.activate, ()), bytes(""));
+        bridge1.setCanonicalBridgeAddress(address(0xBAD));
+        vm.prank(address(safeL1));
+        vm.expectRevert(PairedTreasuryPolicy.InvalidConfiguration.selector);
+        first.activate();
+        bridge1.setCanonicalBridgeAddress(address(0));
+        vm.prank(address(safeL1));
+        first.activate();
+        assertTrue(first.active());
+        vm.clearMockedCalls();
+    }
+
     function testFuzzChangedSplitAndReplayRejectOwnerSignatures(bool startL1) public {
         (ISafe account, address policy, bytes memory data, bytes memory signatures) =
             _signedPayment(startL1, false, 120 * U, 80 * U);

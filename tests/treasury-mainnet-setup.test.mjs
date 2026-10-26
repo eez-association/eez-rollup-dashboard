@@ -82,6 +82,17 @@ test('setup confirmation rejects a different replacement transaction',async()=>{
  assert.equal(s.completed.length,0);
 });
 
+test('setup recovery compares calldata bytes despite RPC hex normalization',async()=>{
+ const {engine,safe,deployer}=fixture(),s=await engine.configure(deployer,safe);
+ s.pending={id:'0',chain:'l1',sender:deployer,nonce:'0x1',data:'0xAbCd',hash:zeroHash,outputs:[]};
+ engine.io.trackPending=async state=>state;
+ let input='0xabcd';
+ engine.io.rpc=async(_chain,method)=>method==='eth_getTransactionReceipt'?{status:'0x1',blockNumber:'0xa',blockHash:zeroHash,logs:[]}:
+   method==='eth_getTransactionByHash'?{from:deployer,to:null,input,nonce:'0x1',value:'0x0'}:{hash:zeroHash};
+ const next=await engine.reconcile(s);assert.equal(next.completed.length,1);assert.equal(next.pending,undefined);
+ input='0xabce';await assert.rejects(engine.reconcile(s),/replaced with different work/);
+});
+
 
 test('new Ethereum treasuries reuse the same verified helpers across wallets and Safes',async()=>{
  const {engine,safe}=fixture(),first=await engine.configure(addr(201),safe),otherSafe=addr(103),rpc=engine.io.rpc;
