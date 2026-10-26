@@ -24,6 +24,8 @@ class BootstrapTests(unittest.TestCase):
             self.assertEqual(text, canonical)
             return 'bound'
         self.assertEqual(validate_fee_quote(tx, quote, digest, 100)['maxPriorityFeePerGas'], 2000000000)
+        with self.assertRaisesRegex(ValueError, 'safety cap'):
+            validate_fee_quote(tx, quote, digest, 100, max_fee_cap=2999999999)
         for key,value in [('nonce','0x4'),('chainId','0x1'),('expiresAt','0x1')]:
             with self.assertRaises(ValueError):
                 validate_fee_quote(tx, dict(quote, **{key:value}), digest, 100)

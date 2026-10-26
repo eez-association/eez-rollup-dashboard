@@ -9,6 +9,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from settlement_state import inspect_settlement, is_active, reconcile, update_order
+from deployment.bootstrap_chiado import quote_transaction, validate_fee_quote
 
 TX = '0x' + '11' * 32
 L2_BLOCK = '0x' + '22' * 32
@@ -182,7 +183,7 @@ class SettlementTests(unittest.TestCase):
                                   get_block=lambda _: {}, send_raw_transaction=broadcast)
             w = SimpleNamespace(eth=eth)
             web3 = SimpleNamespace(HTTPProvider=lambda *a, **k: None,
-                                   keccak=lambda _: bytes.fromhex(TX[2:]),
+                                   keccak=lambda *a, **k: bytes.fromhex(TX[2:]),
                                    to_hex=lambda raw: '0x' + raw.hex())
             class FakeWeb3:
                 HTTPProvider = web3.HTTPProvider
@@ -192,13 +193,39 @@ class SettlementTests(unittest.TestCase):
             class Config(dict):
                 def check_chains(self, **_): pass
             f = Fixture(); f.receipt = None
+            def quoted_rpc(endpoint, method, params):
+                if method != 'eez_quoteFee':
+                    return f.rpc(endpoint, method, params)
+                request = params[0]
+                self.assertEqual(request['nonce'], '0x3')
+                self.assertEqual(request['gas'], hex(100000))
+                return {'version': 1, 'chainId': request['chainId'], 'nonce': request['nonce'],
+                    'expiresAt': hex(120), 'options': [{'type': '0x2', 'gas': request['gas'],
+                    'requestHash': TX, 'estimatedFee': hex(100000 * 300),
+                    'maxFeePerGas': hex(300), 'maxPriorityFeePerGas': hex(200)}]}
             env = {'Web3': FakeWeb3, 'QUEUE': queue, 'update_order': update_order, 'reconcile': reconcile,
-                   'debug': lambda *a, **k: None, 'rpc': f.rpc, 'L2_FRONT': 'composer', 'L1': None, 'L2': w,
+                   'debug': lambda *a, **k: None, 'rpc': quoted_rpc, 'L2_FRONT': 'composer', 'L1': None, 'L2': w,
+                   'quote_transaction': quote_transaction, 'validate_fee_quote': validate_fee_quote,
+                   'time': SimpleNamespace(time=lambda: 100),
+                   'os': SimpleNamespace(getenv=lambda name, default: default),
                    'CFG': Config(L1_RPC='l1', L2_RPC='l2'),
                    'queued': lambda: json.loads(queue.read_text())}
             exec(compile(functions, '<solver functions>', 'exec'), env)
-            account = SimpleNamespace(address='solver', sign_transaction=lambda _: SimpleNamespace(raw_transaction=b'signed'))
-            env['send'](w, account, {'gas': 100000}, 1, original, 'composer')
+            def sign(tx):
+                self.assertEqual(tx['maxFeePerGas'], 300)
+                self.assertEqual(tx['maxPriorityFeePerGas'], 200)
+                return SimpleNamespace(raw_transaction=b'signed')
+            account = SimpleNamespace(address='0x'+'55'*20, sign_transaction=sign)
+            transaction = {'gas': 100000, 'to': '0x'+'66'*20, 'data': '0x',
+                           '_quotedTip': '0x9999', '_quotedMaxFee': '0x9999'}
+            def unavailable(*args): raise TimeoutError('quote unavailable')
+            env['rpc'] = unavailable
+            with self.assertRaises(TimeoutError):
+                env['send'](w, account, transaction, 1, original, 'composer')
+            self.assertEqual(sent, [])
+            self.assertEqual(json.loads(queue.read_text()), original)
+            env['rpc'] = quoted_rpc
+            env['send'](w, account, transaction, 1, original, 'composer')
             self.assertEqual(len(sent), 1)
             self.assertEqual(json.loads(queue.read_text())['status'], 'submitted')
             # Even an expired order must reconcile its existing submission first.

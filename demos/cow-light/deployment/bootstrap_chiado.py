@@ -39,7 +39,7 @@ def quote_transaction(tx):
             for key in ('type', 'chainId', 'from', 'to', 'nonce', 'gas', 'value', 'data')}
 
 
-def validate_fee_quote(transaction, quote, hash_text, now):
+def validate_fee_quote(transaction, quote, hash_text, now, max_fee_cap=5_000_000_000):
     def quantity(value):
         if not isinstance(value, str) or not re.fullmatch(r'0x(?:0|[1-9a-f][0-9a-f]*)', value):
             raise ValueError('Invalid fee quote quantity')
@@ -61,7 +61,7 @@ def validate_fee_quote(transaction, quote, hash_text, now):
     if option['requestHash'].lower() != digest.lower():
         raise ValueError('Fee quote transaction binding mismatch')
     maximum, tip = quantity(option['maxFeePerGas']), quantity(option['maxPriorityFeePerGas'])
-    if maximum > 5_000_000_000 or tip > maximum:
+    if maximum > max_fee_cap or tip > maximum:
         raise ValueError('Quoted fee exceeds safety cap')
     if quantity(option['estimatedFee']) > quantity(option['gas']) * maximum:
         raise ValueError('Inconsistent quoted fee')

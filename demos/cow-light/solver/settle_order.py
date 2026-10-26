@@ -18,6 +18,7 @@ BASE=Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BASE))
 from network_config import load_config
 from settlement_state import is_active, reconcile, update_order
+from deployment.bootstrap_chiado import quote_transaction, validate_fee_quote
 CFG=load_config()
 L1=Web3(Web3.HTTPProvider(CFG['L1_RPC'],request_kwargs={'timeout':60}))
 L2=Web3(Web3.HTTPProvider(CFG['L2_RPC'],request_kwargs={'timeout':60}))
@@ -53,19 +54,24 @@ CATALOG=CFG['TOKEN_CATALOG']
 
 def send(w,a,tx,chain,item,endpoint):
     tx=dict(tx); tx['from']=a.address
-    quoted_tip=tx.pop('_quotedTip',None); quoted_max=tx.pop('_quotedMaxFee',None)
+    tx.pop('_quotedTip',None); tx.pop('_quotedMaxFee',None)
     # The composer maintains a reservation-aware source nonce.  The execution
     # RPC can lag that view, so ask the submission endpoint whenever possible.
     nonce_rpc = Web3(Web3.HTTPProvider(endpoint,request_kwargs={'timeout':30})) if endpoint else w
     tx['nonce']=nonce_rpc.eth.get_transaction_count(a.address,'pending'); tx['chainId']=chain
-    tx.pop('gasPrice',None); base=w.eth.get_block('latest').get('baseFeePerGas') or 0; gp=w.eth.gas_price
-    # EEZ settlement admission charges an L1 tariff. A 1 gwei cap can be
-    # underfunded even when ordinary L2 gas is cheap; prefer the Composer quote
-    # and use this floor only when a quote is unavailable.
-    tip=int(quoted_tip,16) if isinstance(quoted_tip,str) else (int(quoted_tip) if quoted_tip else max(gp//2,2_000_000_000))
-    tx['maxPriorityFeePerGas']=tip
-    tx['maxFeePerGas']=int(quoted_max,16) if isinstance(quoted_max,str) else (int(quoted_max) if quoted_max else max(gp,base+tip))
+    for field in ('gasPrice','maxFeePerGas','maxPriorityFeePerGas'):
+        tx.pop(field,None)
+    tx['type']=2
+    tx.setdefault('value',0)
     if 'gas' not in tx: tx['gas']=int(w.eth.estimate_gas(tx)*13//10)
+    # Debug estimates are advisory. Bind a fresh authoritative quote to the
+    # final nonce, gas and calldata, and never fall back to unquoted fees.
+    request=quote_transaction(tx)
+    quoted=rpc(endpoint,'eez_quoteFee',[request,{'transactionTypes':['0x2']}])
+    budget=int(os.getenv('COW_SOLVER_MAX_FEE_WEI','5000000000000000'))
+    if budget<=0: raise ValueError('Solver fee budget must be positive')
+    tx.update(validate_fee_quote(request,quoted,lambda text:Web3.to_hex(Web3.keccak(text=text)),
+        int(time.time()),max_fee_cap=budget//tx['gas']))
     raw=a.sign_transaction(tx).raw_transaction
     tx_hash=Web3.to_hex(Web3.keccak(raw))
     # Persist the deterministic signed transaction hash before contacting the

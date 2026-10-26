@@ -8,6 +8,8 @@ from web3 import Web3
 BASE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BASE))
 from network_config import load_config
+from deployment.bootstrap_chiado import atomic_json
+from deployment.l2_transactions import L2Transactions
 CFG = load_config()
 RPC = CFG['L2_RPC']; CHAIN_ID = CFG['L2_CHAIN_ID']
 OUT = CFG['COW_MANIFEST']; ART = CFG['COWSWAP_ARTIFACTS']
@@ -25,28 +27,6 @@ def key():
             if line.startswith(("DEPLOYER_PRIVATE_KEY=", "FUZZER_PRIVATE_KEY=")): return line.split("=",1)[1].strip()
     raise RuntimeError("set DEPLOYER_PRIVATE_KEY or DEPLOYER_KEY_FILE")
 
-def send(w3, acct, tx):
-    tx.setdefault("from", acct.address)
-    tx["nonce"] = w3.eth.get_transaction_count(acct.address, "pending")
-    tx["chainId"] = CHAIN_ID
-    # EEZ uses a very low gas price; retain a valid EIP-1559 fee ordering.
-    gp = max(w3.eth.gas_price, 100)
-    tx.setdefault("maxFeePerGas", gp)
-    tx.setdefault("maxPriorityFeePerGas", min(gp, 100))
-    tx.setdefault("gas", int(w3.eth.estimate_gas(tx) * 13 // 10))
-    tx.pop("gasPrice", None)
-    signed = acct.sign_transaction(tx)
-    h = w3.eth.send_raw_transaction(signed.raw_transaction)
-    r = w3.eth.wait_for_transaction_receipt(h, timeout=300)
-    if r.status != 1: raise RuntimeError(f"reverted {h.hex()}")
-    print(f"{h.hex()} block={r.blockNumber} gas={r.gasUsed}", flush=True)
-    return r
-
-def deploy(w3, acct, abi, bytecode, *args):
-    c = w3.eth.contract(abi=abi, bytecode=bytecode)
-    r = send(w3, acct, c.constructor(*args).build_transaction({"from": acct.address}))
-    return r.contractAddress, r
-
 def main():
     w3 = Web3(Web3.HTTPProvider(RPC, request_kwargs={"timeout": 60}))
     CFG.check_chains(l2=w3)
@@ -57,17 +37,30 @@ def main():
         raise RuntimeError(f"unexpected chain: {w3.eth.chain_id}")
     auth_abi, auth_bin = artifact("GPv2AllowListAuthentication.json")
     set_abi, set_bin = artifact("GPv2Settlement.json")
-    auth, ar = deploy(w3, acct, auth_abi, auth_bin)
+    sender = L2Transactions(CFG, acct, OUT.with_suffix('.journal.json'), {
+        'authCodeHash': Web3.to_hex(Web3.keccak(hexstr=auth_bin)),
+        'settlementCodeHash': Web3.to_hex(Web3.keccak(hexstr=set_bin)),
+    })
+    def build(call):
+        return call.build_transaction({'from': acct.address, 'gas': 1})
+    ar = sender.send('authenticator', lambda: build(w3.eth.contract(abi=auth_abi, bytecode=auth_bin).constructor()))
+    auth = ar['contractAddress']
     authc = w3.eth.contract(auth, abi=auth_abi)
-    send(w3, acct, authc.functions.initializeManager(acct.address).build_transaction({"from": acct.address}))
-    send(w3, acct, authc.functions.addSolver(acct.address).build_transaction({"from": acct.address}))
-    settlement, sr = deploy(w3, acct, set_abi, set_bin, auth, "0x0000000000000000000000000000000000000000")
+    sender.send('initializeManager', lambda: build(authc.functions.initializeManager(acct.address)))
+    sender.send('addSolver', lambda: build(authc.functions.addSolver(acct.address)))
+    if authc.functions.manager().call() != acct.address or not authc.functions.isSolver(acct.address).call():
+        raise ValueError('Authenticator manager/solver mismatch')
+    sr = sender.send('settlement', lambda: build(w3.eth.contract(abi=set_abi, bytecode=set_bin).constructor(
+        auth, '0x0000000000000000000000000000000000000000')))
+    settlement = sr['contractAddress']
+    # These pure L2 deployments only require canonical L2 receipts. The
+    # eventual cross-chain swap must separately prove its canonical L1 posting.
     out = {"network": CFG['NETWORK'], "l1ChainId": CFG['L1_CHAIN_ID'], "chainId": CHAIN_ID, "rpc": RPC, "deployer": acct.address,
            "authenticator": auth, "settlement": settlement,
            "vaultRelayer": w3.eth.contract(settlement, abi=set_abi).functions.vaultRelayer().call(),
-           "deploymentTxs": {"authenticator": ar.transactionHash.hex(), "settlement": sr.transactionHash.hex()}}
+           "deploymentTxs": {name: row['hash'] for name, row in sender.journal.data['transactions'].items()}}
     OUT.parent.mkdir(parents=True, exist_ok=True)
-    OUT.write_text(json.dumps(out, indent=2) + "\n")
+    atomic_json(OUT, out)
     print(json.dumps(out, indent=2))
 
 if __name__ == "__main__": main()

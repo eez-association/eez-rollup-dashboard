@@ -58,8 +58,7 @@ operator inspection; the worker intentionally does not create replacement
 transactions automatically, including fee/nonce replacements. Historical orders
 marked settled by the old receipt-only solver are rechecked using their saved
 transaction hashes before being presented as canonically settled.
-Deployment interruption recovery and clearing-price
-slippage remain separate follow-up work.
+Clearing-price slippage remains separate follow-up work.
 
 ## Network profiles
 
@@ -85,7 +84,9 @@ not moved automatically: copy them into `runtime/mainnet/` while services are
 stopped, or explicitly set their old paths. Browser activity is also scoped by
 network, chain IDs and settlement; old unscoped browser history is not imported.
 
-Chiado is a configuration scaffold, not a deployed demo. Copy
+The generic Chiado profile is a configuration scaffold. The ROG 916969
+deployment has completed a live cross-chain swap (see its deployment record).
+For another EEZ testnet, copy
 `.env.chiado.example` to `.env` and fill its RPCs and infrastructure addresses.
 Use the reusable Chiado bootstrap below to deploy test assets and a funded
 Uniswap V2 pool and generate a catalog, or configure an existing test deployment
@@ -205,12 +206,16 @@ The V2 factory is not the deterministic CREATE2 deployment factory.
 For the existing ROG 916969 asset deployment, a public, non-secret configuration
 is also checked in as `config/deployments/rog-916969.json`; select it with
 `COW_DEPLOYMENT_ENV=config/deployments/rog-916969.json` to reuse the tokens/pool
-without running the bootstrap. It does not contain GPv2 or route addresses:
-those remain separate deployment prerequisites. Never use it for another EEZ
+without running the bootstrap. GPv2 and route addresses are loaded from the
+selected deployment's separate runtime manifests. Never use it for another EEZ
 network. The generic `chiado` profile remains free of deployment-specific assets.
 Addresses, receipt hashes, verification results and the zero-transaction rerun
 check are recorded in `deployment/records/rog-916969.json`. This is a historical
-asset-bootstrap record, not an end-to-end swap acceptance result.
+deployment record, including a successful 0.001 ctWETH →
+0.099699900599199102 ctUSD swap with canonical L1 posting evidence. It does
+not assert consensus finality or establish production readiness. The GPv2,
+route/helper and proxy addresses are recorded there; local deployment manifests
+remain under the selected runtime directory.
 
 Source verification remains required before using the deployment. Run
 `python3 deployment/verify_chiado.py --deployment rog-916969 --submit` to submit
@@ -263,9 +268,22 @@ The route consists of exactly two contracts: `L2UniversalV2Route` on L2 and
 `L1UniversalV2BridgeHelper` on L1. The same contracts serve every catalog token.
 
 The route script reuses a completed manifest and checks its configuration.
-The GPv2 script refuses to overwrite an existing manifest. Recovery from an
-interrupted deployment before manifest persistence still requires inspecting
-the submitted transactions; these scripts do not yet journal every stage.
+The GPv2 script refuses to overwrite an existing manifest. Both scripts record
+each signed transaction hash durably before broadcast, lock their journal, and
+bind it to the L2 genesis, deployer, configuration and contract bytecode.
+Rerun an interrupted deployment with the same configuration to reconcile its
+recorded transactions; no ambiguous submission is automatically replaced.
+Pure L2 deployments require successful canonical L2 receipts. The cross-chain
+helper deployment additionally requires canonical L1 posting evidence.
+The helper authorizes the L1 manager's proxy for the L2 route, not the route's
+L2 address. The manager is resolved from the configured L1 bridge.
+
+Cross-chain deployment and solver sends use fresh, transaction-bound
+`eez_quoteFee` responses after fixing gas and nonce. Diagnostic quotes are not
+used as signing authority, and there is no unquoted fallback. Total fee budgets
+are configured by `COW_DEPLOY_MAX_FEE_WEI` and `COW_SOLVER_MAX_FEE_WEI`
+(default 5000000000000000 wei each). Review these explicitly for another
+network. Source verification remains required before running a swap.
 
 For systemd, copy `solver/eez-cow-solver.service`, replace `/opt/eez-cow-light`
 with this directory, and provide `SOLVER_KEY_FILE` through a protected
