@@ -137,7 +137,26 @@ python3 -m unittest discover -s tests -v
 node --test tests/ui-network.test.cjs
 python3 -m py_compile network_config.py settlement_state.py backend/server.py solver/*.py deployment/*.py
 forge build --root contracts
+# Install pinned upstream contract artifacts for the local EVM tests:
+npm ci --prefix contracts --ignore-scripts
+forge test --root contracts -vv
 ```
+
+`contracts/test/SettlementSlippage.t.sol` characterizes the existing pricing
+policy without changing the solver. It deploys the published GPv2 settlement
+bytecode from `@cowprotocol/contracts@1.8.0`, a real Uniswap V2 factory/pair from
+`@uniswap/v2-core@1.0.1`, and both demo route contracts. Test-only ERC20s and a
+synchronous bridge adapter keep the test entirely local; it does not validate
+Composer execution, real bridging, or the bytecode of an existing deployment.
+
+Using raw token units, a signed minimum of 97 and a solver quote of 100 are
+followed by another trader's V2 swap, reducing the available output to 99.
+The route accepts 99, but GPv2's 100-unit payout reverts for insufficient
+balance. The test asserts the exact payout error and rollback of user funds,
+AMM reserves and order-fill state. Controls verify unchanged-price success,
+route-only acceptance of 99, success after re-quoting at 99, and rejection
+below the signed minimum. All five tests are expected to pass: the failure
+case deliberately asserts the current limitation, rather than fixing it.
 
 The deployment scripts are network tools and are not run as part of the web
 build. Use canonical Composer and RPC endpoints when validating a settlement;
