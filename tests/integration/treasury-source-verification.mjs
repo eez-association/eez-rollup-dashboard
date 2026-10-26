@@ -8,7 +8,7 @@ import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, openSync, existsSy
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 import { encodeDeployData, encodeFunctionData, getContractAddress, toHex, zeroAddress } from 'viem';
-import { VerificationWorker, loadBuilds } from '../../scripts/verification/worker.mjs';
+import { VerificationWorker, loadBuilds, loadAdditionalSources } from '../../scripts/verification/worker.mjs';
 import { matchesRuntime } from '../../src/lib/treasury/runtimeCode.ts';
 const current=JSON.parse(readFileSync('src/lib/treasury/current-build.json')).build;
 const bundle=JSON.parse(readFileSync(`src/lib/treasury/builds/${current}.json`));
@@ -22,6 +22,14 @@ const rpcUrl=`http://127.0.0.1:${port}`;
 const rpc=async(method,params=[])=>{const r=await(await fetch(rpcUrl,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method,params})})).json();if(r.error)throw Error(r.error.message);return r.result;};
 const evidence={build:current,scope:'isolated Anvil, real solc standard JSON recompilation, controlled explorer transport',transactions:[],verified:[]};
 try {
+  for (const source of loadAdditionalSources('verification/supplemental')) {
+    const version=source.compiler.split('+')[0],solc=['.local/share/svm','.svm'].map(p=>resolve(homedir(),p,version,`solc-${version}`)).find(existsSync);
+    assert(solc); const output=JSON.parse(execFileSync(solc,['--standard-json'],{input:JSON.stringify(source.sourceInput),encoding:'utf8',maxBuffer:64*1024*1024}));
+    assert(!(output.errors??[]).some(e=>e.severity==='error'));
+    const [path,name]=source.target.split(':'),compiled=output.contracts[path][name].evm.deployedBytecode;
+    assert.equal('0x'+compiled.object,source.runtime,'supplemental compiler input must reproduce every byte, including metadata');
+    assert.deepEqual(Object.values(compiled.immutableReferences??{}),source.immutableGroups);
+  }
   for(let i=0;i<100;i++){try{await rpc('eth_chainId');break;}catch{await new Promise(r=>setTimeout(r,50));}}
   const [owner]=await rpc('eth_accounts');
   async function send(data,to,record=true){const tx=await rpc('eth_sendTransaction',[{from:owner,to,data,gas:'0x1c9c380'}]);let receipt;for(let i=0;i<100&&!receipt;i++){receipt=await rpc('eth_getTransactionReceipt',[tx]);if(!receipt)await new Promise(r=>setTimeout(r,20));}assert(receipt,'deployment receipt timeout');assert.equal(receipt.status,'0x1');if(record)evidence.transactions.push(tx);return receipt;}

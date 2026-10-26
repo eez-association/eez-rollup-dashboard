@@ -7,12 +7,17 @@ import { TestnetAsset } from '../lib/treasury/testnetAsset';
 import { TreasuryMainnetSetup } from './TreasuryMainnetSetup';
 import { TreasuryConnected } from './TreasuryConnected';
 import type { TreasuryWallet } from './TreasuryConnected';
+import { TreasuryPairedHistory } from './TreasuryPairedHistory';
+import { TreasuryPairedRestart } from './TreasuryPairedRestart';
+import styles from './TreasuryDemo.module.css';
 
 /** Network asset provisioning is separate from a user's six Safe setup steps. */
 export function TreasuryTestnet({ wallet, target, bridgeL1, bridgeL2, token }: {
   wallet: TreasuryWallet; target: MainnetTarget; bridgeL1: string; bridgeL2: string; token: string;
 }) {
   const [network, setNetwork] = useState<SetupNetwork | null>(null), [revision, setRevision] = useState(0), [error, setError] = useState('');
+  const [resetVersion, setResetVersion] = useState(0);
+  const restart = () => { setResetVersion(x => x + 1); setRevision(x => x + 1); };
   useEffect(() => {
     let alive = true;
     setNetwork(null); setError('');
@@ -28,15 +33,23 @@ export function TreasuryTestnet({ wallet, target, bridgeL1, bridgeL2, token }: {
     try { return { deployment: network ? loadMainnetManifest(localStorage, network) : null, error: '' }; }
     catch (e) { return { deployment: null, error: (e as Error).message }; }
   }, [network, revision]);
+  useEffect(() => {
+    const changed = (event: StorageEvent) => {
+      if (event.key === null || network && [ `eez:treasury:paired-setup:${setupIdentity(network)}`, `eez:treasury:paired-setup:${setupIdentity(network)}:manifest` ].includes(event.key)) setRevision(x => x + 1);
+    };
+    window.addEventListener('storage', changed);
+    return () => window.removeEventListener('storage', changed);
+  }, [network]);
   if (!isAddress(token)) return <p role="status">Configure the treasury token before setting up your Safes.</p>;
   if (error || loaded.error) return <p role="alert">{error || loaded.error}</p>;
   if (!network) return <p role="status">Checking the configured treasury token…</p>;
-  if (!loaded.deployment) return <TreasuryMainnetSetup wallet={wallet} target={target} network={network} onComplete={() => setRevision(x => x + 1)} />;
+  if (!loaded.deployment) return <div className={styles.treasury}><TreasuryMainnetSetup key={resetVersion} wallet={wallet} target={target} network={network} onComplete={() => setRevision(x => x + 1)} />
+    <TreasuryPairedRestart network={network} wallet={wallet} onRestart={restart} /></div>;
   const setupKey = `eez:treasury:paired-setup:${setupIdentity(network)}`;
-  return <TreasuryConnected deployment={loaded.deployment} wallet={wallet} payments guardAction={async action => {
+  return <div className={styles.treasury}><TreasuryConnected key={loaded.deployment.instance} deployment={loaded.deployment} wallet={wallet} payments guardAction={async action => {
     await navigator.locks.request(setupKey, { ifAvailable: true }, async lock => {
       if (!lock || loadMainnetManifest(localStorage, network)?.instance !== loaded.deployment!.instance) throw new Error('The selected treasury changed or another action is running');
       await action();
     });
-  }} />;
+  }} /><TreasuryPairedHistory target={target} network={network} /><TreasuryPairedRestart network={network} wallet={wallet} onRestart={restart} /></div>;
 }

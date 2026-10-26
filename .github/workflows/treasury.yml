@@ -56,6 +56,7 @@ jobs:
           npx playwright install --with-deps chromium
           node tests/treasury-setup-completion-browser.mjs
           node tests/treasury-mainnet-setup-browser.mjs
+          node tests/treasury-setup-ux-browser.mjs
           node tests/treasury-paired-asset-browser.mjs
           node tests/integration/treasury-paired-setup.mjs --browser
           node tests/treasury-verification-browser.mjs

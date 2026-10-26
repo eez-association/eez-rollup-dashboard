@@ -33,9 +33,9 @@ export function creations(receipt) {
   return [...addresses].map(([address, required]) => ({ address, required }));
 }
 export class VerificationWorker {
-  constructor({ directory, builds, networks, fetcher = fetch, now = Date.now, capacity = 10000 }) {
+  constructor({ directory, builds, networks, additionalSources = [], fetcher = fetch, now = Date.now, capacity = 10000 }) {
     if (!Number.isSafeInteger(capacity) || capacity < 1 || capacity > 10000) throw new Error('Invalid verification capacity');
-    Object.assign(this, { directory, builds, networks, fetcher, now, capacity });
+    Object.assign(this, { directory, builds, networks, additionalSources, fetcher, now, capacity });
     mkdirSync(directory, { recursive: true }); this.jobs = new Map(); this.active = false;
     for (const name of readdirSync(directory).filter(n => /^[a-f\d]{64}\.json$/.test(n))) {
       const job = JSON.parse(readFileSync(join(directory, name), 'utf8'));
@@ -50,6 +50,12 @@ export class VerificationWorker {
     job.updatedAt = this.now();
     const path = join(this.directory, `${job.id}.json`);
     writeFileSync(`${path}.tmp`, JSON.stringify(job)); renameSync(`${path}.tmp`, path); this.jobs.set(job.id, job);
+  }
+  retry(id) {
+    const job = this.jobs.get(id);
+    if (!job) throw new Error('Unknown verification job');
+    if (this.processing !== id) { job.nextAttempt = 0; job.attempts = 0; this.save(job); }
+    return job;
   }
   enqueue(request) {
     this.validate(request);
@@ -79,7 +85,7 @@ export class VerificationWorker {
     if (block?.hash !== receipt.blockHash) throw new Error('Wait for a canonical receipt');
     const contracts = await this.discover(network, receipt);
     const manifest = this.builds[request.build];
-    const candidates = [...Object.values(manifest.contracts), ...Object.values(manifest.dependencies ?? {})];
+    const candidates = [...Object.values(manifest.contracts), ...Object.values(manifest.dependencies ?? {}), ...this.additionalSources];
     const current = await this.rpc(network, 'eth_getBlockByNumber', [receipt.blockNumber, false]);
     if (current?.hash !== receipt.blockHash) throw new Error('Wait for a canonical receipt');
     // Configuration-only confirmations and unrelated creations must not use
@@ -128,11 +134,11 @@ export class VerificationWorker {
         }
       } catch (e) { contract.error = e.message; }
     }
-    const candidates = [...Object.values(manifest.contracts), ...Object.values(manifest.dependencies ?? {})];
+    const candidates = [...Object.values(manifest.contracts), ...Object.values(manifest.dependencies ?? {}), ...this.additionalSources];
     const a = candidates.find(candidate => matchesRuntime(contract.runtime, candidate));
     if (!a) { contract.status = 'source-unavailable'; contract.error = 'No exact compiler input for this deployed bytecode'; return; }
     contract.name = a.target.split(':').at(-1); contract.input = a.input; contract.status = 'pending';
-    const input = manifest.inputs[a.input]; if (!input) throw new Error('Missing retained compiler input');
+    const input = a.sourceInput ?? manifest.inputs[a.input]; if (!input) throw new Error('Missing retained compiler input');
     // Only address-specific, full explorer verification is success. A twin,
     // queued response, partial match or HTTP 200 is insufficient.
     if (network.explorerApi) {
@@ -202,8 +208,9 @@ export class VerificationWorker {
       try { await this.process(job); } catch (e) { job.status = 'retrying'; job.error = e.message; }
       // One owner executes bounded work. Completed jobs are rechecked for reorgs;
       // provider outages never create more concurrent requests or lose a job.
+      const awaitingExplorer = job.contracts.some(c => c.explorer === 'pending');
       job.nextAttempt = this.now() + (['verified','reverted','not-applicable','source-unavailable'].includes(job.status) ? 24 * 60 * 60_000
-        : Math.min(60 * 60_000, 15_000 * 2 ** Math.min(job.attempts - 1, 8)));
+        : awaitingExplorer && job.status !== 'retrying' ? 15_000 : Math.min(5 * 60_000, 15_000 * 2 ** Math.min(job.attempts - 1, 8)));
       this.save(job);
     } finally { delete this.processing; this.active = false; }
   }
@@ -219,6 +226,18 @@ export function loadBuilds(root) {
     return [build, m];
   });
   return Object.fromEntries(entries);
+}
+/** Exact factory sources can be added without changing immutable deployment
+ * releases or invalidating a user's in-progress setup. Never used for deployment.
+ */
+export function loadAdditionalSources(root) {
+  return readdirSync(root).filter(n => /^[a-f\d]{64}\.json$/.test(n)).map(name => {
+    const source = JSON.parse(readFileSync(join(root, name), 'utf8'));
+    if (hash(source) !== name.slice(0, -5) || !/^0x(?:[a-f\d]{2})+$/i.test(source.runtime)
+      || typeof source.compiler !== 'string' || typeof source.target !== 'string' || source.input?.language !== 'Solidity'
+      || !source.input.sources || !Array.isArray(source.immutables) || !Array.isArray(source.immutableGroups)) throw new Error('Invalid supplemental verification source');
+    return { ...source, input: hash(source.input), sourceInput: source.input };
+  });
 }
 export function publicJob(job) {
   return { ...job, contracts: job.contracts.map(({runtime, ...c}) => job.status === 'retrying' ? { ...c, status: 'rechecking' } : c) };

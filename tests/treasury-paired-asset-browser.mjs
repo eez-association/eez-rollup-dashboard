@@ -13,6 +13,7 @@ try {
   browser = await chromium.launch({ headless: true, chromiumSandbox: true });
   const page = await browser.newPage(), sends = [], errors = [], origin = `http://127.0.0.1:${server.httpServer.address().port}`;
   page.on('pageerror', e => errors.push(e.message));
+  await page.exposeFunction('readWalletNonce', () => toHex(sends.length));
   await page.exposeFunction('recordWalletSend', request => { sends.push(request); return toHex(sends.length, { size: 32 }); });
   await page.route('**/*', route => {
     const url = new URL(route.request().url()); assert.equal(url.origin, origin);
@@ -28,20 +29,27 @@ try {
   assert.equal(sends.length, 0); assert(!(await faucet('l1').isDisabled()));
   for (const [chain, method, safe] of [['l1','claim',a(10)],['l2','claimOnL2',a(11)]]) {
     const before = sends.length; await faucet(chain).click();
-    await page.getByText('Waiting for faucet confirmation…', { exact: true }).waitFor();
+    await page.getByRole('region', { name: `${chain} Safe`, exact: true }).getByText('Waiting for faucet confirmation…', { exact: true }).waitFor();
     assert.equal(sends.length, before + 1); assert.equal(sends.at(-1).to.toLowerCase(), a(30));
     const decoded = decodeFunctionData({ abi: release.contracts.TestUSDC.abi, data: sends.at(-1).data });
     assert.equal(decoded.functionName, method); assert.deepEqual(decoded.args.map(x => x.toLowerCase()), [safe]);
     assert.equal(await page.evaluate(() => window.switched), 'l1');
-    await mount(); await faucet(chain).waitFor();
-    assert(await faucet('l1').isDisabled()); assert(await faucet('l2').isDisabled()); assert.equal(sends.length, before + 1);
-    await page.evaluate(() => { window.confirmFixture = true; });
-    await page.getByText('1,000 test USDC received.', { exact: true }).waitFor();
-    assert.equal(await page.evaluate(() => window.refreshes), 1);
-    await page.evaluate(() => { window.confirmFixture = false; });
+    assert(await faucet(chain).isDisabled());
+    if (chain === 'l1') {
+      assert(!(await faucet('l2').isDisabled()), 'The other Safe remains available while this claim is pending');
+      assert(!(await page.getByRole('slider').isDisabled()), 'A claim must not lock the payment form');
+    }
   }
+  assert.equal(sends[0].nonce, '0x0'); assert.equal(sends[1].nonce, '0x1');
+  await mount(); await faucet('l1').waitFor();
+  assert(await faucet('l1').isDisabled()); assert(await faucet('l2').isDisabled()); assert.equal(sends.length, 2);
+  await page.evaluate(() => { window.confirmFixture = true; });
+  await page.waitForFunction(() => window.refreshes === 2);
+  assert.equal(await page.getByText('1,000 test USDC received.', { exact: true }).count(), 2);
+  await page.evaluate(() => { window.confirmFixture = false; });
   // Presets follow the existing EEZ-X slider direction and preserve the exact total.
   const presets = page.getByRole('group', { name: 'EEZ-X share presets' });
+  assert.equal(await presets.getByText('EEZ-X share', { exact: true }).count(), 0);
   for (const [percent, fromL1] of [[25,'30000000'],[50,'20000000'],[75,'10000000']]) {
     await presets.getByRole('button', { name: `${percent}%`, exact: true }).click();
     assert.equal(await page.getByRole('slider').inputValue(), String(percent * 100));

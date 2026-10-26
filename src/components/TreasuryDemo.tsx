@@ -8,11 +8,17 @@ import { parseTreasuryConfig, requireDashboardTreasury } from '../lib/treasury/c
 import { TreasuryConnected } from './TreasuryConnected';
 import type { TreasuryWallet } from './TreasuryConnected';
 import profile from '../lib/treasury/paired-testnet-network.json';
+import network from '../lib/treasury/mainnet-network.json';
+import { TreasuryPairedHistory } from './TreasuryPairedHistory';
+import { TreasuryPairedRestart } from './TreasuryPairedRestart';
+import styles from './TreasuryDemo.module.css';
 
 function TreasuryDemoView({ wallet, ready }: { wallet: TreasuryWallet; ready: boolean }) {
   const [revision, setRevision] = useState(0);
+  const [resetVersion, setResetVersion] = useState(0);
+  const restart = () => { setResetVersion(x => x + 1); setRevision(x => x + 1); };
   useEffect(() => {
-    const changed = () => setRevision(value => value + 1);
+    const changed = (event: StorageEvent) => { if (event.key === null || [mainnetSetupKey, `${mainnetSetupKey}:manifest`].includes(event.key)) setRevision(value => value + 1); };
     window.addEventListener('storage', changed);
     return () => window.removeEventListener('storage', changed);
   }, []);
@@ -37,17 +43,19 @@ function TreasuryDemoView({ wallet, ready }: { wallet: TreasuryWallet; ready: bo
   if (!ready) return <p role="status">Loading treasury configuration…</p>;
   if (parsed.error) return <p role="alert">{parsed.error}</p>;
   if (!parsed.deployment && !config.treasury) {
-    if (mainnet) return <TreasuryMainnetSetup wallet={wallet} target={target} onComplete={() => setRevision(x => x + 1)} />;
+    if (mainnet) return <div className={styles.treasury}><TreasuryMainnetSetup key={resetVersion} wallet={wallet} target={target} onComplete={() => setRevision(x => x + 1)} />
+      <TreasuryPairedRestart network={network} wallet={wallet} onRestart={restart} /></div>;
     if (shared && config.l1FeesEnabled && config.l2FeesEnabled) return <TreasuryTestnet wallet={wallet} target={target} bridgeL1={config.l1Bridge} bridgeL2={config.l2Bridge} token={config.treasuryTokenAddress} />;
   }
   if (!parsed.deployment) return <p role="status">Connect a configured paired treasury for this network.</p>;
   const deployment = parsed.deployment;
-  return <TreasuryConnected key={deployment.instance} deployment={deployment} wallet={wallet} payments guardAction={mainnet && !config.treasury ? async action => {
+  return <div className={styles.treasury}><TreasuryConnected key={deployment.instance} deployment={deployment} wallet={wallet} payments guardAction={mainnet && !config.treasury ? async action => {
     await navigator.locks.request(mainnetSetupKey, { ifAvailable: true }, async lock => {
       if (!lock || loadMainnetManifest(localStorage)?.instance !== deployment.instance) throw new Error('The selected treasury changed or another action is running');
       await action();
     });
-  } : undefined} />;
+  } : undefined} />{mainnet && !config.treasury && <><TreasuryPairedHistory target={target} network={network} />
+    <TreasuryPairedRestart network={network} wallet={wallet} onRestart={restart} /></>}</div>;
 }
 export function TreasuryDemo(props: { wallet: TreasuryWallet; ready: boolean }) {
   return <><TreasuryDemoView {...props} />{props.ready && <TreasurySourceVerification />}</>;

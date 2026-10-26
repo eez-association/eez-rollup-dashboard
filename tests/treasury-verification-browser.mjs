@@ -24,6 +24,7 @@ await context.route('**/*', async route => {
   const url = new URL(route.request().url());
   if (url.origin !== origin) { errors.push(`Unexpected external request: ${url.pathname}`); return route.abort(); }
   if (url.pathname === '/verification-fixture') return route.fulfill({ contentType: 'text/html', body: '<!doctype html><div id="root"></div><script type="module">import RefreshRuntime from "/@react-refresh";RefreshRuntime.injectIntoGlobalHook(window);window.$RefreshReg$=()=>{};window.$RefreshSig$=()=>type=>type;window.__vite_plugin_react_preamble_installed__=true;</script>' });
+  if (/\/jobs\/[a-f\d]{64}\/retry$/.test(url.pathname)) return route.fulfill({ status: 202, json: {} });
   if (url.pathname !== '/treasury-verification/jobs') return route.fallback();
   const request = route.request().postDataJSON(), index = requests.findIndex(r => r.transactionHash === request.transactionHash);
   assert(index >= 0); assert.deepEqual(request, requests[index]);
@@ -51,28 +52,30 @@ try {
 
   unavailable = false;
   await page.clock.fastForward(15_001);
-  await details.locator('summary').filter({ hasText: 'Publishing contract sources · 2 of 3 verified' }).waitFor();
+  await details.locator('summary').filter({ hasText: 'Publishing to explorers · 2 of 3 verified' }).waitFor();
   assert.deepEqual(delivered, [0, 1, 2, 0, 1, 2]);
   assert.equal(await details.getByRole('status').count(), 0);
   passed.push('the automatic retry recovers the original request and clears the transient error');
 
   sourceOnly = true;
   await page.evaluate(() => window.dispatchEvent(new Event('treasury-source-request')));
-  await details.locator('summary').filter({ hasText: /^Contract sources verified$/ }).waitFor();
+  await details.locator('summary').filter({ hasText: /^Publishing to explorers · 0 of 3 verified$/ }).waitFor();
   assert.equal(await details.getByRole('link', { name: 'Exact source verified' }).count(), 3);
   assert.equal(await details.getByText('explorer publication pending', { exact: false }).count(), 3);
-  passed.push('exact Sourcify matches finish source verification while explorer publication stays in details');
+  passed.push('Sourcify matches do not falsely report completed explorer publication');
 
+  await details.getByRole('button', { name: 'Retry source publication', exact: true }).click();
+  await page.waitForFunction(() => !document.querySelector('button:disabled'));
   undiscovered = true;
   await page.evaluate(() => window.dispatchEvent(new Event('treasury-source-request')));
-  await details.locator('summary').filter({ hasText: /^Verifying contract sources$/ }).waitFor();
+  await details.locator('summary').filter({ hasText: /^Publishing to explorers · 0 of 2 verified$/ }).waitFor();
   passed.push('an unresolved deployment without discovered contracts is not reported as fully verified');
 
   sourceOnly = false; undiscovered = false;
   complete = true;
   await page.evaluate(() => window.dispatchEvent(new Event('treasury-source-request')));
-  await details.locator('summary').filter({ hasText: /^Contract sources verified$/ }).waitFor();
-  assert.equal(await details.getByText('Verified on explorer', { exact: false }).count(), 3);
+  await details.locator('summary').filter({ hasText: /^Contract sources verified on explorers$/ }).waitFor();
+  assert.equal(await details.locator('li').filter({ hasText: 'Verified on explorer' }).count(), 3);
   assert.equal(await page.evaluate(key => localStorage.getItem(key), key), outbox);
   passed.push('all independent jobs can finish without losing the durable outbox');
   await page.evaluate(() => window.unmountVerification());

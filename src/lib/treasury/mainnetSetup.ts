@@ -19,6 +19,9 @@ import sharedContracts from "./mainnet-shared-contracts.json" with { type: "json
 
 const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 function check(ok: unknown, message: string): asserts ok { if (!ok) throw new Error(message); }
+async function readInBatches<T>(items: readonly T[], read: (item: T) => Promise<void>) {
+  for (let offset = 0; offset < items.length; offset += 4) await Promise.all(items.slice(offset, offset + 4).map(read));
+}
 const digest = (x: unknown): x is Hex => typeof x === "string" && /^0x[\da-f]{64}$/i.test(x);
 export type SetupNetwork = typeof network & { testnet?: boolean };
 export const setupIdentity = (selected: SetupNetwork) => keccak256(toHex(JSON.stringify(selected)));
@@ -103,8 +106,9 @@ export class MainnetSetup {
         { l1ChainId: toHex(this.network.chains.l1.chainId), l2ChainId: toHex(this.network.chains.l2.chainId), registryAddress: this.network.registry, l2Address: this.network.manager });
       check(discovery.status === "detected", discovery.detail);
     }
-    for (const binding of Object.values(this.network.contracts))
+    await readInBatches(Object.values(this.network.contracts), async binding => {
       check(keccak256(await this.io.rpc<Hex>(binding.chain as Chain, "eth_getCode", [binding.address, "latest"])) === binding.hash, "The reviewed USDC or bridge code changed");
+    });
     const abi: Abi = parseAbi(["function manager() view returns(address)", "function rollupId() view returns(uint64)", "function canonicalBridgeAddress() view returns(address)", "function getWrappedToken(address,uint64) view returns(address)", "function wrappedTokenInfo(address) view returns(address,uint64)", "function BRIDGE() view returns(address)", "function paused() view returns(bool)"]);
     const read = async (chain: Chain, to: string, name: string, args: unknown[] = []) => {
       const { decodeFunctionResult } = await import("viem");
@@ -174,8 +178,8 @@ export class MainnetSetup {
   async unchanged(s: MainnetSetupState) {
     check(s.version === 3 && s.build === this.artifacts.build && pairedSetupAvailable(this.artifacts), "Legacy treasury setup is retired; start a new paired setup");
     await this.validate();
-    for (const b of s.code) check(keccak256(await this.io.rpc<Hex>(b.chain, "eth_getCode", [b.address, "latest"])) === b.hash, "A selected treasury contract changed");
-    for (const r of s.completed) check((await this.io.rpc<{ hash: Hex }>(r.chain, "eth_getBlockByNumber", [r.number, false]))?.hash === r.blockHash, "A setup confirmation was reorganized; preserve this setup for reconciliation");
+    await readInBatches(s.code, async b => { check(keccak256(await this.io.rpc<Hex>(b.chain, "eth_getCode", [b.address, "latest"])) === b.hash, "A selected treasury contract changed"); });
+    await readInBatches(s.completed, async r => { check((await this.io.rpc<{ hash: Hex }>(r.chain, "eth_getBlockByNumber", [r.number, false]))?.hash === r.blockHash, "A setup confirmation was reorganized; preserve this setup for reconciliation"); });
     const safe = await inspectSafe(this.io, "l1", s.addresses.safeL1!);
     check(same(safe.singleton, s.addresses.singletonL1!), "The Ethereum Safe implementation changed");
   }
@@ -228,14 +232,17 @@ export class MainnetSetup {
     await this.wallet(provider, r.chain, sender); await this.currentReview(s);
     const approval = { owner: sender, signature }; await packEOAApprovals(tx, r.owners, 1, [approval]); return approval;
   }
-  async prepare(s: MainnetSetupState, provider: EthereumProvider) {
+  async prepare(s: MainnetSetupState, provider: EthereumProvider, onProgress: (message: string) => void = () => {}) {
     check(!s.build || s.build === this.artifacts.build, "Restore this setup’s original source build");
-    check(!s.pending && s.completed.length < 6, "Finish the pending setup transaction first"); await this.unchanged(s);
+    check(!s.pending && s.completed.length < 6, "Finish the pending setup transaction first");
+    onProgress("Checking the network, deployed contracts and completed steps…"); await this.unchanged(s);
     const step = s.completed.length, chain = mainnetSetupSteps[step]!.chain;
+    onProgress("Checking your wallet connection…");
     const sender = await this.wallet(provider, chain, step < 4 ? s.deployer : undefined);
     const nonce = await this.io.rpc<Hex>(chain, "eth_getTransactionCount", [sender, "pending"]);
     let pending: Pending = { id: String(step), chain, sender, nonce, data: "0x", outputs: [] };
     if (step >= 4) {
+      onProgress("Rechecking Safe owners, nonce and collected approvals…");
       const r = await this.currentReview(s), tx = this.tx(s, r);
       const signature = r.chain === "l1" ? await packEOAApprovals(tx, r.owners, r.threshold, r.approvals)
         : await packOwnerApprovals(tx, s.addresses.adapter!, r.owners, r.threshold, r.approvals);
@@ -245,11 +252,13 @@ export class MainnetSetup {
     let request: Record<string, string> = { from: sender, chainId: toHex(this.network.chains[chain].chainId), nonce, data: pending.data, value: "0x0", ...(pending.to ? { to: pending.to } : {}) };
     let expiresAt: string | undefined;
     if (step === 5) {
+      onProgress("Quoting cross-chain execution fees with Composer…");
       pending.l2StartBlock = await this.io.rpc<Hex>("l2", "eth_blockNumber");
       const quote = await quoteCrossChainFees({ tx: request, from: sender, chainId: request.chainId!, wallet: provider,
         rpc: (method, params) => this.io.rpc(chain, method, params, true), maxTotalFee: BigInt(this.target.fees.l1) });
       request = quote.transaction; expiresAt = quote.expiresAt;
-    } else request.gas = toHex(BigInt(await this.io.rpc<Hex>(chain, "eth_estimateGas", [request], true)) * 120n / 100n);
+    } else { onProgress("Estimating transaction gas…"); request.gas = toHex(BigInt(await this.io.rpc<Hex>(chain, "eth_estimateGas", [request], true)) * 120n / 100n); }
+    onProgress("Rechecking your wallet before opening confirmation…");
     await this.wallet(provider, chain, sender); return { pending, request, expiresAt };
   }
   private async batch(s: MainnetSetupState, nonce: Hex) {

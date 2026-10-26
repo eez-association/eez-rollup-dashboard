@@ -147,7 +147,7 @@ function PairedTreasuryConnected({ deployment, wallet, payments = false, guardAc
       throw failure;
     }
   }, [client, acceptSnapshot, acceptPayments, payments, source]);
-  const faucet = useTreasuryFaucet(deployment, wallet, refresh);
+  const faucet = useTreasuryFaucet(deployment, wallet, refresh, guardAction);
   useEffect(() => {
     let active = true;
     let timer: ReturnType<typeof setTimeout>;
@@ -309,7 +309,7 @@ function PairedTreasuryConnected({ deployment, wallet, payments = false, guardAc
   const alreadySigned = approvals.some(a => a.owner.toLowerCase() === wallet.address?.toLowerCase());
   const nextChain = review && approvals.length >= review.snapshot.threshold ? client.submissionSource(review.transaction) : payments ? source : "l2";
   const correctChain = wallet.chainId && BigInt(wallet.chainId) === BigInt(deployment[nextChain].chainId);
-  const locked = !!busy || !!intent && !terminal(outcome) || !!restored.error || ownerChangePending || faucet.busy || !!faucet.state.pending;
+  const locked = !!busy || !!intent && !terminal(outcome) || !!restored.error || ownerChangePending;
   const displayStatus = busy || outcome?.detail || (review ? "Collect owner approvals, then submit once." : "Review an action to collect owner approvals.");
   const l1Name = deployment.l1.chainId === 10200 ? "Chiado" : "Ethereum";
   let split: { amount: bigint; fromL1: bigint; fromL2: bigint; error: string } | undefined;
@@ -344,8 +344,8 @@ function PairedTreasuryConnected({ deployment, wallet, payments = false, guardAc
         return <section className={styles.card} key={chain} aria-label={`${chain === "l1" ? l1Name : "EEZ-X"} Safe funds`}>
           <h3 className={styles.chainLabel} data-chain={chain}>{name} Safe</h3>
           <SafeIdentity address={chain === "l1" ? deployment.safeL1 : deployment.safeL2} name={name} explorer={explorer} safeAppUrl={chain === "l1" ? deployment.safeAppUrl : undefined} />
-          <TreasurySafeFaucet faucet={faucet} chain={chain} l1Name={l1Name} disabled={locked || !!review || !wallet.address} />
-          {payments && <><strong className={styles.amount}>{balances ? formatUSDC(chain === "l1" ? balances.balanceL1 : balances.balanceL2) : "—"} <span>USDC</span></strong>
+          {payments && <><div className={styles.safeBalanceRow}><strong className={styles.amount}>{balances ? formatUSDC(chain === "l1" ? balances.balanceL1 : balances.balanceL2) : "—"} <span>USDC</span></strong>
+            <TreasurySafeFaucet faucet={faucet} chain={chain} l1Name={l1Name} disabled={!!busy || !!review || !wallet.address} /></div>
             {allowance ? <><p>{formatUSDC(remaining(allowance))} available under this Safe’s limit</p>
               <p className={styles.hint}><span data-testid={`${chain}-spent`}>{formatUSDC(allowance[1]!)}</span> / {formatUSDC(allowance[0]!)} spent this period</p></> : <p className={styles.hint}>Reading this Safe’s balance…</p>}</>}
         </section>;

@@ -68,6 +68,9 @@
 .copyStatus { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .balanceSummary { display: grid; grid-template-columns: 1.2fr 1fr 1fr; gap: 16px; }
 .amount span { font-size: 14px; font-weight: 400; color: var(--text-dim); }
+.safeBalanceRow { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+.safeFaucetAction { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+.safeFaucetAction p { font-size: 12px; }
 .setupProgress { display: flex; align-items: center; gap: 16px; margin-bottom: 8px; }
 .card .stepCount { flex-shrink: 0; font: 500 12px/1.5 var(--mono); color: var(--text-dim); }
 .setupProgress progress { max-width: 180px; height: 4px; }

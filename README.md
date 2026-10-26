@@ -175,12 +175,27 @@ configured token matches the current `TestUSDC` bytecode and bridge bindings.
 It is hidden for ordinary tokens and Ethereum-mainnet configurations. Clicking
 the L1 button calls `claim(safeL1)`; the L2 button calls `claimOnL2(safeL2)` through
 the normal bridge. Each sends exactly **1,000 test tokens**, with a normal wallet
-confirmation and gas paid on Chiado. Both buttons remain locked while a claim is
-unresolved, including after reload. No separate faucet screen is part of setup.
+confirmation and gas paid on Chiado. Each Safe has its own claim journal and pending button. The other faucet and
+payment controls remain usable; wallet requests are sequenced to avoid reusing
+an L1 nonce. Both claims remain recoverable after reload. No separate faucet screen is part of setup.
 
 The contribution slider includes **25%**, **50%**, and **75%** presets for the
 EEZ-X share. They preserve the exact total, use the same balance/allowance checks
 as the slider, and lock when the payment is reviewed.
+
+Setup retains its progress bar, chain and spending-limit context, current owner
+list, approval badges, Safe nonce, wallet/gas guidance and transaction history.
+The final step distinguishes L2 signatures from L1 submission and reports
+validation, gas estimation and Composer quoting before the wallet opens.
+**Change setup** is available before the first submission. **Start new treasury**
+archives the selected journal and verification requests before returning to the
+chooser; pending deployments, payments, owner changes or claims prevent restart.
+
+Source publication counts full explorer verification separately from exact
+Sourcify matches and partial explorer matches. Verification-only supplemental
+factory inputs live under `verification/supplemental/`, identified by their
+content hashes and recompiled in integration checks. They do not change the
+active deployment release or reinterpret saved setup journals.
 
 The current testnet profile pins the public dashboard's chain checkpoints,
 protocol implementations and normal bridge bytecode. A zero bridge counterpart

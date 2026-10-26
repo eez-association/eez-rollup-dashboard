@@ -1,5 +1,6 @@
 // UI lifecycle fixture. Contract verification is controlled here; deployment
 // tests separately exercise the real receipt, code and allowance checks.
+import { DeploymentIO } from "../../src/lib/treasury/deploymentIO";
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { TreasuryMainnetSetup } from "../../src/components/TreasuryMainnetSetup";
@@ -9,6 +10,12 @@ import "../../src/styles/global.css";
 export function mount(fixture: any) {
   const control = (window as any).completionTest = { checks: 0, walletCalls: 0, callbacks: 0, locks: [], confirm: false,
     failure: fixture.failure, release: undefined, unmount: undefined };
+  DeploymentIO.prototype.rpc = async (_chain, method, params = []) => {
+    if (method === 'eth_getBalance') return '0xde0b6b3a7640000' as any;
+    if (method === 'eth_getTransactionReceipt') { const tx = fixture.state.completed.find((x: any) => x.hash === params[0]); return tx ? {status:'0x1',blockNumber:tx.number,blockHash:tx.blockHash} : null; }
+    const tx = fixture.state.completed.find((x: any) => x.number === params[0]);
+    return (tx ? {number:tx.number,hash:tx.blockHash,timestamp:'0x1'} : {number:'0x0',hash:fixture.state.salt,timestamp:'0x1'}) as any;
+  };
   MainnetSetup.prototype.reconcile = async function (state) {
     if (!control.confirm || !state.pending) return state;
     return { ...fixture.state, pending: undefined };

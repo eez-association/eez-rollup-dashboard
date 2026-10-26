@@ -5,11 +5,12 @@ export function TreasurySafeFaucet({ faucet, chain, l1Name, disabled }: {
   faucet: ReturnType<typeof useTreasuryFaucet>; chain: 'l1' | 'l2'; l1Name: string; disabled: boolean;
 }) {
   if (!faucet.available) return null;
-  return <div>
-    <button type="button" className="btn btn-sm btn-outline" disabled={disabled || faucet.busy || !!faucet.state.pending}
+  const state = faucet.claims[chain];
+  return <div className={styles.safeFaucetAction}>
+    <button type="button" className="btn btn-sm btn-outline" title={`Claim 1,000 test USDC directly to this Safe. Gas is paid on ${l1Name}.`} disabled={disabled || faucet.busy[chain] || !!state.pending}
       onClick={() => void faucet.claim(chain)}>Get USDC from faucet</button>
-    <p className={styles.hint}>1,000 test USDC to this Safe. Confirm in your wallet; gas is paid on {l1Name}.</p>
-    {faucet.state.pending?.kind === chain && <p role="status">Waiting for faucet confirmation…</p>}
-    {!faucet.state.pending && faucet.state.last?.destination === chain && <p role="status">1,000 test USDC received.</p>}
+    {faucet.busy[chain] && !state.pending && <p role="status">Preparing wallet request…</p>}
+    {state.pending && <p role="status">Waiting for faucet confirmation…</p>}
+    {!state.pending && state.last?.destination === chain && <p role="status">1,000 test USDC received.</p>}
   </div>;
 }

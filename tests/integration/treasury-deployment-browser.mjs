@@ -83,22 +83,29 @@ export async function deploymentBrowser(f) {
     for(let step=0;step<6;step++) {
       held=true;
       await page.waitForFunction(({key,step})=>JSON.parse(localStorage.getItem(key)??'null')?.completed.length===step,{key,step});
+      assert.equal(await page.getByRole('progressbar',{name:'Setup progress'}).getAttribute('value'),String(step));
+      await page.getByRole('region',{name:'About this step'}).waitFor();
       if(step>=4) {
-        await page.getByRole('button',{name:'Review allowance',exact:true}).click();
-        await page.getByRole('button',{name:'Sign approval',exact:true}).click();
+        await page.getByRole('button',{name:'Review Safe step',exact:true}).click();
+        await page.getByText('Current owners',{exact:true}).click();
+        assert(await page.getByRole('button',{name:'Approve Safe step',exact:true}).evaluate(e=>e.classList.contains('btn-solid')));
+        assert(await page.getByRole('button',{name:'Submit approved Safe step',exact:true}).isDisabled());
+        if(step===5)await page.getByText('Sign for your',{exact:false}).waitFor();
+        await page.screenshot({path:`${directory}/setup-approval-${step}.png`,fullPage:true});
+        await page.getByRole('button',{name:'Approve Safe step',exact:true}).click();
         await page.getByText('1 of 2 owner approvals',{exact:true}).waitFor();
         await page.evaluate(()=>window.setupControls.select('B'));
-        await page.getByRole('button',{name:'Sign approval',exact:true}).click();
+        await page.getByRole('button',{name:'Approve Safe step',exact:true}).click();
         await page.getByText('2 of 2 owner approvals',{exact:true}).waitFor();
         await page.evaluate(()=>window.setupControls.select('A'));
       }
       if(step===0) {
         await page.evaluate(()=>{window.setupControls.rejectNext=true;});
-        await page.getByRole('button',{name:'Confirm in wallet',exact:true}).click();
-        await page.getByRole('alert').getByText('User rejected transaction',{exact:true}).waitFor();
+        await page.getByRole('button',{name:step>=4?'Submit approved Safe step':'Approve next deployment step',exact:true}).click();
+        await page.getByRole('status').getByText('Wallet cancelled. No transaction was authorized.',{exact:true}).waitFor();
         assert.equal((await state()).pending,undefined); assert.equal(submissions.length,0);
       }
-      await page.getByRole('button',{name:'Confirm in wallet',exact:true}).click();
+      await page.getByRole('button',{name:step>=4?'Submit approved Safe step':'Approve next deployment step',exact:true}).click();
       await page.waitForFunction(key=>!!JSON.parse(localStorage.getItem(key)??'null')?.pending?.hash,key);
       assert.equal(submissions.length,step+1);
       const before=await state(); await mount();

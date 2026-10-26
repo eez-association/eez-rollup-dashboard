@@ -5,7 +5,7 @@ import { TestnetAsset, readAssetJournal } from './testnetAsset.ts';
 import type { AssetJournal } from './testnetAsset.ts';
 
 const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
-export const safeFaucetKey = (c: TreasuryConfig) => `eez:treasury:safe-faucet:${c.instance}:${c.payments!.tokenL1.toLowerCase()}`;
+export const safeFaucetKey = (c: TreasuryConfig, chain?: 'l1' | 'l2') => `eez:treasury:safe-faucet:${c.instance}:${c.payments!.tokenL1.toLowerCase()}${chain ? `:${chain}` : ''}`;
 
 /** A symbol or label is not proof that an asset exposes the test-only mint. */
 export async function verifiedSafeFaucet(c: TreasuryConfig, artifacts: DeploymentArtifacts): Promise<TestnetAsset | null> {
@@ -29,4 +29,16 @@ export function readSafeFaucet(c: TreasuryConfig, raw: string | null): AssetJour
     || p && (p.kind === 'deploy' || !same(p.recipient, p.kind === 'l1' ? c.safeL1 : c.safeL2)))
     throw new Error('Saved faucet request belongs to another token or Safe; preserve it for recovery');
   return state;
+}
+
+/** Keep pre-existing single-claim journals recoverable without moving or erasing them. */
+export function readSafeFaucetClaim(c: TreasuryConfig, storage: Pick<Storage, 'getItem'>, chain: 'l1' | 'l2'): AssetJournal {
+  const raw = storage.getItem(safeFaucetKey(c, chain));
+  if (raw !== null) {
+    const state = readSafeFaucet(c, raw);
+    if (state.pending && state.pending.kind !== chain) throw new Error('Saved faucet request belongs to the other Safe');
+    return state;
+  }
+  const legacy = readSafeFaucet(c, storage.getItem(safeFaucetKey(c)));
+  return legacy.pending?.kind === chain || !legacy.pending && legacy.last?.destination === chain ? legacy : readSafeFaucet(c, null);
 }

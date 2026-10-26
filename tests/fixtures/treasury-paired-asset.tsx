@@ -18,14 +18,14 @@ export async function mount(mode = 'test') {
   // UI-only fixture: genuine packaged claim calldata, controlled wallet and receipts.
   TestnetAsset.prototype.validate = async () => {};
   TestnetAsset.prototype.validateToken = async () => {};
-  TestnetAsset.prototype.rpc = async () => (mode === 'ordinary-token' ? '0x6000' : release.contracts.TestUSDC.runtime) as any;
+  TestnetAsset.prototype.rpc = async (_chain, method) => method === 'eth_getTransactionCount' ? w.readWalletNonce() : (mode === 'ordinary-token' ? '0x6000' : release.contracts.TestUSDC.runtime) as any;
   TestnetAsset.prototype.read = async () => a(31) as any;
   TestnetAsset.prototype.wallet = async () => sender as any;
   TestnetAsset.prototype.prepare = async function(kind, token, recipient) {
     if (kind === 'deploy') throw new Error('Token deployment is not part of Safe setup');
-    const data = this.data(kind, recipient);
-    return { pending: { id: kind, kind, chain: 'l1', sender, nonce: '0x0', data, recipient, build: release.build!, l2StartBlock: '0x1', token, to: token },
-      request: { from: sender, to: token!, data, value: '0x0', chainId: '0x27d8' } } as any;
+    const data = this.data(kind, recipient), nonce = await this.rpc('l1', 'eth_getTransactionCount', [sender, 'pending']);
+    return { pending: { id: kind, kind, chain: 'l1', sender, nonce, data, recipient, build: release.build!, l2StartBlock: '0x1', token, to: token },
+      request: { from: sender, to: token!, nonce, data, value: '0x0', chainId: '0x27d8' } } as any;
   };
   TestnetAsset.prototype.reconcile = async state => !state.pending || !w.confirmFixture ? state : {
     ...state, pending: undefined, last: { hash: state.pending.hash!, destination: state.pending.kind as 'l1' | 'l2' },

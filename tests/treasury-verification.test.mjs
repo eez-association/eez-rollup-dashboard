@@ -3,8 +3,9 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { encodeEventTopics, encodeAbiParameters, parseAbi, parseAbiParameters } from 'viem';
-import { VerificationWorker, creations, loadBuilds, publicJob } from '../scripts/verification/worker.mjs';
+import { VerificationWorker, creations, loadBuilds, loadAdditionalSources, publicJob } from '../scripts/verification/worker.mjs';
 import { appendSourceRequest, sourceRequests, deliverSourceRequest, retainSourceRequests } from '../src/lib/treasury/sourceVerification.ts';
+import { blockscoutApiUrl } from '../scripts/verification/network.mjs';
 const build = 'ab'.repeat(32), tx = '0x'+'12'.repeat(32), blockHash = '0x'+'34'.repeat(32), address = '0x'+'56'.repeat(20);
 const runtime = '0x60006000556001a164736f6c6343000822000a';
 const artifact = { runtime, bytecode: '0x6000', immutables: [], immutableGroups: [], input: 'source', compiler: '0.8.34+commit.80d5c536', target: 'A.sol:A' };
@@ -31,6 +32,28 @@ function fixture(t, change = {}) {
   const config = { directory, builds:{[build]:manifest}, networks:{[state.chainId]:{rpc:'https://rpc.invalid',explorerApi:'https://explorer.invalid/api'}}, fetcher, now:()=>state.time };
   return {state,config,worker:new VerificationWorker(config)};
 }
+test('explorer website roots and explicit API bases normalize to the same Blockscout endpoint', () => {
+  for (const path of ['/explorer', '/explorer/', '/explorer/api', '/explorer/api/', '/explorer/api/v2'])
+    assert.equal(blockscoutApiUrl(`https://example.invalid${path}`, '', 'http://127.0.0.1:8083'), 'https://example.invalid/explorer/api');
+  assert.equal(blockscoutApiUrl('', 'https://example.invalid', ''), 'https://example.invalid/api');
+  assert.equal(blockscoutApiUrl('', '', 'http://127.0.0.1:8083'), '');
+});
+test('accepted explorer publications stay on short polls and manual retry preserves the job', async t => {
+  const { state, worker } = fixture(t), job = worker.enqueue(request);
+  job.attempts = 12; await worker.tick();
+  assert.equal(job.nextAttempt - state.time, 15000);
+  const copy = JSON.stringify(job.contracts); worker.retry(job.id);
+  assert.equal(job.nextAttempt, 0); assert.equal(job.attempts, 0); assert.equal(JSON.stringify(job.contracts), copy);
+  worker.processing = job.id; job.nextAttempt = 999; worker.retry(job.id); assert.equal(job.nextAttempt, 999);
+});
+test('supplemental sources verify factory children without changing the requested deployment build', async t => {
+  const sources = loadAdditionalSources('verification/supplemental'); assert(sources.length);
+  const a = sources[0], { state, config } = fixture(t, { code: a.runtime });
+  const worker = new VerificationWorker({ ...config, additionalSources: sources }), job = await worker.admit(request);
+  assert.equal(job.request.build, build); await worker.tick();
+  assert.equal(job.contracts[0].name, 'CrossChainProxy'); assert.equal(job.contracts[0].status, 'pending');
+  const submitted = JSON.parse(await state.posts[0].body.get('files[0]').text()); assert.deepEqual(submitted, a.sourceInput);
+});
 test('receipt discovery includes nested creation, Safe factories, aliases, wrapped tokens and claim transfers', () => {
   const abis = parseAbi(['event Created(uint256 indexed index,address indexed target,bytes32 initHash)',
     'event CrossChainProxyCreated(address indexed proxy,address indexed originalAddress,uint64 indexed originalRollupId)',

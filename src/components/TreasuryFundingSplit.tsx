@@ -22,7 +22,6 @@ export function TreasuryFundingSplit({ l1Name, split, onChange, onReset }: {
       aria-valuetext={split ? `${l1Name} ${formatPercentage(bps)} percent, ${formatUSDC(split.fromL1)} USDC; EEZ-X ${formatPercentage(10_000n - bps)} percent, ${formatUSDC(split.fromL2)} USDC` : "Enter an amount"}
       onChange={event => { if (split) onChange(split.amount * (10_000n - BigInt(event.target.value)) / 10_000n); }} />
     <div className={styles.splitPresets} role="group" aria-label="EEZ-X share presets">
-      <span>EEZ-X share</span>
       {[25, 50, 75].map(percent => <button key={percent} type="button" disabled={!split}
         aria-pressed={!!split && split.fromL1 === split.amount * BigInt(100 - percent) / 100n}
         onClick={() => { if (split) onChange(split.amount * BigInt(100 - percent) / 100n); }}>{percent}%</button>)}
