@@ -22,6 +22,7 @@ services:
       EEZ_UI_LISTEN: "8080"
       EEZ_UI_MONITOR_UPSTREAM: "monitor:8080"
       EEZ_UI_TRACE_UPSTREAM: "trace-decoder:8080"
+      EEZ_UI_COW_UPSTREAM: "${EEZ_UI_COW_UPSTREAM:-http://host.docker.internal:8787}"
       EEZ_UI_PROTOCOL_COMMIT: "${EEZ_UI_PROTOCOL_COMMIT:-development}"
       EEZ_UI_L1_RPC_UPSTREAM: "${EEZ_UI_L1_RPC_UPSTREAM:-http://host.docker.internal:19545}"
       EEZ_UI_L2_RPC_UPSTREAM: "${EEZ_UI_L2_RPC_UPSTREAM:-http://host.docker.internal:19546}"

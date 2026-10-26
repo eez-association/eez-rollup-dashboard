@@ -26,6 +26,7 @@ import styles from "./App.module.css";
 
 const VisualizerView = lazy(() => import("./components/VisualizerView").then(module => ({ default: module.VisualizerView })));
 const TreasuryDemo = lazy(() => import("./components/TreasuryDemo").then(module => ({ default: module.TreasuryDemo })));
+const CowLightDemo = lazy(() => import("./components/CowLightDemo").then(module => ({ default: module.CowLightDemo })));
 
 const TREASURY_VISIBILITY_KEY = "eez:treasury-demo:visible";
 
@@ -35,12 +36,14 @@ function treasuryVisibleForSession(): boolean {
 }
 
 // Flash-loan and aggregator views are retained but are not enabled on this network.
-type DashboardTab = "dashboard" | "counter-demo" | "treasury-demo";
+type DashboardTab = "dashboard" | "counter-demo" | "treasury-demo" | "cow-demo";
+const isHiddenDemo = (tab: DashboardTab) => tab === "treasury-demo" || tab === "cow-demo";
 
 /** Dashboard sub-tabs that can be deep-linked via hash */
 const HASH_TO_TAB: Record<string, DashboardTab> = {
   "counter-demo": "counter-demo",
   "treasury-demo": "treasury-demo",
+  "cow-demo": "cow-demo",
   // Keep saved bridge links opening the combined dashboard.
   "bridge": "dashboard",
 };
@@ -59,7 +62,7 @@ function getInitialTab(treasuryVisible: boolean): DashboardTab {
   const raw = window.location.hash.replace("#/", "").replace("#", "");
   const hash = raw.split("?")[0] || "";
   const tab = HASH_TO_TAB[hash] ?? "dashboard";
-  return tab === "treasury-demo" && !treasuryVisible ? "dashboard" : tab;
+  return isHiddenDemo(tab) && !treasuryVisible ? "dashboard" : tab;
 }
 
 /** Parse ?key=value from the hash fragment (e.g. #/?target=0x...) */
@@ -75,6 +78,7 @@ const DASHBOARD_TABS: { id: DashboardTab; label: string }[] = [
   { id: "dashboard", label: "Bridge & Calls" },
   { id: "counter-demo", label: "Counter Demo" },
   { id: "treasury-demo", label: "Treasury Demo" },
+  { id: "cow-demo", label: "CoW Light Demo" },
 ];
 
 export function App() {
@@ -125,7 +129,7 @@ export function App() {
   const visualizerParams = new URLSearchParams(visualizerRoute.split("?")[1] ?? "");
   const [dashboardTab, setDashboardTab] = useState<DashboardTab>(() => getInitialTab(treasuryVisible));
   useEffect(() => {
-    document.title = `${view === "debug" ? "Quote Debugger" : view === "visualizer" ? "Execution Visualizer" : view === "monitor" ? "Network Monitor" : dashboardTab === "counter-demo" ? "Counter Demo" : dashboardTab === "treasury-demo" ? "Treasury Demo" : "Dashboard"} — ${config.rollupName}`;
+    document.title = `${view === "debug" ? "Quote Debugger" : view === "visualizer" ? "Execution Visualizer" : view === "monitor" ? "Network Monitor" : dashboardTab === "counter-demo" ? "Counter Demo" : dashboardTab === "treasury-demo" ? "Treasury Demo" : dashboardTab === "cow-demo" ? "CoW Light Demo" : "Dashboard"} — ${config.rollupName}`;
   }, [view, dashboardTab, configLoaded]);
 
   /** Switch dashboard sub-tab and update hash for deep linking */
@@ -160,7 +164,7 @@ export function App() {
       if (visible) {
         navigate("dashboard");
         switchTab("treasury-demo");
-      } else if (dashboardTab === "treasury-demo") {
+      } else if (isHiddenDemo(dashboardTab)) {
         switchTab("counter-demo");
       }
     };
@@ -177,7 +181,7 @@ export function App() {
       if (target) setGenericTargetAddr(target);
       // Deep link to dashboard sub-tabs (e.g. #/counter-demo, #/bridge)
       const tab = raw ? HASH_TO_TAB[raw] : undefined;
-      setDashboardTab(tab === "treasury-demo" && !treasuryVisible ? "dashboard" : tab ?? "dashboard");
+      setDashboardTab(tab && isHiddenDemo(tab) && !treasuryVisible ? "dashboard" : tab ?? "dashboard");
       setView(getInitialView());
       setVisualizerRoute(window.location.hash);
     };
@@ -397,7 +401,7 @@ export function App() {
           </section>
 
           <nav className={styles.tabs} aria-label="Dashboard sections">
-            {DASHBOARD_TABS.filter(tab => tab.id !== "treasury-demo" || treasuryVisible).map((tab) => (
+            {DASHBOARD_TABS.filter(tab => !isHiddenDemo(tab.id) || treasuryVisible).map((tab) => (
               <button
                 key={tab.id}
                 className={`${styles.tab} ${dashboardTab === tab.id ? styles.tabActive : ""}`}
@@ -537,7 +541,13 @@ export function App() {
               </Suspense>
             )}
 
-            {dashboardTab !== "treasury-demo" && <TxHistoryPanel
+            {treasuryVisible && dashboardTab === "cow-demo" && (
+              <Suspense fallback={<p role="status">Loading CoW Light demo…</p>}>
+                <CowLightDemo ready={configLoaded} />
+              </Suspense>
+            )}
+
+            {!isHiddenDemo(dashboardTab) && <TxHistoryPanel
               records={txHistory.records}
               onClear={txHistory.clearHistory}
               onInspect={(hash, chain) => { window.location.hash = `#/visualizer?mode=trace&chain=${chain}&tx=${hash}`; }}

@@ -35,6 +35,32 @@ python3 solver/worker.py                  # separate process
 Open `http://127.0.0.1:8787/`. The browser only signs the EIP-712 order;
 settlement is performed by the worker.
 
+The dashboard also embeds this UI in its hidden **CoW Light Demo** tab. Press
+**Ctrl+Alt+Shift+T** (**Cmd+Option+Shift+T** on macOS) outside a text field to
+reveal both Treasury and CoW Light tabs; press again to hide them. Configure
+the dashboard's `EEZ_UI_COW_UPSTREAM` to reach this API. Its chain IDs must match
+the dashboard before the embedded trading UI opens.
+
+## Settlement status and recovery
+
+The worker durably saves the signed transaction hash before broadcast, then
+reconciles that same hash on subsequent passes. A successful L2 execution
+receipt only reaches `awaiting_settlement`. `settled` requires a matching
+canonical indexed L2 block and a successful L1 posting receipt in the current
+L1 block. This is canonical inclusion, not consensus finality.
+
+Timeouts, missing index data and RPC outages leave the submission pending;
+they do not fail the order or trigger a new transaction. Restarting the worker
+continues checking the saved hash, including after the signed order expires.
+An explicit Composer rejection or a revert in a canonically settled block
+marks the order failed. Ambiguous submissions that never reach Composer need
+operator inspection; the worker intentionally does not create replacement
+transactions automatically, including fee/nonce replacements. Historical orders
+marked settled by the old receipt-only solver are rechecked using their saved
+transaction hashes before being presented as canonically settled.
+Deployment interruption recovery and clearing-price
+slippage remain separate follow-up work.
+
 ## Network profiles
 
 Every Python entry point uses `network_config.py`. Select `COW_NETWORK=mainnet`
@@ -109,7 +135,7 @@ EnvironmentFile. Do not put a secret in this repository.
 ```bash
 python3 -m unittest discover -s tests -v
 node --test tests/ui-network.test.cjs
-python3 -m py_compile network_config.py backend/server.py solver/*.py deployment/*.py
+python3 -m py_compile network_config.py settlement_state.py backend/server.py solver/*.py deployment/*.py
 forge build --root contracts
 ```
 

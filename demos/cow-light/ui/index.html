@@ -18,7 +18,7 @@
 <section class="card"><h2>2. Available L1 liquidity</h2><div class="token-tools"><input id="search" placeholder="Filter tokens…"><span id="count" class="badge">0 / 100</span></div><div class="scroll"><table><thead><tr><th>Token</th><th>Uniswap V2 pair</th><th>WETH reserve</th><th>L2 wrapper</th></tr></thead><tbody id="rows"></tbody></table></div><p class="muted small">Click any row to use it in the single selector above. “Not deployed” is expected for a token whose first inbound bridge has not happened yet.</p></section></main>
 <section class="card activity"><h2>3. Your order activity</h2><div class="muted small">Orders are kept across reloads and refreshed from the solver queue. Never sign an order you did not initiate.</div><div id="orders" class="muted">Loading order activity…</div></section>
 <script>
-const BASE=location.pathname.startsWith('/cowdemo')?'/cowdemo':'';let cfg,list=[],selected,quoteData,provider,signer,account,submitted=[],allowanceData,quoteTimer;
+const BASE=location.pathname.replace(/\/(?:index\.html)?$/,'');let cfg,list=[],selected,quoteData,provider,signer,account,submitted=[],allowanceData,quoteTimer;
 const $=id=>document.getElementById(id);const api=(path,opts)=>fetch(BASE+path,opts).then(async r=>{const j=await r.json();if(!r.ok)throw Error(j.error||'Request failed');return j});
 const fmt=(raw,dec=18,max=6)=>{try{let s=String(raw),d=Number(dec);if(s[0]==='-')return '-'+fmt(s.slice(1),d,max);s=s.padStart(d+1,'0');let whole=s.slice(0,-d)||'0',frac=s.slice(-d).slice(0,max).replace(/0+$/,'');whole=whole.replace(/\B(?=(\d{3})+(?!\d))/g,',');return frac?whole+'.'+frac:whole}catch{return '—'}};
 function setStatus(text,kind='muted'){ $('status').className='notice '+kind;$('status').textContent=text }

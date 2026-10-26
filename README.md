@@ -151,14 +151,23 @@ the selected wallet, and the shared collapsed gas controls and transaction popup
 Missing source proxies can be created from the demo; existing proxies are
 verified before use. Cross-chain history records the actual call direction.
 
-An experimental **Treasury Demo** is hidden from the normal dashboard. Press
+The experimental **Treasury Demo** and **CoW Light Demo** are hidden from the normal dashboard. Press
 **Ctrl+Alt+Shift+T** (or **Cmd+Option+Shift+T** on macOS), outside an editable field,
-to reveal its tab beside Counter Demo and open it. Press the same shortcut again
-to hide it; an open treasury view returns to Counter Demo. Visibility is kept in
+to reveal both tabs beside Counter Demo and open Treasury. Press the same shortcut again
+to hide both; either open demo returns to Counter Demo. Visibility is kept in
 `sessionStorage` for this browser tab's session and survives reloads. A fresh
-session starts hidden, and `#/treasury-demo` alone does not enable it. This is a
+session starts hidden; neither `#/treasury-demo` nor `#/cow-demo` enables the tabs. This is a
 navigation preference, not access control: anyone who knows the shortcut can
 open the example, and its code ships with the application.
+
+CoW Light reuses the standalone UI in `demos/cow-light`, served through
+`/dashboard/cowdemo/`. Run its API and solver for the dashboard's network;
+`EEZ_UI_COW_UPSTREAM` selects the API upstream (Vite defaults to
+`http://127.0.0.1:8787`; Compose defaults to `http://host.docker.internal:8787`).
+When using Compose, the API must listen on an interface reachable from the UI
+container. The tab checks both chain IDs before opening the trading UI and
+shows an unavailable state if the API is not running. This proxy does not
+start the API, deploy contracts, or expose the solver's control endpoint.
 
 On the configured **Chiado 10200 / EEZ-X 906969** dashboard, this tab opens
 wallet-approved setup when no shared manifest is saved. **Start setup** connects

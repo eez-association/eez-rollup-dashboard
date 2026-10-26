@@ -17,6 +17,7 @@ from eth_utils import to_checksum_address, keccak
 BASE=Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BASE))
 from network_config import load_config
+from settlement_state import is_active, reconcile, update_order
 CFG=load_config()
 L1=Web3(Web3.HTTPProvider(CFG['L1_RPC'],request_kwargs={'timeout':60}))
 L2=Web3(Web3.HTTPProvider(CFG['L2_RPC'],request_kwargs={'timeout':60}))
@@ -50,7 +51,7 @@ BRIDGE_ABI=[{'type':'function','name':'bridgeTokens','stateMutability':'nonpayab
 PAIR_ABI=[{'type':'function','name':'token0','stateMutability':'view','inputs':[],'outputs':[{'type':'address'}]}, {'type':'function','name':'getReserves','stateMutability':'view','inputs':[],'outputs':[{'type':'uint112'},{'type':'uint112'},{'type':'uint32'}]}, {'type':'function','name':'swap','stateMutability':'nonpayable','inputs':[{'type':'uint256'},{'type':'uint256'},{'type':'address'},{'type':'bytes'}],'outputs':[]}]
 CATALOG=CFG['TOKEN_CATALOG']
 
-def send(w,a,tx,chain,endpoint=None,timeout=1200):
+def send(w,a,tx,chain,item,endpoint):
     tx=dict(tx); tx['from']=a.address
     quoted_tip=tx.pop('_quotedTip',None); quoted_max=tx.pop('_quotedMaxFee',None)
     # The composer maintains a reservation-aware source nonce.  The execution
@@ -59,75 +60,46 @@ def send(w,a,tx,chain,endpoint=None,timeout=1200):
     tx['nonce']=nonce_rpc.eth.get_transaction_count(a.address,'pending'); tx['chainId']=chain
     tx.pop('gasPrice',None); base=w.eth.get_block('latest').get('baseFeePerGas') or 0; gp=w.eth.gas_price
     # EEZ settlement admission charges an L1 tariff. A 1 gwei cap can be
-    # underfunded even when ordinary L2 gas is cheap; start above that floor
-    # and raise it from the structured admission error when necessary.
+    # underfunded even when ordinary L2 gas is cheap; prefer the Composer quote
+    # and use this floor only when a quote is unavailable.
     tip=int(quoted_tip,16) if isinstance(quoted_tip,str) else (int(quoted_tip) if quoted_tip else max(gp//2,2_000_000_000))
     tx['maxPriorityFeePerGas']=tip
     tx['maxFeePerGas']=int(quoted_max,16) if isinstance(quoted_max,str) else (int(quoted_max) if quoted_max else max(gp,base+tip))
     if 'gas' not in tx: tx['gas']=int(w.eth.estimate_gas(tx)*13//10)
-    b=nonce_rpc
-    for attempt in range(3):
-        raw=a.sign_transaction(tx).raw_transaction
-        # Public, replayable envelope only; never log signing material.
-        tx_view={
-            'from': a.address,
-            'to': tx.get('to'),
-            'value': hex(int(tx.get('value',0))),
-            'data': tx.get('data','0x'),
-            'nonce': hex(int(tx['nonce'])),
-            'gas': hex(int(tx['gas'])) if tx.get('gas') is not None else None,
-            'maxFeePerGas': hex(int(tx['maxFeePerGas'])) if tx.get('maxFeePerGas') is not None else None,
-            'maxPriorityFeePerGas': hex(int(tx['maxPriorityFeePerGas'])) if tx.get('maxPriorityFeePerGas') is not None else None,
-            'chainId': chain,
-        }
-        debug('tx_submit_attempt', attempt=attempt, nonce=tx['nonce'], endpoint=endpoint, to=tx.get('to'), gas=tx.get('gas'), transaction=tx_view)
-        try:
-            h=b.eth.send_raw_transaction(raw); hx=h.hex(); debug('tx_submitted', hash=hx, nonce=tx['nonce'], transaction=tx_view); break
-        except Exception as exc:
-            msg=str(exc)
-            debug('tx_submit_error', attempt=attempt, nonce=tx['nonce'], error=msg)
-            import re
-            m=re.search(r'expected(?: next)?(?: unreserved)? nonce (\d+)',msg)
-            fee=re.search(r"requiredPayment['\"]?: ['\"](0x[0-9a-fA-F]+)['\"].*?sourceGasUsed['\"]?: ['\"](0x[0-9a-fA-F]+)",msg)
-            if fee and attempt<2:
-                required=int(fee.group(1),16); gas_used=int(fee.group(2),16)
-                tx['maxPriorityFeePerGas']=max(tx['maxPriorityFeePerGas'],(required//gas_used)+100_000_000)
-                tx['maxFeePerGas']=max(tx['maxFeePerGas'],base+tx['maxPriorityFeePerGas'])
-                debug('fee_retry', requiredPayment=required, sourceGasUsed=gas_used, priorityFee=tx['maxPriorityFeePerGas'])
-                continue
-            if m and attempt<2:
-                tx['nonce']=int(m.group(1)); continue
-            raise
-    # Poll the execution RPC and Composer index until the transaction is
-    # canonical or a durable rejection is reported.
-    deadline=time.monotonic()+timeout
-    while time.monotonic()<deadline:
-        try:
-            r=w.eth.get_transaction_receipt(h)
-            if r is not None:
-                if r.status!=1: raise RuntimeError('reverted '+hx)
-                return r
-        except Exception:
-            pass
-        if endpoint:
-            try:
-                q=requests.post(endpoint,json={'jsonrpc':'2.0','id':1,'method':'eez_getCrossChainTransaction','params':[hx]},timeout=20).json().get('result')
-                if q:
-                    own=q.get('ownership') or {}; rej=own.get('rejection') or {}
-                    if q.get('lifecycle')=='terminal' and own.get('canonical') is None:
-                        err=rej.get('error') or own.get('reason') or 'terminal composer rejection'
-                        raise RuntimeError(f'composer rejected {hx}: {err}')
-            except RuntimeError: raise
-            except Exception: pass
-        time.sleep(3)
-    raise RuntimeError(f'timed out waiting for canonical receipt {hx}')
+    raw=a.sign_transaction(tx).raw_transaction
+    tx_hash=Web3.to_hex(Web3.keccak(raw))
+    # Persist the deterministic signed transaction hash before contacting the
+    # Composer. A lost response or process exit must never cause a fresh send.
+    update_order(QUEUE,item['id'],'submitting',txHash=tx_hash,nonce=tx['nonce'],
+                 message='Submission started; awaiting Composer response.')
+    debug('tx_submit_attempt',orderId=item['id'],hash=tx_hash,nonce=tx['nonce'])
+    try:
+        accepted=nonce_rpc.eth.send_raw_transaction(raw)
+        if Web3.to_hex(accepted).lower()!=tx_hash.lower():
+            raise RuntimeError('Composer returned an unexpected transaction hash')
+        update_order(QUEUE,item['id'],'submitted',message='Submitted; awaiting canonical settlement.')
+        debug('tx_submitted',orderId=item['id'],hash=tx_hash,nonce=tx['nonce'])
+    except Exception as exc:
+        # Even a timeout may follow acceptance. Keep the hash and reconcile it.
+        update_order(QUEUE,item['id'],'submitted',message=f'Submission outcome unknown; checking transaction: {exc}')
+        debug('tx_submit_error',orderId=item['id'],hash=tx_hash,error=str(exc))
+    pending={**item,'solver':{**item.get('solver',{}),'txHash':tx_hash}}
+    return reconcile(QUEUE,pending,rpc,CFG['L1_RPC'],CFG['L2_RPC'],L2_FRONT)
+
+
+def rpc(endpoint,method,params):
+    response=requests.post(endpoint,json={'jsonrpc':'2.0','id':1,'method':method,'params':params},timeout=15)
+    response.raise_for_status()
+    body=response.json()
+    if 'error' in body: raise RuntimeError(str(body['error']))
+    return body.get('result')
 
 def queued():
     rows=[json.loads(x) for x in QUEUE.read_text().splitlines() if x.strip()]
     retry=os.getenv('RETRY_ORDER_ID')
     if retry:
-        return next((r for r in reversed(rows) if r.get('id')==retry and r.get('status') in ('queued','failed')),None)
-    return next((r for r in reversed(rows) if r.get('status')=='queued'),None)
+        return next((r for r in reversed(rows) if r.get('id')==retry and is_active(r)),None)
+    return next((r for r in reversed(rows) if is_active(r)),None)
 
 def token_route(token):
     t=next((x for x in CFG.catalog() if x.get('address','').lower()==token.lower()),None)
@@ -150,20 +122,19 @@ def live_route_quote(pair, amount):
 
 def record_failure(item, reason):
     """Durably terminalize an order that cannot be filled as signed."""
-    with QUEUE_LOCK.open('w') as lf:
-      fcntl.flock(lf, fcntl.LOCK_EX)
-      rows=[json.loads(x) for x in QUEUE.read_text().splitlines() if x.strip()]
-      for r in rows:
-        if r.get('id')==item.get('id') and r.get('status')=='queued':
-          r['status']='failed'; r['solver']={'orderId':item.get('id'),'error':reason}
-      tmp=QUEUE.with_suffix('.jsonl.tmp'); tmp.write_text(''.join(json.dumps(r)+'\n' for r in rows)); os.replace(tmp,QUEUE)
-      fcntl.flock(lf, fcntl.LOCK_UN)
+    update_order(QUEUE,item['id'],'failed',error=reason)
 
 def main():
     CFG.check_chains(l1=L1,l2=L2)
-    CFG.catalog()
     item=queued()
     if not item: print('no queued catalog-token order'); return
+    if item.get('solver',{}).get('txHash') or item.get('solver',{}).get('settlement'):
+        result=reconcile(QUEUE,item,rpc,CFG['L1_RPC'],CFG['L2_RPC'],L2_FRONT)
+        debug('settlement_checked',orderId=item['id'],status=result['status'])
+        return
+    if item.get('status')!='queued':
+        raise RuntimeError('Pending submission has no transaction hash; manual inspection required')
+    CFG.catalog()
     order=item['order']; amount=int(order['sellAmount']); minimum=int(order['buyAmount'])
     token,pair,symbol=order_route(item)
     if int(time.time()) >= int(order['validTo']):
@@ -180,6 +151,7 @@ def main():
         # Keep the worker alive while the user funds the order and grants the
         # GPv2 relayer allowance.
         print(f'waiting: user WETH/allowance insufficient ({user_bal}/{settlement_allowance} < {amount})', flush=True)
+        update_order(QUEUE,item['id'],'queued',message='Waiting for user WETH balance or allowance.')
         return
     predicted=to_checksum_address(order['buyToken'])
     # The signed order is immutable. Reject a non-canonical wrapper address so
@@ -261,19 +233,19 @@ def main():
             # admission separately accounts for the L1 settlement estimate.
             fill_tx=st.functions.settle([WETH_L2,predicted],clearing_prices,[trade],interactions).build_transaction({'from':ACCT.address,'gas':settle_gas})
             fill_tx['_quotedTip']=quoted_tip; fill_tx['_quotedMaxFee']=quoted_max
-            fill=send(L2,ACCT,fill_tx,L2_CHAIN,L2_FRONT)
-        except RuntimeError as exc:
-            record_failure(item,str(exc)); print(f'failed: {exc}',flush=True); return
-        result={'orderId':item['id'],'settlement':'0x'+fill.transactionHash.hex(),'settlementBlock':fill.blockNumber,'wrapper':predicted,'route':route.address,'l1Helper':us['l1Helper'],'inventoryBacked':False}
-        with QUEUE_LOCK.open('w') as lf:
-            fcntl.flock(lf,fcntl.LOCK_EX)
-            rows=[json.loads(x) for x in QUEUE.read_text().splitlines() if x.strip()]
-            for r in rows:
-                if r.get('id')==item.get('id') and r.get('status') in ('queued','failed'): r['status']='settled'; r['solver']=result
-            tmp=QUEUE.with_suffix('.jsonl.tmp'); tmp.write_text(''.join(json.dumps(r)+'\n' for r in rows)); os.replace(tmp,QUEUE); fcntl.flock(lf,fcntl.LOCK_UN)
-        print(json.dumps(result,indent=2)); return
+            send(L2,ACCT,fill_tx,L2_CHAIN,item,L2_FRONT)
+        except Exception as exc:
+            # Errors before submission leave the order queued. Once persisted,
+            # the submission hash is retained and the next pass only reconciles.
+            debug('order_worker_exception',orderId=item['id'],error=str(exc))
+        return
 
     record_failure(item, 'universal route manifest is missing; deploy the final universal route before settling')
     return
 
-if __name__=='__main__': main()
+if __name__=='__main__':
+    QUEUE.parent.mkdir(parents=True,exist_ok=True)
+    # Serialize independent worker processes as well as threads.
+    with QUEUE.with_suffix(QUEUE.suffix+'.solver.lock').open('a') as execution_lock:
+        fcntl.flock(execution_lock,fcntl.LOCK_EX)
+        main()

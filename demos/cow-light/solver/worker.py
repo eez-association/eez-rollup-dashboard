@@ -12,6 +12,7 @@ from pathlib import Path
 BASE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BASE))
 from network_config import load_config
+from settlement_state import is_active
 CFG = load_config()
 QUEUE = CFG['ORDER_QUEUE']
 SCRIPT = Path(os.getenv("SETTLE_SCRIPT", Path(__file__).with_name("settle_order.py")))
@@ -32,22 +33,24 @@ def queued():
     if not QUEUE.exists(): return False
     for line in QUEUE.read_text().splitlines():
         try:
-            if json.loads(line).get("status") == "queued": return True
+            if is_active(json.loads(line)): return True
         except Exception:
             continue
     return False
 
 def run_once():
     global last
-    item = next((json.loads(x) for x in QUEUE.read_text().splitlines() if x.strip() and json.loads(x).get("status") == "queued"), None) if QUEUE.exists() else None
-    if not item:
-        last = {"status": "idle", "checkedAt": int(time.time())}
-        return
     with LOCK:
-        if not queued(): return
+        rows = [json.loads(x) for x in QUEUE.read_text().splitlines() if x.strip()] if QUEUE.exists() else []
+        item = min((row for row in rows if is_active(row)),
+                   key=lambda row: row.get('solver', {}).get('checkedAt', 0), default=None)
+        if not item:
+            last = {"status": "idle", "checkedAt": int(time.time())}
+            return
         log("order_pickup", orderId=item.get("id"), validTo=item.get("order", {}).get("validTo"), buyToken=item.get("order", {}).get("buyToken"))
         try:
             p = subprocess.run([sys.executable, str(SCRIPT)], cwd=str(BASE),
+                               env={**os.environ, 'RETRY_ORDER_ID': item['id']},
                                text=True, capture_output=True, timeout=1100)
             last = {"status": "processed", "exitCode": p.returncode,
                     "stdout": p.stdout[-4000:], "stderr": p.stderr[-2000:],

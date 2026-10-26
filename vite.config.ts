@@ -50,6 +50,11 @@ export default defineConfig(() => {
   });
   const proxies = Object.fromEntries(
     Object.entries({
+      [base + "cowdemo"]: {
+        target: process.env.EEZ_UI_COW_UPSTREAM || "http://127.0.0.1:8787",
+        changeOrigin: true,
+        rewrite: (url: string) => url.slice((base + "cowdemo").length) || "/",
+      },
       "/trace/api": traceProxy("/trace/api"),
       [base + "trace/api"]: traceProxy(base + "trace/api"),
       "/monitor/api": {

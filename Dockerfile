@@ -27,6 +27,7 @@ FROM nginx:1.27-alpine
 ARG EEZ_UI_PROTOCOL_COMMIT=development
 ENV EEZ_UI_PROTOCOL_COMMIT=$EEZ_UI_PROTOCOL_COMMIT
 ENV EEZ_UI_LISTEN=8080 EEZ_UI_MONITOR_UPSTREAM=monitor:8080 EEZ_UI_TRACE_UPSTREAM=trace-decoder:8080
+ENV EEZ_UI_COW_UPSTREAM=http://127.0.0.1:8787
 COPY --from=build /app/dist /usr/share/nginx/html
 COPY config.template.json /opt/eez/config.template.json
 COPY docker/default.conf.template /etc/nginx/templates/default.conf.template

@@ -144,58 +144,6 @@ def solver_events():
     except Exception: return latest
     return latest
 
-def crosschain_settlement(tx_hash):
-    """Resolve the canonical L1 transaction for a settled L2 source tx."""
-    if not tx_hash:
-        return {}
-    try:
-        response=requests.post(
-            L2_FRONT,
-            json={"jsonrpc":"2.0","id":1,"method":"eez_getCrossChainTransaction","params":[tx_hash]},
-            timeout=8,
-        ).json()
-        result=response.get("result") or {}
-        # The block-index endpoint can provide the same settlement information
-        # when the transaction index has no record.
-        if not result:
-            return {}
-        txs=result.get("transactions") or {}
-        l1tx=txs.get("l1") or txs.get("postBatch") or {}
-        canonical=result.get("ownership",{}).get("canonical") or {}
-        return {
-            "l1Tx": l1tx.get("hash"),
-            "l1Block": canonical.get("number"),
-            "l1State": result.get("lifecycle"),
-        }
-    except Exception:
-        return {}
-
-def settlement_by_l2_block(block_number):
-    """Resolve a canonical L1 settlement using the L2 block index.
-
-    Resolve a settlement through the L2 block index while preserving the
-    response shape used by the UI.
-    """
-    if block_number is None:
-        return {}
-    try:
-        response=requests.post(
-            L2_FRONT,
-            json={"jsonrpc":"2.0","id":1,"method":"eez_getSettlementByL2Block","params":[int(block_number)]},
-            timeout=8,
-        ).json()
-        result=response.get("result") or {}
-        tx=result.get("l1TransactionHash")
-        if not tx:
-            return {}
-        number=result.get("l1BlockNumber")
-        return {
-            "l1Tx": tx,
-            "l1Block": int(number, 16) if isinstance(number,str) and number.startswith("0x") else number,
-            "l1State": "terminal" if result.get("canonicalL2") else None,
-        }
-    except Exception:
-        return {}
 
 def order_debug(row, events):
     oid=row.get("id"); e=events.get(oid,{})
@@ -210,10 +158,12 @@ def order_debug(row, events):
         "composer_debug_quote":"quote_rejected",
         "order_worker_exception":"worker_error", "order_worker_exit":"worker_stopped",
     }
-    if status=="settled": state="settled"
+    if status=="settled":
+        state="settled" if (row.get('solver') or {}).get('canonicalVerified') is True else "awaiting_settlement"
+    elif status in ("submitting","submitted","awaiting_settlement"): state=status
     elif status in ("failed","expired"): state="failed"
     else: state=states.get(event,"queued")
-    msg=display.get("error") or display.get("message")
+    msg=(row.get('solver') or {}).get('message') or display.get("error") or display.get("message")
     if event=="composer_debug_quote":
         try:
             diag=display.get("response",{}).get("result",{}).get("diagnostics",{})
@@ -232,9 +182,6 @@ def order_debug(row, events):
         except Exception: pass
     solver=row.get("solver") or {}
     settlement=solver.get("settlement")
-    canonical=crosschain_settlement(settlement) if state=="settled" else {}
-    if state=="settled" and not canonical.get("l1Tx"):
-        canonical=settlement_by_l2_block(solver.get("settlementBlock"))
     # The solver records the exact public composer intent so a failed quote
     # can be reproduced with curl/cast.  Do not include signatures or keys.
     intent=display.get("intent") or display.get("transaction")
@@ -242,11 +189,11 @@ def order_debug(row, events):
             "nonce":display.get("nonce"),"gas":display.get("gas"),
             "intent":intent,
             "createdContracts":display.get("createdContracts"),
-            "txHash":display.get("hash") or settlement,
+            "txHash":solver.get('txHash') or display.get("hash") or settlement,
             "settlement":settlement,"settlementBlock":solver.get("settlementBlock"),
-            "l1Tx":canonical.get("l1Tx") or solver.get("l1Tx"),
-            "l1Block":canonical.get("l1Block") or solver.get("l1Block"),
-            "error":(msg if event=="composer_debug_quote" else (solver.get("error") or (msg if state.endswith("failed") or state=="worker_error" else None)))}
+            "l1Tx":solver.get("l1Tx"),
+            "l1Block":solver.get("l1Block"),
+            "error":solver.get("error") or (msg if state in ('failed','quote_rejected','worker_error') else None)}
 
 class Handler(BaseHTTPRequestHandler):
     def send_json(self,obj,code=200):
