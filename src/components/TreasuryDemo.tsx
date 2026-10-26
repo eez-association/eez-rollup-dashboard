@@ -38,7 +38,7 @@ function TreasuryDemoView({ wallet, ready }: { wallet: TreasuryWallet; ready: bo
   if (parsed.error) return <p role="alert">{parsed.error}</p>;
   if (!parsed.deployment && !config.treasury) {
     if (mainnet) return <TreasuryMainnetSetup wallet={wallet} target={target} onComplete={() => setRevision(x => x + 1)} />;
-    if (shared && config.l1FeesEnabled && config.l2FeesEnabled) return <TreasuryTestnet wallet={wallet} target={target} bridgeL1={config.l1Bridge} bridgeL2={config.l2Bridge} />;
+    if (shared && config.l1FeesEnabled && config.l2FeesEnabled) return <TreasuryTestnet wallet={wallet} target={target} bridgeL1={config.l1Bridge} bridgeL2={config.l2Bridge} token={config.treasuryTokenAddress} />;
   }
   if (!parsed.deployment) return <p role="status">Connect a configured paired treasury for this network.</p>;
   const deployment = parsed.deployment;

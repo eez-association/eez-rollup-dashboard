@@ -164,14 +164,23 @@ once. Local contributions transfer first, then the authenticated peer contribute
 Normal bridge submissions use L1 while signatures retain the initiating Safe's
 domain and nonce. Ethereum uses its existing Circle USDC and normal bridges.
 
-On **Chiado 10200 / EEZ-X 699069**, configure both normal bridge addresses in the
-dashboard first. The treasury can deploy the current `TestUSDC` or validate an
-existing instance of that exact contract. Each explicit `claim(address)` or
-`claimOnL2(address)` sends exactly **1,000 Test USDC**; there is no arbitrary-amount
-faucet, dispenser, claim helper or custom treasury bridge. Make an EEZ-X claim to
-create the wrapped representation before continuing to Safe setup. The recipient
-can be a wallet or Safe. The connected wallet pays gas on Chiado; claims and Safe
-setup are separate actions.
+On **Chiado 10200 / EEZ-X 699069**, configure the normal bridges and an existing
+`treasuryTokenAddress` in the local runtime configuration. The configured
+`TestUSDC` and its normal-bridge wrapped representation must already exist.
+The user supplies an existing L1 Safe and creates or reuses its L2 mirror;
+the six Safe setup steps neither deploy the token nor require a faucet claim.
+
+After setup, **Get USDC from faucet** appears beside each Safe only when the
+configured token matches the current `TestUSDC` bytecode and bridge bindings.
+It is hidden for ordinary tokens and Ethereum-mainnet configurations. Clicking
+the L1 button calls `claim(safeL1)`; the L2 button calls `claimOnL2(safeL2)` through
+the normal bridge. Each sends exactly **1,000 test tokens**, with a normal wallet
+confirmation and gas paid on Chiado. Both buttons remain locked while a claim is
+unresolved, including after reload. No separate faucet screen is part of setup.
+
+The contribution slider includes **25%**, **50%**, and **75%** presets for the
+EEZ-X share. They preserve the exact total, use the same balance/allowance checks
+as the slider, and lock when the payment is reviewed.
 
 The current testnet profile pins the public dashboard's chain checkpoints,
 protocol implementations and normal bridge bytecode. A zero bridge counterpart

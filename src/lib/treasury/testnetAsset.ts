@@ -147,7 +147,7 @@ export class TestnetAsset extends DeploymentIO {
   async network(token: Address): Promise<SetupNetwork> {
     await this.validate(); await this.validateToken(token);
     const wrapped = await this.read<Address>('l2', this.bridgeL2, 'Bridge', 'getWrappedToken', [token, 0n]);
-    check(wrapped !== zeroAddress, 'Claim 1,000 Test USDC on EEZ-X to create the wrapped token first');
+    check(wrapped !== zeroAddress, 'The configured token has no wrapped representation on EEZ-X. Initialize the normal bridge asset before configuring this treasury.');
     const code = async (chain: 'l1' | 'l2', address: Address) => ({ chain, address, hash: keccak256(await this.rpc<Hex>(chain, 'eth_getCode', [address, 'latest'])) });
     const asset = await code('l1', token);
     const selected: SetupNetwork = { source: 'paired-testnet', protocolCommit: profile.protocolCommit, testnet: true,

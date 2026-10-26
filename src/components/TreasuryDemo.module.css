@@ -97,6 +97,11 @@
 .splitHeading { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; }
 .splitReset { color: var(--muted, #9aa3b3); background: transparent; border: 0; padding: 4px 0; font: inherit; font-size: 12px; text-decoration: underline; cursor: pointer; }
 .splitReset:disabled { cursor: default; opacity: .5; }
+.splitPresets { display: flex; justify-content: center; align-items: center; gap: 8px; margin-top: 8px; }
+.splitPresets span { font-size: 12px; color: var(--muted, #9aa3b3); }
+.splitPresets button { border: 1px solid var(--edge, #333); border-radius: 6px; padding: 5px 10px; background: transparent; color: inherit; font: inherit; font-size: 12px; cursor: pointer; }
+.splitPresets button[aria-pressed="true"] { border-color: currentColor; background: rgba(255,255,255,.08); }
+.splitPresets button:disabled { opacity: .5; cursor: default; }
 .splitAmounts { display: flex; justify-content: space-between; gap: 16px; margin: 16px 0 8px; }
 .splitAmounts > div { display: grid; gap: 4px; min-width: 0; }
 .splitAmounts > div:last-child { text-align: right; }
