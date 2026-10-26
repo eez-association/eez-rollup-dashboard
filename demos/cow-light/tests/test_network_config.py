@@ -43,7 +43,8 @@ class ConfigurationTests(unittest.TestCase):
 
     def test_chiado_has_no_mainnet_fallback(self):
         cfg = self.config(COW_NETWORK='chiado')
-        self.assertEqual((cfg['L1_CHAIN_ID'], cfg['L2_CHAIN_ID']), (10200, 906969))
+        self.assertEqual(cfg['L1_CHAIN_ID'], 10200)
+        self.assertIsNone(cfg.get('L2_CHAIN_ID'))
         for key in ('L1_RPC', 'L2_RPC', 'L2_FRONT', 'WETH_L1', 'WETH_L2',
                     'SETTLEMENT_L2', 'BRIDGE_L1', 'BRIDGE_L2', 'EEZ_MANAGER_L2',
                     'WRAPPER_REFERENCE_TX', 'WRAPPER_PREFIX_LEN'):
@@ -56,6 +57,73 @@ class ConfigurationTests(unittest.TestCase):
             self.assertNotEqual(mainnet[key], chiado[key])
         self.assertEqual(chiado['ORDER_QUEUE'], self.root / 'runtime/chiado/ui-orders.jsonl')
 
+    def test_shared_dashboard_endpoints_discover_l2(self):
+        with patch('network_config.rpc_chain_id', return_value=916969) as rpc:
+            cfg = self.config(COW_NETWORK='chiado',
+                              EEZ_UI_L1_RPC_UPSTREAM='http://l1',
+                              EEZ_UI_L2_RPC_UPSTREAM='http://l2',
+                              EEZ_UI_L2_FRONT_UPSTREAM='http://composer')
+            self.assertEqual(cfg['L2_CHAIN_ID'], 916969)
+            self.assertEqual(cfg['L1_RPC'], 'http://l1')
+            self.assertEqual(cfg['L2_FRONT'], 'http://composer')
+            rpc.assert_called_once_with('http://l2')
+            cfg.check_chains(l1=SimpleNamespace(eth=SimpleNamespace(chain_id=10200)),
+                             l2=SimpleNamespace(eth=SimpleNamespace(chain_id=916969)))
+            rpc.assert_called_with('http://composer')
+
+    def test_discovery_does_not_accept_old_manifest(self):
+        self.manifest('chiado', 'cow-deployment.json', {'chainId': 906969})
+        with patch('network_config.rpc_chain_id', return_value=916969):
+            with self.assertRaisesRegex(ValueError, 'manifest chainId'):
+                self.config(COW_NETWORK='chiado', L2_RPC='http://l2')
+
+    def test_shared_infrastructure_and_explicit_overrides(self):
+        env = dict(COW_NETWORK='chiado', EEZ_L1_BRIDGE_SENDER=ADDRESS,
+                   EEZ_L2_BRIDGE_RECEIVER=OTHER_ADDRESS, EEZL2_ADDRESS=ADDRESS,
+                   EEZ_ROLLUP_ID='2', BRIDGE_L1='', EEZ_MANAGER_L2='')
+        cfg = self.config(**env)
+        self.assertEqual(cfg['BRIDGE_L1'], ADDRESS)
+        self.assertEqual(cfg['BRIDGE_L2'], OTHER_ADDRESS)
+        self.assertEqual(cfg['EEZ_MANAGER_L2'], ADDRESS)
+        self.assertEqual(cfg['L2_ROLLUP_ID'], 2)
+        cfg = self.config(**dict(env, BRIDGE_L1=OTHER_ADDRESS, L2_ROLLUP_ID='3'))
+        self.assertEqual(cfg['BRIDGE_L1'], OTHER_ADDRESS)
+        self.assertEqual(cfg['L2_ROLLUP_ID'], 3)
+        with self.assertRaisesRegex(ValueError, 'BRIDGE_L2'):
+            self.config(**dict(env, EEZ_L2_BRIDGE_RECEIVER='0x123'))
+        with self.assertRaisesRegex(ValueError, 'positive'):
+            self.config(**dict(env, EEZ_ROLLUP_ID='0'))
+
+    def test_discovery_failure_is_not_a_fallback(self):
+        with patch('network_config.rpc_chain_id', side_effect=ValueError('RPC unavailable')):
+            with self.assertRaisesRegex(ValueError, 'RPC unavailable'):
+                self.config(COW_NETWORK='chiado', L2_RPC='http://l2')
+
+    def test_explicit_settings_and_pins_take_precedence(self):
+        with patch('network_config.rpc_chain_id') as rpc:
+            cfg = self.config(COW_NETWORK='chiado', L2_CHAIN_ID='916969',
+                              L2_RPC='http://override', EEZ_UI_L2_RPC_UPSTREAM='http://shared')
+            self.assertEqual(cfg['L2_RPC'], 'http://override')
+            rpc.assert_not_called()
+            with self.assertRaisesRegex(ValueError, 'L2 RPC'):
+                cfg.check_chains(l2=SimpleNamespace(eth=SimpleNamespace(chain_id=906969)))
+
+    def test_composer_must_match_read_rpc(self):
+        cfg = self.config(COW_NETWORK='chiado', L2_CHAIN_ID='916969', L2_FRONT='http://composer')
+        with patch('network_config.rpc_chain_id', return_value=906969):
+            with self.assertRaisesRegex(ValueError, 'Composer'):
+                cfg.check_chains(l2=SimpleNamespace(eth=SimpleNamespace(chain_id=916969)))
+
+    def test_rpc_identity_rejects_invalid_response_and_hides_endpoint(self):
+        from network_config import rpc_chain_id
+        from io import BytesIO
+        for payload in ({'result': '0x0'}, {'result': 916969}, {'error': {'message': 'secret'}}, {}):
+            with patch('network_config.urlopen', return_value=BytesIO(json.dumps(payload).encode())):
+                with self.assertRaisesRegex(ValueError, '^Could not discover chain ID from configured RPC$'):
+                    rpc_chain_id('http://user:secret@localhost')
+        with patch('network_config.urlopen', return_value=BytesIO(b'{"result":"0xdfde9"}')):
+            self.assertEqual(rpc_chain_id('http://localhost'), 916969)
+
     def test_profile_manifest_environment_precedence(self):
         self.manifest('mainnet', 'cow-deployment.json', {'chainId': 696990, 'settlement': ADDRESS})
         self.assertEqual(self.config()['SETTLEMENT_L2'], ADDRESS)
@@ -65,6 +133,7 @@ class ConfigurationTests(unittest.TestCase):
         self.manifest('chiado', 'cow-deployment.json', {'network': 'chiado', 'l1ChainId': 10200,
                                                        'chainId': 906969, 'settlement': ADDRESS})
         cfg = self.config(COW_NETWORK='chiado', L1_RPC='http://localhost:8545',
+                          L2_CHAIN_ID='906969',
                           L2_RPC='http://localhost:8546', WRAPPER_PREFIX_LEN='42',
                           WETH_L1=OTHER_ADDRESS)
         self.assertEqual(cfg['SETTLEMENT_L2'], ADDRESS)
@@ -107,8 +176,9 @@ class ConfigurationTests(unittest.TestCase):
 
     def test_rejects_wrong_rpc_chain(self):
         cfg = self.config()
-        cfg.check_chains(l1=SimpleNamespace(eth=SimpleNamespace(chain_id=1)),
-                         l2=SimpleNamespace(eth=SimpleNamespace(chain_id=696990)))
+        with patch('network_config.rpc_chain_id', return_value=696990):
+            cfg.check_chains(l1=SimpleNamespace(eth=SimpleNamespace(chain_id=1)),
+                             l2=SimpleNamespace(eth=SimpleNamespace(chain_id=696990)))
         with self.assertRaisesRegex(ValueError, 'L2 RPC'):
             cfg.check_chains(l2=SimpleNamespace(eth=SimpleNamespace(chain_id=906969)))
 

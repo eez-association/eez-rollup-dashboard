@@ -5,7 +5,7 @@ separate from the dashboard's monitor and treasury applications:
 
 ```text
 deployment/   idempotent deployment helpers and manifests
-contracts/    only the two final route contracts used by this demo
+contracts/    route contracts, Chiado-only liquidity bootstrap, local tests
 backend/      quote API, signed-order queue and settlement status API
 solver/       restart-safe inventory-free GPv2 solver
 ui/            static wallet UI
@@ -65,7 +65,7 @@ slippage remain separate follow-up work.
 
 Every Python entry point uses `network_config.py`. Select `COW_NETWORK=mainnet`
 (the default, preserving the original Ethereum/EEZ addresses) or
-`COW_NETWORK=chiado` (Chiado 10200 / EEZ-X 906969). Public defaults live in
+`COW_NETWORK=chiado` (Chiado 10200 / the configured EEZ deployment). Public defaults live in
 `config/networks/<name>.json`; another network can use another JSON profile.
 Chain IDs identify EVM networks; `L2_ROLLUP_ID` is the bridge's destination
 rollup ID and is distinct from the L2 chain ID. L1 remains bridge rollup 0.
@@ -87,13 +87,36 @@ network, chain IDs and settlement; old unscoped browser history is not imported.
 
 Chiado is a configuration scaffold, not a deployed demo. Copy
 `.env.chiado.example` to `.env` and fill its RPCs and infrastructure addresses.
-Deploy test WETH and a funded Uniswap V2 pool, then populate
-`config/token-catalog.chiado.json` with its `weth` and `tokens` (the same token
-entry format as the mainnet catalog). Deploy GPv2 first, then the route. To
+Use the reusable Chiado bootstrap below to deploy test assets and a funded
+Uniswap V2 pool and generate a catalog, or configure an existing test deployment
+in `config/token-catalog.chiado.json` (the same token entry format as the mainnet
+catalog). Deploy GPv2 first, then the route. To
 derive wrappers before their first bridge, supply `WRAPPER_REFERENCE_TX` and
 `WRAPPER_PREFIX_LEN` for that network's bridge creation code. An existing
 wrapper can be resolved without those fields. Chiado never inherits mainnet
 addresses, token liquidity or wrapper traces.
+
+The Chiado profile discovers its L2 chain ID with `eth_chainId` from `L2_RPC`;
+it does not assume a particular EEZ testnet ID. An explicit `L2_CHAIN_ID` pins
+the expected identity instead. Discovery failures stop startup. Existing
+manifests are checked against the discovered identity, not used to choose it.
+The L2 Composer must report the same chain ID as the read RPC before use.
+
+To share configuration with the dashboard, export its environment before
+starting the demo. The loader accepts `EEZ_UI_L1_RPC_UPSTREAM`,
+`EEZ_UI_L2_RPC_UPSTREAM`, `EEZ_UI_L2_FRONT_UPSTREAM`, and
+`EEZ_UI_L1_EXPLORER_URL` / `EEZ_UI_L2_EXPLORER_URL`. Bridge and manager settings
+reuse `EEZ_L1_BRIDGE_SENDER`, `EEZ_L2_BRIDGE_RECEIVER`, `EEZL2_ADDRESS`,
+and `EEZ_ROLLUP_ID`. Non-empty demo-specific
+settings override these; no environment files are implicitly read or executed.
+Use endpoints reachable from the process: a Docker-only hostname is not
+automatically translated when running Python on the host.
+
+Discovery identifies the chain, not its contracts. Bridge, manager, token and
+pool addresses still require configuration and validation for that deployment.
+Never reuse an old manifest or queue for a replacement chain: select fresh
+runtime paths when changing deployments. The original mainnet profile retains
+its pinned chain IDs and addresses for compatibility.
 
 To run both demos, launch each API and worker with its own environment and
 distinct `PORT` values (for example API 8787/8788 and worker 8791/8792).
@@ -101,6 +124,88 @@ distinct `PORT` values (for example API 8787/8788 and worker 8791/8792).
 the API and worker. Both use the same code and separate profile state.
 
 ## Deployment
+
+### Reusable Chiado assets and liquidity
+
+`deployment/bootstrap_chiado.py` reuses the configured bridge pair; it never
+deploys or modifies EEZ infrastructure. It creates a pinned Uniswap V2 factory,
+two fixed-supply test ERC20s (`ctWETH` and `ctUSD`), and a real V2 pair with
+1,000 / 100,000 tokens of initial liquidity. These tokens have no real value;
+ctWETH is **not** redeemable for native currency. The deployer receives the LP
+tokens and another 1,000 / 100,000 test tokens. One token of each asset is
+retained by the setup contract for canonical bridging to the deployer's L2
+address, initializing both wrappers. Supply cannot be increased.
+
+From this demo directory, install `requirements.txt` in a virtual environment,
+export the intended dashboard environment, and run:
+
+```bash
+npm ci --prefix contracts --ignore-scripts
+forge build --root contracts
+export COW_NETWORK=chiado
+# Read-only infrastructure check. No private key is required.
+python3 deployment/bootstrap_chiado.py --deployment rog-916969
+# Only when ready to spend testnet gas and deploy:
+# Provide DEPLOYER_PRIVATE_KEY through a protected environment, not a tracked file.
+python3 deployment/bootstrap_chiado.py --deployment rog-916969 --execute
+```
+
+The bootstrap requires `EEZ_REGISTRY_ADDRESS` and the shared bridge/manager
+settings documented above, plus `EEZ_UI_L1_FRONT_UPSTREAM` (or `L1_FRONT`) for
+L1-origin bridge transactions. It verifies chain IDs, code presence, reciprocal
+bridge peers, and manager/rollup bindings before execution. Both the script
+and custom token/liquidity constructors refuse Ethereum mainnet; the constructors
+only allow Chiado chain ID 10200. The script is intentionally Chiado-only, not
+a general-purpose production token or AMM deployer.
+
+Records live under `runtime/chiado/deployments/<name>/`. Use a new name for each
+EEZ deployment. The manifest binds L1/L2 chain IDs, an available finalized L1
+checkpoint and the L2 genesis hash, registry,
+manager and bridge code identities (including EIP-1967 implementations), build
+artifacts, deployer, and transaction hashes. Reruns recheck the saved L1 block;
+if it has been pruned, use an archive-capable RPC rather than deleting the binding.
+Keep these ignored runtime records
+in your deployment backups; the reusable scripts and contracts are versioned.
+Do not delete the journal to retry an interrupted deployment.
+
+Every transaction hash is fsynced before broadcast. Reruns reconcile that hash
+and require canonical, finalized L1 receipts; they do not re-seed liquidity or
+submit replacement transactions. A run may stop while awaiting finalization:
+rerun the identical command later. If broadcast was interrupted or a transaction
+reverted, inspect it manually; the bootstrap intentionally will not guess a new
+nonce or retry with another signed transaction. Run one bootstrap at a time per
+deployer; file locking only protects the same deployment directory.
+
+After both wrapper addresses exist in safe L2 state, the script writes the
+token catalog and a non-secret `environment.json`. All existing demo Python
+entry points can load that file:
+
+```bash
+export COW_DEPLOYMENT_ENV=runtime/chiado/deployments/rog-916969/environment.json
+```
+
+Keep the shared RPC environment exported. The generated file provides token,
+bridge, manager and chain bindings and separate queue, log, catalog and GPv2 /
+route manifest paths. Explicit demo-specific environment variables override it;
+unset stale values before selecting another deployment. Rerun the read-only
+bootstrap check before reuse after a network reset or protocol upgrade.
+GPv2 and the route/helper are **not** deployed by the asset bootstrap; continue
+with the steps below, supplying `DETERMINISTIC_FACTORY_L1` and CoW artifacts.
+The V2 factory is not the deterministic CREATE2 deployment factory.
+
+Source verification remains required before using the deployment. This tooling
+does not automatically publish sources or constitute a security audit. Local
+tests use a synchronous bridge adapter and do not prove live Composer behavior;
+a controlled testnet rehearsal is still required.
+
+### Mainnet: configure existing assets and liquidity
+
+Do not run the Chiado bootstrap. Use `.env.example` and the mainnet profile to
+configure and validate existing tokens, their canonical wrappers, bridge pair,
+and funded Uniswap V2 pairs in the catalog. No test tokens are minted and no
+liquidity is seeded. Reuse compatible GPv2 and route/helper deployments where
+available; those demo-specific contracts may otherwise need separately reviewed
+deployment. The following scripts are separate from the test asset bootstrap.
 
 1. Set RPCs, Composer fronts, chain IDs, rollup ID, bridge/manager/settlement
    addresses and `DEPLOYER_PRIVATE_KEY` in a protected environment.

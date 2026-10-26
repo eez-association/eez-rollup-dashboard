@@ -7,6 +7,7 @@ import json
 import os
 import re
 from pathlib import Path
+from urllib.request import Request, urlopen
 
 ROOT = Path(__file__).resolve().parent
 INTEGER_KEYS = ('L1_CHAIN_ID', 'L2_CHAIN_ID', 'L2_ROLLUP_ID', 'WRAPPER_PREFIX_LEN')
@@ -15,6 +16,36 @@ PATH_KEYS = ('TOKEN_CATALOG', 'ORDER_QUEUE', 'SOLVER_LOG', 'ROUTE_MANIFEST',
 ADDRESS_KEYS = ('WETH_L1', 'WETH_L2', 'BRIDGE_L1', 'BRIDGE_L2',
                 'EEZ_MANAGER_L2', 'SETTLEMENT_L2', 'NATIVE_WETH_L2',
                 'DETERMINISTIC_FACTORY_L1')
+SHARED_SETTINGS = {
+    'L1_RPC': 'EEZ_UI_L1_RPC_UPSTREAM',
+    'L2_RPC': 'EEZ_UI_L2_RPC_UPSTREAM',
+    'L2_FRONT': 'EEZ_UI_L2_FRONT_UPSTREAM',
+    'L1_EXPLORER': 'EEZ_UI_L1_EXPLORER_URL',
+    'L2_EXPLORER': 'EEZ_UI_L2_EXPLORER_URL',
+    'BRIDGE_L1': 'EEZ_L1_BRIDGE_SENDER',
+    'BRIDGE_L2': 'EEZ_L2_BRIDGE_RECEIVER',
+    'EEZ_MANAGER_L2': 'EEZL2_ADDRESS',
+    'L2_ROLLUP_ID': 'EEZ_ROLLUP_ID',
+}
+
+
+def rpc_chain_id(endpoint):
+    """Read identity without Web3, signing, or exposing credential-bearing URLs."""
+    try:
+        request = Request(endpoint, data=json.dumps({
+            'jsonrpc': '2.0', 'id': 1, 'method': 'eth_chainId', 'params': []
+        }).encode(), headers={'Content-Type': 'application/json'})
+        with urlopen(request, timeout=10) as response:
+            result = json.load(response)
+        value = result.get('result')
+        if result.get('error') or not isinstance(value, str) or not re.fullmatch(r'0x[0-9a-fA-F]+', value):
+            raise ValueError('Invalid chain ID')
+        chain = int(value, 16)
+        if chain <= 0:
+            raise ValueError('Invalid chain ID')
+        return chain
+    except Exception:
+        raise ValueError('Could not discover chain ID from configured RPC') from None
 
 
 class NetworkConfig:
@@ -40,6 +71,9 @@ class NetworkConfig:
         for name, client in (('L1', l1), ('L2', l2)):
             if client is not None and client.eth.chain_id != self[name + '_CHAIN_ID']:
                 raise ValueError(f'{name} RPC chain does not match {self["NETWORK"]} profile')
+        if l2 is not None and self.get('L2_FRONT'):
+            if rpc_chain_id(self['L2_FRONT']) != self['L2_CHAIN_ID']:
+                raise ValueError('L2 Composer chain does not match selected L2')
 
     def read_manifest(self, key):
         path = self[key]
@@ -66,6 +100,17 @@ class NetworkConfig:
 def load_config(environ=None, root=ROOT):
     env = os.environ if environ is None else environ
     root = Path(root)
+    if env.get('COW_DEPLOYMENT_ENV'):
+        deployment_env = Path(env['COW_DEPLOYMENT_ENV'])
+        if not deployment_env.is_absolute():
+            deployment_env = root / deployment_env
+        saved = json.loads(deployment_env.read_text())
+        allowed = {'COW_NETWORK', *INTEGER_KEYS, *PATH_KEYS, *ADDRESS_KEYS}
+        if not isinstance(saved, dict) or set(saved) - allowed or any(not isinstance(v, str) for v in saved.values()):
+            raise ValueError('Invalid deployment environment file')
+        # Saved deployment bindings win over shared dashboard aliases; explicit
+        # demo-specific environment values retain their usual precedence.
+        env = {**saved, **env}
     network = env.get('COW_NETWORK', 'mainnet')
     if not re.fullmatch(r'[a-z0-9][a-z0-9_-]*', network):
         raise ValueError('Invalid COW_NETWORK profile name')
@@ -73,6 +118,12 @@ def load_config(environ=None, root=ROOT):
     if not profile.is_file():
         raise ValueError(f'Unknown COW_NETWORK profile: {network}')
     values = json.loads(profile.read_text())
+    # Share the dashboard environment, without implicitly reading/sourcing files.
+    # Non-empty demo-specific settings override shared settings.
+    env = dict(env)
+    for key, shared in SHARED_SETTINGS.items():
+        if not env.get(key) and env.get(shared):
+            env[key] = env[shared]
     values['NETWORK'] = network
     runtime = f'runtime/{network}'
     values.update(ORDER_QUEUE=f'{runtime}/ui-orders.jsonl',
@@ -89,6 +140,13 @@ def load_config(environ=None, root=ROOT):
             values[key] = int(values[key])
             if values[key] <= 0:
                 raise ValueError(f'{key} must be positive')
+    for key in SHARED_SETTINGS:
+        if key in env and key not in INTEGER_KEYS:
+            values[key] = env[key]
+    # A null profile chain ID means discover, not trust a deployment manifest.
+    for side in ('L1', 'L2'):
+        if values.get(side + '_CHAIN_ID') is None and values.get(side + '_RPC'):
+            values[side + '_CHAIN_ID'] = rpc_chain_id(values[side + '_RPC'])
     for key in PATH_KEYS:
         if values.get(key):
             path = Path(values[key])
