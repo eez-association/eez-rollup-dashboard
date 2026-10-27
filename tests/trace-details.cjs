@@ -127,6 +127,15 @@ model.recordedView = { ...model, mode: "physical", recordedView: null,
     await page.waitForFunction(() => !document.fullscreenElement);
     const inspector = page.getByRole("link", { name: "Blocks & settlement →" });
     assert.ok((await inspector.getAttribute("href")).includes("mode=inspect"));
+    await page.route("**/trace/api/jobs/*/result", route => route.fulfill({ json: {
+      apiVersion: 1, partial: true, observedAt: "2026-10-14T12:00:00Z",
+      model: { ...model, nodes: [], roots: [], recordedView: null,
+        transactions: model.transactions.map(tx => ({ ...tx, requested: true, traced: false, traceReason: "trace-unavailable" })),
+        unresolved: [{ code: "trace-unavailable", message: "The configured endpoint could not provide a call trace." }] },
+    } }));
+    await page.getByRole("button", { name: "Refresh", exact: true }).click();
+    await page.getByText("The transaction was found, but its call trace is unavailable from the configured RPC. Refresh after a tracing-enabled endpoint is available.", { exact: true }).waitFor();
+    assert.equal(await page.getByText("No calls match this view. Enable local reads or protocol calls, or clear the search to see more.", { exact: true }).count(), 0);
     assert.deepEqual(errors, []);
     writeFileSync(`${directory}/result.json`, JSON.stringify({ passed: true,
       scope: "Native trace navigation, linked/recorded views, details, refresh, and mobile layout with mocked API/RPC; no wallet or chain writes" }, null, 2) + "\n");

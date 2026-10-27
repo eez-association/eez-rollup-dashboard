@@ -40,6 +40,8 @@ export function TraceDiagram({ model, view, transaction, onSelect, selected, tok
   const rows = useMemo(() => traceRows(model, { transaction, protocol, localReads, search, collapsed }),
     [model, transaction, protocol, localReads, search, collapsed]);
   useEffect(() => { setPage(0); }, [transaction, protocol, localReads, search, collapsed, model]);
+  const missingTrace = model.transactions.some(tx => !tx.traced
+    && (transaction ? `${tx.chain}:${tx.hash}` === transaction : tx.requested));
   const physical = model.mode === "physical";
   const chainSteps = { L1: 0, L2: 0 };
   const steps = rows.map(row => ++chainSteps[row.node.chain]);
@@ -137,7 +139,9 @@ export function TraceDiagram({ model, view, transaction, onSelect, selected, tok
         <td className={node.failed || node.reverted ? styles.failure : undefined}>{returnLabel(node)}{node.kind === "ghost" && " · execution not observed"}</td>
       </tr>)}</tbody>
     </table></div>}
-    {!rows.length && <p className={styles.empty}>No calls match this view. Enable local reads or protocol calls, or clear the search to see more.</p>}
+    {!rows.length && <p className={styles.empty}>{missingTrace && !search.trim()
+      ? "The transaction was found, but its call trace is unavailable from the configured RPC. Refresh after a tracing-enabled endpoint is available."
+      : "No calls match this view. Enable local reads or protocol calls, or clear the search to see more."}</p>}
     <div className={styles.pagination}><span>{rows.length} calls · page {currentPage + 1} of {pages}</span>
       <button className="btn btn-sm btn-outline" disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}>Previous</button>
       <button className="btn btn-sm btn-outline" disabled={currentPage + 1 >= pages} onClick={() => setPage(currentPage + 1)}>Next</button></div>
