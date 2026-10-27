@@ -24,7 +24,7 @@ function partyName(model: TraceModel, chain: TraceChain, address: string): strin
 }
 
 /** Height a card needs for its notes (two shown, then a "+N more" line). */
-export const tokenNotesHeight = (count: number) => count ? Math.min(2, count) * 64 + (count > 2 ? 20 : 0) : 0;
+export const tokenNotesHeight = (count: number) => count ? Math.min(2, count) * 80 + (count > 2 ? 20 : 0) : 0;
 
 export function TokenTransferSummary({ model }: { model: TraceModel }) {
   const seen = new Set<string>();
@@ -65,9 +65,10 @@ export function TokenNotes({ model, chain, transfers, compact = false }: {
   }
   return <span className={styles.notes}>
     {transfers.slice(0, 2).map(transfer => <span key={transfer.eventId} className={styles.note} data-kind={transfer.kind}>
-      <span className={styles.title}>◉ {action[transfer.kind]} · {transfer.symbol || partyName(model, chain, transfer.token) || short(transfer.token)}</span>
-      <span className={styles.amount}>{tokenAmount(transfer)}</span>
-      <span className={styles.route}>{short(transfer.from)} → {short(transfer.to)}</span>
+      <span className={styles.title} title={transfer.token}>◉ {transfer.symbol || partyName(model, chain, transfer.token) || short(transfer.token)} · {action[transfer.kind]}</span>
+      <span className={styles.route} title={`From ${partyName(model, chain, transfer.from) || transfer.from} (${transfer.from})`}>From: {partyName(model, chain, transfer.from) || short(transfer.from)}</span>
+      <span className={styles.route} title={`To ${partyName(model, chain, transfer.to) || transfer.to} (${transfer.to})`}>To: {partyName(model, chain, transfer.to) || short(transfer.to)}</span>
+      <span className={styles.amount} title={tokenAmount(transfer)}>Amount: {tokenAmount(transfer)}</span>
     </span>)}
     {transfers.length > 2 && <span className={styles.more}>+{transfers.length - 2} more · select the call</span>}
   </span>;

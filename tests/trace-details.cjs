@@ -85,6 +85,10 @@ model.recordedView = { ...model, mode: "physical", recordedView: null,
     assert.match(await tokenSummary.innerText(), /1\.234567 TESTUSDC/);
     assert.match(await tokenSummary.innerText(), /1234567 raw units/);
     assert.equal(await tokenSummary.getByText("Counter", { exact: true }).first().getAttribute("title"), address);
+    const tokenCard = page.getByRole("region", { name: "Call map canvas" });
+    await tokenCard.getByText("From: Counter", { exact: true }).first().waitFor();
+    await tokenCard.getByText("To: 0x3333…3333", { exact: true }).first().waitFor();
+    await tokenCard.getByText("Amount: 1.234567", { exact: true }).waitFor();
     await page.screenshot({ path: `${directory}/token-summary.png`, fullPage: true });
     await page.getByRole("checkbox", { name: /Token transfers/ }).uncheck();
     assert.equal(await tokenSummary.count(), 0);
