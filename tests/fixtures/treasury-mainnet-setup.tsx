@@ -12,8 +12,8 @@ export function mount() {
   DeploymentIO.prototype.rpc = async () => '0xde0b6b3a7640000' as any;
   L1_CHAIN.chainId='0x1'; L2_CHAIN.chainId='0xaa29e';
   setConfig({rollupsAddress:network.registry,ccmL2Address:network.manager,l1Bridge:network.contracts.bridgeL1.address,l2Bridge:network.contracts.bridgeL2.address,
-    l1Rpc:'https://mainnet.eez.dev/rpc/l1',l2Rpc:'https://mainnet.eez.dev/rpc/l2',l1ProxyRpc:'https://mainnet.eez.dev/composer/l1',l2ProxyRpc:'https://mainnet.eez.dev/composer/l2',
-    l1Explorer:'https://etherscan.io',l2Explorer:'https://explorer.eez.dev',l1FeesEnabled:true,l2FeesEnabled:true,treasury:null});
+    l1Rpc:'https://mainnet.example/rpc/l1',l2Rpc:'https://mainnet.example/rpc/l2',l1ProxyRpc:'https://mainnet.example/composer/l1',l2ProxyRpc:'https://mainnet.example/composer/l2',
+    l1Explorer:'https://etherscan.io',l2Explorer:'https://explorer.example',l1FeesEnabled:true,l2FeesEnabled:true,treasury:null});
   // Form-only fixture: selection is recorded before the real planner would make
   // its on-chain checks. It does not manufacture a deployment or open a wallet.
   MainnetSetup.prototype.configure=async function(deployer,safeL1,safeL2){w.selection={deployer,safeL1,safeL2};throw Error('Fixture stopped before network validation');};

@@ -4,15 +4,21 @@ import { readFileSync } from 'node:fs';
 import { decodeAbiParameters, encodeDeployData, decodeFunctionData, encodeAbiParameters, encodeEventTopics, parseAbi, getAddress, getContractAddress, keccak256, toHex, zeroAddress, zeroHash } from 'viem';
 import { MainnetSetup, mainnetSetupKey, mainnetManifestKey, mainnetSetupSteps, readMainnetSetup, isMainnetSetupTarget, loadMainnetManifest } from '../src/lib/treasury/mainnetSetup.ts';
 import { sharedDeploymentKey, sharedManifestKey } from '../src/lib/treasury/deployment.ts';
+import { privateKeyToAccount } from 'viem/accounts';
+import { safeTransactionHash } from '../src/lib/treasury/safeTransactions.ts';
+import { ownerFingerprint } from '../src/lib/treasury/safeSetup.ts';
+import { EIP1967_IMPLEMENTATION_SLOT } from '../src/lib/treasury/mainnet.ts';
+import { createServer } from 'node:http';
+import { once } from 'node:events';
 const json=path=>JSON.parse(readFileSync(path));
 const base=json('src/lib/treasury/deployment-artifacts.json'),current=json('src/lib/treasury/mainnet-artifacts.json'),network=json('src/lib/treasury/mainnet-network.json');
 const shared=json('src/lib/treasury/mainnet-shared-contracts.json'),release=json(`src/lib/treasury/builds/${json('src/lib/treasury/current-build.json').build}.json`);
 const artifacts={...release,contracts:{...base.contracts,...current.contracts,...release.contracts}},addr=n=>getAddress(`0x${n.toString(16).padStart(40,'0')}`);
 const target={l1:{rpc:'http://127.0.0.1:1',front:'http://127.0.0.1:1',explorer:'https://etherscan.io'},l2:{rpc:'http://127.0.0.1:2',front:'http://127.0.0.1:2',explorer:'https://explorer.eez.dev'},fees:{l1:'1',l2:'1'}};
-function fixture(selectedArtifacts=artifacts){
+function fixture(selectedArtifacts=artifacts,selectedTarget=target){
  const sharedCode={ [shared.contracts.moduleL1.address.toLowerCase()]:release.contracts.AllowanceModule.runtime };
  for(const b of Object.values(shared.contracts))assert.equal(keccak256(sharedCode[b.address.toLowerCase()]),b.hash);
- const engine=new MainnetSetup(target,selectedArtifacts),safe=addr(100),singleton=addr(101),deployer=addr(200),block={number:'0xa',hash:zeroHash};
+ const engine=new MainnetSetup(selectedTarget,selectedArtifacts),safe=addr(100),singleton=addr(101),deployer=addr(200),block={number:'0xa',hash:zeroHash};
  engine.validate=async()=>{};
  engine.io.rpc=async(chain,method,params)=>{
   if(method==='eth_getBlockByNumber')return block;
@@ -254,4 +260,129 @@ test('normal preparation estimates gas first and only diagnoses a failed simulat
   if(failure){await assert.rejects(prepared,/execution reverted.*selected contract changed/);assert.equal(diagnoses,1);}
   else {assert.equal((await prepared).request.gas,'0x6270');assert.equal(diagnoses,0);}
  }
+});
+
+async function submissionFixture(step) {
+ const {engine,safe,deployer}=fixture(artifacts,{...target,fees:{l1:'1000000',l2:'1000000'}}),state=await engine.configure(deployer,safe);
+ const owner=privateKeyToAccount(toHex(42n,{size:32})); // Public dummy test key.
+ Object.assign(state.addresses,{policyL1:addr(301),policy:addr(302),multiSendL1:addr(303),
+   safeL2:addr(304),moduleL2:addr(305),multiSendL2:addr(306),adapter:addr(307),safeL2Alias:addr(308)});
+ state.completed=['l1','l2','l2','l1','l1'].slice(0,step).map((chain,i)=>({chain,hash:toHex(i+1,{size:32}),number:toHex(i+10),blockHash:toHex(i+20,{size:32})}));
+ const review={step,chain:step===4?'l1':'l2',nonce:'0',owners:[owner.address],threshold:1,
+   fingerprint:ownerFingerprint([owner.address],1),hash:zeroHash,approvals:[],moduleEnabled:false};
+ const tx=engine.tx(state,review);review.hash=safeTransactionHash(tx);
+ review.approvals=[{owner:owner.address,signature:await owner.signTypedData(tx)}];state.review=review;
+ engine.wallet=async()=>owner.address;
+ engine.unchanged=async()=>assert.fail('The full audit must not run for a successful simulation or guard failure');
+ engine.currentReview=async()=>assert.fail('Submission must not repeat ownership reads');
+ const reads=[];
+ engine.io.rpc=async(chain,method,params)=>{
+   reads.push({chain,method,params});
+   if(method==='eth_getTransactionCount')return '0x1';
+   if(method==='eth_estimateGas')return '0x5208';
+   if(method==='eth_blockNumber')return '0x20';
+   if(method==='eez_quoteFee'){
+     const [request]=params;
+     const normalized={...request,type:'0x2',gas:'0x5208',from:request.from.toLowerCase(),to:request.to.toLowerCase(),data:request.data.toLowerCase()};
+     return {version:1,chainId:request.chainId,nonce:request.nonce,expiresAt:toHex(Math.floor(Date.now()/1000)+30),
+       options:[{type:'0x2',gas:'0x5208',estimatedFee:'0x5208',maxFeePerGas:'0x1',maxPriorityFeePerGas:'0x0',
+         requestHash:keccak256(toHex(JSON.stringify(Object.fromEntries(Object.keys(normalized).sort().map(k=>[k,normalized[k]])))))}]};
+   }
+   if(method==='eth_getStorageAt'){
+     const pin=network.protocol.find(p=>p.chain===chain);
+     assert.deepEqual(params,[pin.proxy,EIP1967_IMPLEMENTATION_SLOT,'latest']);
+     return toHex(BigInt(pin.implementation),{size:32});
+   }
+   if(method==='eth_getBlockByNumber'){
+     const latest=state.completed.filter(t=>t.chain===chain).at(-1);
+     assert.deepEqual(params,[latest.number,false],'Only the latest recorded block per chain needs a new read');
+     return {hash:latest.blockHash};
+   }
+   assert.fail(`Unexpected RPC: ${method}`);
+ };
+ return {engine,state,reads};
+}
+
+for(const step of [4,5]) {
+ test(`setup step ${step+1} collects an owner signature without deployment RPC reads`,async()=>{
+   const {engine,state}=await submissionFixture(step),approval=state.review.approvals[0];
+   state.review.approvals=[];
+   engine.wallet=MainnetSetup.prototype.wallet;
+   engine.io.rpc=async()=>assert.fail('Owner signing must not add deployment RPC reads');
+   const methods=[],provider={request:async({method})=>{
+     methods.push(method);
+     if(method==='eth_accounts')return [approval.owner];
+     if(method==='eth_chainId')return toHex(network.chains[state.review.chain].chainId);
+     assert.equal(method,'eth_signTypedData_v4');return approval.signature;
+   }};
+   assert.deepEqual(await engine.approve(state,provider),approval);
+   assert.deepEqual(methods,['eth_accounts','eth_chainId','eth_signTypedData_v4','eth_accounts','eth_chainId']);
+ });
+ test(`setup step ${step+1} performs exactly four fresh guard reads after successful simulation`,async()=>{
+   const {engine,state,reads}=await submissionFixture(step),before=JSON.stringify(state);
+   const prepared=await engine.prepare(state,{});
+   assert.equal(prepared.pending.id,String(step));assert.equal(JSON.stringify(state),before);
+   const guard=reads.filter(r=>['eth_getStorageAt','eth_getBlockByNumber'].includes(r.method));
+   assert.equal(guard.length,4);
+   assert.deepEqual(guard.map(r=>[r.chain,r.method]),[['l1','eth_getStorageAt'],['l1','eth_getBlockByNumber'],['l2','eth_getStorageAt'],['l2','eth_getBlockByNumber']]);
+   assert(reads.findIndex(r=>r.method===(step===4?'eth_estimateGas':'eez_quoteFee'))<reads.indexOf(guard[0]));
+ });
+ for(const chain of ['l1','l2'])for(const failure of ['implementation','reorg','missing-block','unavailable','block-unavailable','malformed-slot']) {
+   test(`setup step ${step+1} preserves its journal and rejects ${chain} ${failure}`,async()=>{
+     const {engine,state,reads}=await submissionFixture(step),rpc=engine.io.rpc,before=JSON.stringify(state);
+     engine.io.rpc=async(c,method,params)=>{
+       if(c===chain && method==='eth_getStorageAt'){
+         if(failure==='implementation')return toHex(999n,{size:32});
+         if(failure==='malformed-slot')return '0x';
+         if(failure==='unavailable')throw Error('RPC unavailable');
+       }
+       if(c===chain && method==='eth_getBlockByNumber'){
+         if(failure==='block-unavailable')throw Error('RPC unavailable');
+         if(failure==='reorg')return {hash:zeroHash};
+         if(failure==='missing-block')return null;
+       }
+       return rpc(c,method,params);
+     };
+     await assert.rejects(engine.prepare(state,{}),/protocol implementation changed|confirmation changed or is unavailable|RPC unavailable/);
+     assert.equal(JSON.stringify(state),before);assert.equal(state.pending,undefined);
+     assert(!reads.some(r=>r.method.startsWith('eth_send')));
+   });
+ }
+}
+
+test('submission guard dispatches all four reads together and rechecks on retry',async()=>{
+ const {engine,state}=await submissionFixture(4),rpc=engine.io.rpc,releases=[];
+ engine.io.rpc=(...args)=>new Promise((resolve,reject)=>releases.push(()=>rpc(...args).then(resolve,reject)));
+ const first=engine.checkSubmission(state);
+ assert.equal(releases.length,4);releases.splice(0).forEach(release=>release());await first;
+ const retry=engine.checkSubmission(state);
+ assert.equal(releases.length,4);releases.splice(0).forEach(release=>release());await retry;
+});
+
+test('submission guard uses the real HTTP transport and configured RPC paths',async()=>{
+ const {state}=await submissionFixture(4),requests=[];
+ const server=createServer(async(req,res)=>{
+   let body='';for await(const chunk of req)body+=chunk;
+   const request=JSON.parse(body),chain=req.url==='/configured/l1'?'l1':req.url==='/configured/l2'?'l2':null;
+   requests.push({chain,...request});
+   res.setHeader('Content-Type','application/json');
+   const pin=network.protocol.find(p=>p.chain===chain),block=state.completed.filter(tx=>tx.chain===chain).at(-1);
+   const result=request.method==='eth_getStorageAt' && pin ? toHex(BigInt(pin.implementation),{size:32})
+     : request.method==='eth_getBlockByNumber' && block ? {hash:block.blockHash} : null;
+   res.end(JSON.stringify({jsonrpc:'2.0',id:request.id,result}));
+ });
+ server.listen(0,'127.0.0.1');await once(server,'listening');
+ try {
+   const origin=`http://127.0.0.1:${server.address().port}`;
+   const engine=new MainnetSetup({...target,l1:{...target.l1,rpc:origin+'/configured/l1'},
+     l2:{...target.l2,rpc:origin+'/configured/l2'}},artifacts);
+   await engine.checkSubmission(state);
+   assert.equal(requests.length,4);
+   for(const chain of ['l1','l2']) {
+     const calls=requests.filter(r=>r.chain===chain),pin=network.protocol.find(p=>p.chain===chain);
+     assert.equal(calls.length,2);
+     assert.deepEqual(calls.find(r=>r.method==='eth_getStorageAt').params,[pin.proxy,EIP1967_IMPLEMENTATION_SLOT,'latest']);
+     assert.deepEqual(calls.find(r=>r.method==='eth_getBlockByNumber').params,[state.completed.filter(tx=>tx.chain===chain).at(-1).number,false]);
+   }
+ } finally {await new Promise(resolve=>server.close(resolve));}
 });

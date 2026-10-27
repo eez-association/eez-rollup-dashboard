@@ -164,6 +164,13 @@ once. Local contributions transfer first, then the authenticated peer contribute
 Normal bridge submissions use L1 while signatures retain the initiating Safe's
 domain and nonce. Ethereum uses its existing Circle USDC and normal bridges.
 
+Before each of the final two setup submissions, four parallel RPC reads check
+the pinned protocol implementation on each chain and the latest recorded setup
+block hash on each chain. A failed check preserves the journal and collected
+approvals without opening wallet confirmation. These checks run once per
+submission attempt, not while collecting owner signatures; they supplement the
+existing simulation and final deployment validation.
+
 On **Chiado 10200 / EEZ-X 699069**, configure the normal bridges and an existing
 `treasuryTokenAddress` in the local runtime configuration. The configured
 `TestUSDC` and its normal-bridge wrapped representation must already exist.
@@ -787,8 +794,8 @@ unavailability remains a blocking error; no gas limit is invented. Upgrade
 Composer before relying on these hints: older unstructured errors still surface
 immediately, and no submission or wallet signature is retried.
 
-Wallets may apply their own gas policy. Rabby's saved Chiado RPC must use
-`https://eez.asuscomm.com/composer/l1` for cross-chain estimation.
+Wallets may apply their own gas policy. For cross-chain estimation, set Rabby's
+Chiado RPC to the L1 Composer URL shown by your current dashboard deployment.
 
 Bridge regression checks include:
 

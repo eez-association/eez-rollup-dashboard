@@ -13,7 +13,7 @@ import { setupIdentity } from '../../src/lib/treasury/mainnetSetup.ts';
 export async function deploymentBrowser(f) {
   const { network,target,engine,A,B,safeL1,rpc,send,evidence,directory,ids } = f;
   const server = await createServer({ configFile:false, envFile:false, plugins:[react()], server:{host:'127.0.0.1',port:0}, base:'/' }); await server.listen();
-  let browser, page, held = true;
+  let browser, page, held = true, changedProtocol = false;
   const hashes = new Set(), submissions = [], signatures = [], errors = [];
   const timings = { scope: 'isolated EVM; automated wallet, includes reload/recovery polling; not live network confirmation time', steps: [] };
   let submissionStarted = 0, walletOpened = 0;
@@ -25,6 +25,9 @@ export async function deploymentBrowser(f) {
     page.on('pageerror',e=>errors.push(e.message));
     const state = () => page.evaluate(key=>JSON.parse(localStorage.getItem(key)),key);
     await page.exposeFunction('setupRpc',async({chain,method,params,front})=>{
+      if (changedProtocol && method === 'eth_getStorageAt'
+        && params[1] === '0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc')
+        return toHex(999n, { size: 32 });
       if(method==='eth_getTransactionReceipt' && held && hashes.has(params[0])) return null;
       if(method==='eez_quoteFee') {
         assert(front); const [request,options]=params,s=await state();
@@ -117,6 +120,16 @@ export async function deploymentBrowser(f) {
         await page.getByRole('status').getByText('Wallet cancelled. No transaction was authorized.',{exact:true}).waitFor();
         assert.equal((await state()).pending,undefined); assert.equal(submissions.length,0);
       }
+      if(step===4) {
+        const saved=await state(),lastWallet=walletOpened;
+        changedProtocol=true;
+        await page.getByRole('button',{name:'Submit approved Safe step',exact:true}).click();
+        await page.getByRole('alert').getByText('The protocol implementation changed; review it before authorizing setup',{exact:true}).waitFor();
+        assert.deepEqual(await state(),saved,'Guard failure must retain the journal and collected signatures');
+        assert.equal(walletOpened,lastWallet,'Guard failure must not open transaction confirmation');
+        assert.equal(submissions.length,step);
+        changedProtocol=false;
+      }
       submissionStarted = performance.now();
       await page.getByRole('button',{name:step>=4?'Submit approved Safe step':'Approve next deployment step',exact:true}).click();
       await page.waitForFunction(key=>!!JSON.parse(localStorage.getItem(key)??'null')?.pending?.hash,key);
@@ -133,7 +146,7 @@ export async function deploymentBrowser(f) {
     const completed=await page.evaluate(()=>window.completedState);
     assert.equal(completed.completed.length,6); assert.equal(signatures.length,4); assert.deepEqual(signatures.map(s=>Number(BigInt(s.chainId))),[ids.l1,ids.l1,ids.l2,ids.l2]);
     assert.deepEqual(errors,[]); await page.screenshot({path:`${directory}/deployment-browser.png`,fullPage:true});
-    evidence.browser={passed:true,sandbox:true,timings,steps:6,walletCancellation:true,reloadEveryStep:true,singleSubmissionPerStep:true,submissions,signatures,
+    evidence.browser={passed:true,sandbox:true,timings,steps:6,walletCancellation:true,submissionGuardRecovery:true,reloadEveryStep:true,singleSubmissionPerStep:true,submissions,signatures,
       limitation:'Final L1 alias request is checked but executed directly on logical L2 in the single-EVM fixture; native relay/settlement is not proven.'};
     console.log('PASS all six setup steps through browser: real deployment/approvals, cancellation, six pending reloads, activation and manifest validation');
     return completed;

@@ -41,6 +41,8 @@ jobs:
         run: |
           npm test
           npm test --prefix trace-decoder
+          node src/monitor/tests/test_app.mjs
+          node src/monitor/tests/test_live_app.mjs
           npm run test:contracts
           forge fmt --check --root contracts
           npm run build:treasury-release
@@ -54,6 +56,7 @@ jobs:
         run: |
           test -u "$CHROME_DEVEL_SANDBOX"
           npx playwright install --with-deps chromium
+          node tests/composer-wallet.cjs
           node tests/treasury-setup-completion-browser.mjs
           node tests/treasury-mainnet-setup-browser.mjs
           node tests/treasury-setup-ux-browser.mjs

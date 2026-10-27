@@ -250,6 +250,30 @@ export class MainnetSetup {
     check(s.review && s.review.hash === fresh.hash && s.review.fingerprint === fresh.fingerprint, "Owners, threshold, Safe nonce or module configuration changed. Review this step again");
     return s.review;
   }
+  /** Four reads at most, only before granting spending authority. The latest
+   * recorded block on each chain anchors its earlier setup confirmations too.
+   * This deliberately does not repeat the full code/owner audit while signing.
+   */
+  async checkSubmission(s: MainnetSetupState) {
+    const observations = (["l1", "l2"] as const).map(chain => {
+      const protocol = this.network.protocol.find(binding => binding.chain === chain);
+      const latest = s.completed.filter(tx => tx.chain === chain)
+        .reduce<MainnetSetupState["completed"][number] | undefined>((last, tx) =>
+          !last || BigInt(tx.number) > BigInt(last.number) ? tx : last, undefined);
+      check(protocol && latest, "Setup verification is incomplete; preserve this setup for recovery");
+      return { chain, protocol, latest };
+    });
+    await Promise.all(observations.flatMap(({ chain, protocol, latest }) => [
+      this.io.rpc<Hex>(chain, "eth_getStorageAt", [protocol.proxy, EIP1967_IMPLEMENTATION_SLOT, "latest"]).then(slot => {
+        check(digest(slot) && same(`0x${slot.slice(-40)}`, protocol.implementation),
+          "The protocol implementation changed; review it before authorizing setup");
+      }),
+      this.io.rpc<{ hash: Hex } | null>(chain, "eth_getBlockByNumber", [latest.number, false]).then(block => {
+        check(block && digest(block.hash) && same(block.hash, latest.blockHash),
+          "A setup confirmation changed or is unavailable; preserve this setup and retry verification");
+      }),
+    ]));
+  }
   private savedReview(s: MainnetSetupState) {
     const r = s.review;
     check(!s.pending && s.completed.length >= 4 && s.completed.length < 6 && r
@@ -301,6 +325,10 @@ export class MainnetSetup {
       try { await this.unchanged(s); if (step >= 4) await this.currentReview(s); }
       catch (diagnosticError) { throw new Error(`Transaction simulation failed: ${(simulationError as Error).message}. ${(diagnosticError as Error).message}`); }
       throw simulationError;
+    }
+    if (step >= 4) {
+      onProgress("Verifying setup before wallet confirmation…");
+      await this.checkSubmission(s);
     }
     onProgress("Rechecking your wallet before opening confirmation…");
     await this.wallet(provider, chain, sender, false); return { pending, request, expiresAt };

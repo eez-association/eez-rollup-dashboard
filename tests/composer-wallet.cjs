@@ -1,9 +1,9 @@
 // Mocked EIP-6963 wallets and read RPCs. Never signs or broadcasts transactions.
-// EEZ_UI_URL=http://127.0.0.1:18779/dashboard NODE_PATH=/path/to/playwright/node_modules node tests/composer-wallet.cjs
+// Starts an isolated dashboard unless EEZ_UI_URL selects an existing test server.
 const assert = require('node:assert/strict');
 const { chromium } = require('playwright');
 const { encodeFunctionResult, parseAbi, keccak256, stringToHex } = require('viem');
-const origin = (process.env.EEZ_UI_URL || 'http://127.0.0.1:18779/dashboard').replace(/\/$/, '');
+let origin = process.env.EEZ_UI_URL?.replace(/\/$/, '');
 const discovery = '0x7Ae2c80116976915a0Ee9b7994e7Bb12026087f8';
 const account = '0x' + '22'.repeat(20);
 const registry = '0x' + '11'.repeat(20);
@@ -91,11 +91,12 @@ async function fixture(browser, options = {}) {
     });
   }, { account, options, l1Chain });
   await page.route('**/*', async route => {
-    const request = route.request(), path = new URL(request.url()).pathname;
+    const request = route.request(), url = new URL(request.url()), path = url.pathname;
+    assert.ok([new URL(origin).origin, 'https://mainnet.example'].includes(url.origin), 'Wallet tests must not contact a real external endpoint');
     if (path.endsWith('/config.json')) return route.fulfill({ json: {
       networkName: options.mainnet ? 'EEZ-X Mainnet' : 'EEZ-X Devnet', l1RpcUrl: '/rpc/l1', l2RpcUrl: '/rpc/l2',
-      l1FrontUrl: options.mainnet ? 'https://mainnet.eez.dev/composer/l1' : '/composer/l1',
-      l2FrontUrl: options.mainnet ? 'https://mainnet.eez.dev/composer/l2' : '/composer/l2',
+      l1FrontUrl: options.mainnet ? 'https://mainnet.example/composer/l1' : '/composer/l1',
+      l2FrontUrl: options.mainnet ? 'https://mainnet.example/composer/l2' : '/composer/l2',
       l1ContractAddress: registry, l2ContractAddress: l2, rollupManagerAddress: manager,
     } });
     if (request.method() !== 'POST') return route.continue();
@@ -130,9 +131,18 @@ async function fixture(browser, options = {}) {
 }
 
 (async () => {
-  const browser = await chromium.launch({ headless: true, chromiumSandbox: true });
+  let browser, server;
   let passed = 0;
   try {
+    if (!origin) {
+      const { createServer } = await import('vite');
+      const react = (await import('@vitejs/plugin-react')).default;
+      server = await createServer({ configFile: false, envFile: false, plugins: [react()],
+        server: { host: '127.0.0.1', port: 0 }, base: '/dashboard/' });
+      await server.listen();
+      origin = `http://127.0.0.1:${server.httpServer.address().port}/dashboard`;
+    }
+    browser = await chromium.launch({ headless: true, chromiumSandbox: true });
     const connected = await fixture(browser);
     assert.equal((await connected.calls()).length, 0, 'does not probe before connecting');
     await connected.connect();
@@ -371,9 +381,9 @@ async function fixture(browser, options = {}) {
     assert.match(mainnetSetup, /Ethereum.*chain ID 1/);
     assert.match(mainnetSetup, /select Integrated Network, then Ethereum/);
     assert.doesNotMatch(mainnetSetup, /Custom Network|Chiado/);
-    assert.equal(await notice.locator('code').innerText(), 'https://mainnet.eez.dev/composer/l1');
+    assert.equal(await notice.locator('code').innerText(), 'https://mainnet.example/composer/l1');
     await notice.getByRole('button', { name: 'Copy RPC URL' }).click();
-    assert.deepEqual(await mainnet.page.evaluate(() => window.copiedURLs), ['https://mainnet.eez.dev/composer/l1']);
+    assert.deepEqual(await mainnet.page.evaluate(() => window.copiedURLs), ['https://mainnet.example/composer/l1']);
     await mainnet.page.evaluate(() => { window.walletModes.Rabby = 'detected'; });
     await notice.getByRole('button', { name: 'Recheck wallet Composer connection' }).click();
     await until(async () => await notice.count() === 0, 'setup notice disappears after successful discovery');
@@ -389,7 +399,7 @@ async function fixture(browser, options = {}) {
     }, '0x' + (696990).toString(16));
     await mainnet.menu.getByText('Composer not detected', { exact: true }).waitFor();
     assert.match(await mainnet.menu.locator('ol').innerText(), /EEZ-X Mainnet.*chain ID 696990/);
-    assert.equal(await mainnet.menu.locator('code').innerText(), 'https://mainnet.eez.dev/composer/l2');
+    assert.equal(await mainnet.menu.locator('code').innerText(), 'https://mainnet.example/composer/l2');
     await mainnet.close(); passed++;
 
     for (const mainnetProfile of [false, true]) {
@@ -410,7 +420,7 @@ async function fixture(browser, options = {}) {
       assert.match(steps, /Select the saved Composer URL.*default RPC.*save/);
       assert.match(steps, /Recheck/);
       assert.doesNotMatch(steps, /Rabby|Integrated Network|Modify RPC URL/);
-      const front = mainnetProfile ? 'https://mainnet.eez.dev' : new URL(origin).origin;
+      const front = mainnetProfile ? 'https://mainnet.example' : new URL(origin).origin;
       assert.equal(await guidance.locator('code').innerText(), front + '/composer/l1');
       await guidance.getByRole('button', { name: 'Copy RPC URL' }).click();
       assert.equal((await mm.page.evaluate(() => window.copiedURLs)).at(-1), front + '/composer/l1');
@@ -438,5 +448,5 @@ async function fixture(browser, options = {}) {
       await mm.close(); passed++;
     }
     console.log(JSON.stringify({ passed, selectedWallet: true, bothDirections: true, staleResponsesIgnored: true, transactionsSent: 0 }));
-  } finally { await browser.close(); }
+  } finally { await browser?.close(); await server?.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

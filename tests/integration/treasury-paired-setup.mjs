@@ -59,7 +59,15 @@ try {
   // Only network pin/Composer checks are fixture-controlled. All contract reads,
   // bytecode checks, CREATE predictions, owner reviews and executions are real.
   engine.validate = async () => {};
-  engine.io.rpc = async (chain, method, params = []) => method === 'eth_chainId' ? toHex(ids[chain]) : rpc(method, params);
+  engine.io.rpc = async (chain, method, params = []) => {
+    if (method === 'eth_chainId') return toHex(ids[chain]);
+    // These fixture managers are not upgradeable proxies. Model their pinned
+    // implementation slots while retaining real setup block/hash observations.
+    if (method === 'eth_getStorageAt' && params[1] === '0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc'
+      && [registry,manager].some(address => address.toLowerCase() === params[0].toLowerCase()))
+      return toHex(BigInt(params[0]), { size: 32 });
+    return rpc(method, params);
+  };
   network.contracts.wrappedUSDC.address = await engine.io.read('l2',bridgeL2,'Bridge','getWrappedToken',[tokenL1,0n]);
   network.contracts.usdcImplementation.address = tokenL1;
   for (const entry of Object.values(network.contracts)) entry.hash = keccak256(await rpc('eth_getCode',[entry.address,'latest']));
