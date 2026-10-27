@@ -24,7 +24,8 @@ function partyName(model: TraceModel, chain: TraceChain, address: string): strin
 }
 
 /** Height a card needs for its notes (two shown, then a "+N more" line). */
-export const tokenNotesHeight = (count: number) => count ? Math.min(2, count) * 80 + (count > 2 ? 20 : 0) : 0;
+export const tokenNotesHeight = (transfers: TraceTokenTransfer[]) => transfers.slice(0, 2)
+  .reduce((height, transfer) => height + (transfer.kind === "transfer" ? 100 : 80), 0) + (transfers.length > 2 ? 20 : 0);
 
 export function TokenTransferSummary({ model }: { model: TraceModel }) {
   const seen = new Set<string>();
@@ -41,13 +42,15 @@ export function TokenTransferSummary({ model }: { model: TraceModel }) {
     {partyName(model, chain, address) || short(address)}
   </span>;
   return <section className={styles.summary} aria-label="Token transfer summary">
-    <h2>Token transfers <small>experimental</small></h2>
+    <h2>Token transfers</h2>
     <ul className={styles.summaryList}>{transfers.map(({ chain, tx, transfer }) => {
       const token = transfer.symbol || partyName(model, chain, transfer.token) || short(transfer.token);
       return <li key={`${chain}:${tx}:${transfer.eventId}`} className={styles.summaryRow} data-kind={transfer.kind}>
         <strong title={transfer.token}>{token} · {action[transfer.kind]} <small>{chain}</small></strong>
-        <span className={styles.summaryRoute}><small>From</small> {party(chain, transfer.from)}
-          <span aria-hidden="true"> → </span><small>To</small> {party(chain, transfer.to)}</span>
+        <span className={styles.summaryRoute}>
+          {transfer.kind !== "mint" && <><small>From</small> {party(chain, transfer.from)}</>}
+          {transfer.kind === "transfer" && <span aria-hidden="true"> → </span>}
+          {transfer.kind !== "burn" && <><small>To</small> {party(chain, transfer.to)}</>}</span>
         <span className={styles.summaryAmount}><small>Amount</small> {tokenAmount(transfer)}{transfer.decimals != null ? ` ${token}` : ""}</span>
       </li>;
     })}</ul>
@@ -63,13 +66,31 @@ export function TokenNotes({ model, chain, transfers, compact = false }: {
     const label = transfers.length + (transfers.length === 1 ? " token transfer" : " token transfers");
     return <span className={styles.chip} data-kind={transfers.length === 1 ? transfers[0]!.kind : "transfer"} role="img" aria-label={label} title={label}>◉ {transfers.length}</span>;
   }
+  const party = (label: string, address: string) => {
+    const name = partyName(model, chain, address);
+    return <span className={styles.party} title={`${label}: ${name ? name + " · " : ""}${address}`}>
+      <span className={styles.partyLabel}>{label}</span>
+      <span className={styles.partyIdentity}>
+        {name ? <span className={styles.partyName}>{name}</span>
+          : <span className={styles.partyAddress}>{short(address)}</span>}
+      </span>
+    </span>;
+  };
   return <span className={styles.notes}>
-    {transfers.slice(0, 2).map(transfer => <span key={transfer.eventId} className={styles.note} data-kind={transfer.kind}>
-      <span className={styles.title} title={transfer.token}>◉ {transfer.symbol || partyName(model, chain, transfer.token) || short(transfer.token)} · {action[transfer.kind]}</span>
-      <span className={styles.route} title={`From ${partyName(model, chain, transfer.from) || transfer.from} (${transfer.from})`}>From: {partyName(model, chain, transfer.from) || short(transfer.from)}</span>
-      <span className={styles.route} title={`To ${partyName(model, chain, transfer.to) || transfer.to} (${transfer.to})`}>To: {partyName(model, chain, transfer.to) || short(transfer.to)}</span>
-      <span className={styles.amount} title={tokenAmount(transfer)}>Amount: {tokenAmount(transfer)}</span>
-    </span>)}
+    {transfers.slice(0, 2).map(transfer => {
+      const token = transfer.symbol || partyName(model, chain, transfer.token) || short(transfer.token);
+      return <span key={transfer.eventId} className={styles.note} data-kind={transfer.kind} aria-label={`${token} ${action[transfer.kind].toLowerCase()}`}>
+        <span className={styles.noteHeader}><span className={styles.noteAction}>{action[transfer.kind]}</span><span className={styles.noteChain}>{chain}</span></span>
+        <span className={styles.parties}>
+          {transfer.kind !== "mint" && party("From", transfer.from)}
+          {transfer.kind !== "burn" && party("To", transfer.to)}
+          <span className={styles.party} title={`${tokenAmount(transfer)} · ${token} (${transfer.token})`}>
+            <span className={styles.partyLabel}>Amount</span>
+            <span className={styles.amountLine}><span className={styles.amount}>{tokenAmount(transfer)}</span><span className={styles.token}>{token}</span></span>
+          </span>
+        </span>
+      </span>;
+    })}
     {transfers.length > 2 && <span className={styles.more}>+{transfers.length - 2} more · select the call</span>}
   </span>;
 }
@@ -81,12 +102,12 @@ export function TokenDetails({ model, chain, transfers }: { model: TraceModel; c
     return <div className={styles.field}><small>{label}</small>{name && <strong>{name}</strong>}<code>{address}</code></div>;
   };
   return <>
-    <h3>Token transfers · experimental</h3>
+    <h3>Token transfers</h3>
     {transfers.map(transfer => <div key={transfer.eventId} className={styles.detail} data-kind={transfer.kind}>
       <strong className={styles.detailTitle}>◉ {action[transfer.kind]} · {chain}</strong>
       {party("Token", transfer.token, transfer.symbol)}
-      {party("From", transfer.from, transfer.kind === "mint" ? "Mint origin" : null)}
-      {party("To", transfer.to, transfer.kind === "burn" ? "Burn address" : null)}
+      {transfer.kind !== "mint" && party("From", transfer.from, null)}
+      {transfer.kind !== "burn" && party("To", transfer.to, null)}
       <div className={styles.field}><small>Amount</small>
         <span className={styles.detailAmount}>{tokenAmount(transfer)}{transfer.symbol && transfer.decimals != null ? " " + transfer.symbol : ""}</span></div>
     </div>)}

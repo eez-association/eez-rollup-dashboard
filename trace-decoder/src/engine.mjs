@@ -2,6 +2,7 @@ import { ethers } from 'ethers';
 import { ChainReader, makeRpc, validateSettlement } from './rpc.mjs';
 import { protocol, hex, lower, number, parseEvent, same } from './protocol.mjs';
 import { buildGraph } from './logical.mjs';
+import { enrichTokenMetadata } from './token-metadata.mjs';
 import { lookupTransactionLinks, validateTransactionLinks, recheckTransactionLinks, isolateL2Execution } from './transaction-links.mjs';
 
 async function concurrent(items, fn, limit = 8) {
@@ -294,11 +295,13 @@ export async function decodeCrossChainTrace(inputConfig, txHash) {
   }
   const transactions = [...records.values()].sort((a,b) => a.chain.localeCompare(b.chain) || a.blockNumber - b.blockNumber || a.transactionIndex - b.transactionIndex);
   const graph = await buildGraph({ config: { ...config, chainIds }, transactions, managers, readers, rollupIds, settlements, transactionLinks, matchingDisabled: !legacyDiscovery && !transactionLinks.length, unresolvedReason });
-  return {
+  const trace = {
     schemaVersion: '1.0.0', txHash: lower(txHash), origin: { chain: origin.chain, transactionId: origin.id },
     metadata: { chainIds, rollupIds, managers, composer, correlation: correlation?.name ?? null, transactionLinks: { state: linkDiscovery.state, reason: linkDiscovery.reason ?? null, observation: linkDiscovery.raw ?? null }, search },
     transactions: transactions.map(({ traceResult, ...r }) => ({ ...r, trace: { available: !!traceResult.trace, provenance: traceResult.provenance ?? null, reason: traceResult.reason ?? null, failures: traceResult.failures ?? [] } })),
     originalTraces: transactions.map(r => ({ chain: r.chain, transactionHash: r.hash, trace: r.traceResult.trace })),
     settlements, transactionLinks, ...graph, unresolved, diagnostics,
   };
+  await enrichTokenMetadata(trace, readers);
+  return trace;
 }

@@ -73,7 +73,8 @@ model.recordedView = { ...model, mode: "physical", recordedView: null,
     });
     await page.goto(url + "#/visualizer?mode=trace&chain=l2&tx=" + hash);
     await page.getByRole("heading", { name: "Counter.increment()" }).waitFor();
-    assert.equal(await page.getByRole("region", { name: "Token transfer summary" }).count(), 0);
+    assert.equal(await page.getByRole("checkbox", { name: /Token transfers/ }).isChecked(), true);
+    assert.equal(await page.getByText("experimental", { exact: true }).count(), 0);
     const requestsBeforeTokens = creates;
     await page.getByRole("checkbox", { name: /Token transfers/ }).check();
     const tokenSummary = page.getByRole("region", { name: "Token transfer summary" });
@@ -86,13 +87,37 @@ model.recordedView = { ...model, mode: "physical", recordedView: null,
     assert.match(await tokenSummary.innerText(), /1234567 raw units/);
     assert.equal(await tokenSummary.getByText("Counter", { exact: true }).first().getAttribute("title"), address);
     const tokenCard = page.getByRole("region", { name: "Call map canvas" });
-    await tokenCard.getByText("From: Counter", { exact: true }).first().waitFor();
-    await tokenCard.getByText("To: 0x3333…3333", { exact: true }).first().waitFor();
-    await tokenCard.getByText("Amount: 1.234567", { exact: true }).waitFor();
+    const note = tokenCard.getByLabel("TESTUSDC sent", { exact: true }).first();
+    await note.getByText("From", { exact: true }).waitFor();
+    await note.getByText("Counter", { exact: true }).waitFor();
+    assert.ok(await note.locator(`[title="From: Counter · ${address}"]`).count());
+    assert.equal(await note.locator("[title]").last().getByText("Amount", { exact: true }).count(), 1, "amount is the last row");
+    await note.getByText("0x3333…3333", { exact: true }).waitFor();
+    await note.getByText("1.234567", { exact: true }).waitFor();
+    assert.ok(await note.evaluate(el => el.scrollHeight <= el.clientHeight), "transfer details fit within their card");
+    await note.screenshot({ path: `${directory}/transfer-card.png` });
     await page.screenshot({ path: `${directory}/token-summary.png`, fullPage: true });
     await page.getByRole("checkbox", { name: /Token transfers/ }).uncheck();
     assert.equal(await tokenSummary.count(), 0);
     assert.equal(creates, requestsBeforeTokens, "the summary does not refetch the trace");
+    const originalTransfers = model.nodes[0].tokenTransfers;
+    for (const kind of ["mint", "burn"]) {
+      model.nodes[0].tokenTransfers = [{ ...originalTransfers[0], kind,
+        from: kind === "mint" ? "0x" + "00".repeat(20) : address,
+        to: kind === "burn" ? "0x" + "00".repeat(20) : originalTransfers[0].to }];
+      await page.getByRole("button", { name: "Refresh", exact: true }).click();
+      await page.getByRole("checkbox", { name: /Token transfers/ }).check();
+      const changedNote = tokenCard.getByLabel(`TESTUSDC ${kind === "mint" ? "minted" : "burned"}`, { exact: true });
+      await changedNote.waitFor();
+      assert.equal(await changedNote.getByText(kind === "mint" ? "From" : "To", { exact: true }).count(), 0);
+      assert.equal(await changedNote.getByText(kind === "mint" ? "To" : "From", { exact: true }).count(), 1);
+      assert.ok(await changedNote.evaluate(el => el.scrollHeight <= el.clientHeight));
+      await changedNote.screenshot({ path: `${directory}/${kind}-card.png` });
+    }
+    model.nodes[0].tokenTransfers = originalTransfers;
+    await page.getByRole("button", { name: "Refresh", exact: true }).click();
+    await tokenCard.getByLabel("TESTUSDC sent", { exact: true }).first().waitFor();
+    await page.getByRole("checkbox", { name: /Token transfers/ }).uncheck();
     assert.equal(await page.locator("iframe").count(), 0);
     assert.equal(await page.getByRole("button", { name: "Call map", exact: true }).getAttribute("aria-pressed"), "true");
     const call = page.getByRole("region", { name: "Call map canvas" })

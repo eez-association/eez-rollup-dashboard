@@ -76,3 +76,62 @@ test('zero addresses distinguish mint and burn events', () => {
     assert.equal(notes(t)[0].kind, kind);
   }
 });
+
+// Missing display metadata is read at the transfer's block, not guessed.
+const { enrichTokenMetadata } = await import('../src/token-metadata.mjs');
+const { ethers } = await import('ethers');
+const metadataAbi = new ethers.Interface(['function decimals() view returns(uint8)', 'function symbol() view returns(string)']);
+function metadataFixture() {
+  const t = fixture(), blockHash = '0x' + 'ab'.repeat(32);
+  Object.assign(t.transactions[0].receipt, { blockHash, blockNumber: '0x20' });
+  const calls = [];
+  const reader = { async send(method, params) {
+    calls.push({ method, params });
+    if (method === 'eth_getBlockByNumber') return { hash: blockHash };
+    const field = params[0].data === '0x313ce567' ? 'decimals' : 'symbol';
+    return metadataAbi.encodeFunctionResult(field, [field === 'decimals' ? 6 : 'TESTUSDC']);
+  } };
+  return { t, calls, reader, blockHash };
+}
+test('missing token metadata is queried once per token/block on the correct chain and formats existing receipt events', async () => {
+  const { t, calls, reader } = metadataFixture();
+  t.events.push({ ...t.events[0], id: 'trace-1' }, { ...t.events[1], id: 'receipt-1' });
+  await enrichTokenMetadata(t, { L2: reader, L1: { send() { throw new Error('wrong chain'); } } });
+  assert.equal(calls.length, 3);
+  assert(calls.filter(c => c.method === 'eth_call').every(c => c.params[0].to === token && c.params[1] === '0x20'));
+  assert.equal(notes(t).length, 2);
+  assert.equal(notes(t)[0].decimals, 6); assert.equal(notes(t)[0].symbol, 'TESTUSDC');
+  assert.equal(t.frames.length, 2, 'metadata reads are not fabricated execution frames');
+});
+test('observed metadata avoids redundant RPC calls and conflicting trace reads stay unknown', async () => {
+  const { t, calls, reader } = metadataFixture();
+  read(t, '0x313ce567', '6'); read(t, '0x95d89b41', 'USDC');
+  await enrichTokenMetadata(t, { L2: reader }); assert.equal(calls.length, 0);
+  read(t, '0x313ce567', '18');
+  await enrichTokenMetadata(t, { L2: reader });
+  assert.equal(notes(t)[0].decimals, null); assert.equal(notes(t)[0].symbol, 'USDC');
+});
+test('metadata failures, malformed responses and reorgs keep raw units without querying latest', async () => {
+  for (const mode of ['archive-error', 'malformed', 'reorg']) {
+    const { t, reader, calls } = metadataFixture();
+    const send = reader.send.bind(reader);
+    reader.send = async (method, params) => {
+      if (mode === 'archive-error') throw new Error('unavailable');
+      if (mode === 'malformed' && method === 'eth_call') return '0x01';
+      if (mode === 'reorg' && method === 'eth_getBlockByNumber') return { hash: '0x' + 'cd'.repeat(32) };
+      return send(method, params);
+    };
+    await enrichTokenMetadata(t, { L2: reader });
+    assert.equal(notes(t)[0].decimals, null); assert.equal(notes(t)[0].symbol, null);
+    assert(!JSON.stringify(calls).includes('latest'));
+  }
+});
+test('metadata is isolated by chain and receipt block; unsuccessful transfers cause no calls', async () => {
+  const { t, reader, calls } = metadataFixture();
+  t.transactions[0].receipt.status = '0x0';
+  await enrichTokenMetadata(t, { L2: reader }); assert.equal(calls.length, 0);
+  t.transactions[0].receipt.status = '0x1';
+  await enrichTokenMetadata(t, { L2: reader });
+  const copy = structuredClone(t); copy.events.forEach(e => e.chain = 'L1'); copy.frames.forEach(f => f.chain = 'L1'); copy.transactions[0].chain = 'L1';
+  assert.equal(notes(copy)[0].decimals, null);
+});

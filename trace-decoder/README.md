@@ -19,12 +19,19 @@ The native call flow connects visible callers to their children, numbers
 calls, and highlights connections for the selected call. Dashed connectors mark
 uncertain or missing execution; recorded traces never connect independent
 transactions. Search and hidden protocol frames can promote descendants to the
-nearest visible ancestor. **Token transfers · experimental** (off by
+nearest visible ancestor. **Token transfers** (on by
 default) shows ERC20 Transfer events on call cards only when the same event
 appears in both the trace and the committed receipt; amounts describe events,
 not net balance changes. Prepared results without an expected L2 delivery are labeled separately
 and do not by themselves make the API result partial. Both models use curated
 public diagnostic messages; raw provider errors remain server-side.
+
+Missing token decimals and symbols are read from the token on its own chain at
+the receipt's block, with the block hash checked afterward. These optional reads
+are reused per token/chain/block within a decode, bounded to 32 token/block
+combinations and two concurrent lookup groups. They never use latest state as a
+fallback or replace conflicting metadata observed inside the transaction.
+Unavailable historical metadata leaves amounts explicitly in raw units.
 
 ## Dashboard API
 

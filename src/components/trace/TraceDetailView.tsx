@@ -86,8 +86,8 @@ export function TraceDetailView({ hash, source, ready, onBack }: {
   const [transaction, setTransaction] = useState("");
   const [selected, setSelected] = useState<number | null>(null);
   const [recorded, setRecorded] = useState(false);
-  // Experimental token notes stay off until the viewer opts in.
-  const [tokens, setTokens] = useState(false);
+  // Receipt-confirmed token transfers are visible by default.
+  const [tokens, setTokens] = useState(true);
   const viewer = useRef<HTMLElement>(null);
   const fullscreenButton = useRef<HTMLButtonElement>(null);
   const [fullscreen, setFullscreen] = useState(false);

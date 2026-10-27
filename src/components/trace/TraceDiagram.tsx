@@ -91,7 +91,7 @@ export function TraceDiagram({ model, view, transaction, onSelect, selected, tok
       <label className={styles.checkbox}><input type="checkbox" checked={protocol} onChange={event => setProtocol(event.target.checked)} />Show protocol calls</label>
       {view !== "sequence" && <label className={styles.checkbox} title="Show ERC20 Transfer events confirmed in both the trace and the receipt">
         <input type="checkbox" checked={tokens} onChange={event => onTokens(event.target.checked)} />
-        Token transfers{transferCount ? " (" + transferCount + ")" : ""} <span className={styles.experimental}>experimental</span></label>}
+        Token transfers{transferCount ? " (" + transferCount + ")" : ""}</label>}
       {view === "flow" && <label className={styles.checkbox}><input type="checkbox" checked={compact} onChange={event => setCompact(event.target.checked)} />Compact cards</label>}
       <button className="btn btn-sm btn-outline" onClick={() => setCollapsed(new Set())}>Expand all</button>
     </div>

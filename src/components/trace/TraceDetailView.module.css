@@ -65,7 +65,6 @@
 .search { flex: 1; min-width: 160px; }
 .checkbox { display: flex; gap: 8px; align-items: center; color: var(--text-dim); font-size: 12px; }
 .checkbox input { accent-color: var(--accent); }
-.experimental { padding: 0 6px; border: 1px solid var(--yellow-border); border-radius: 100px; color: var(--yellow); font: 10px var(--mono); letter-spacing: .04em; text-transform: uppercase; }
 .diagram > p { padding: 12px 16px; }
 .flowScroller { overflow: auto; max-height: 900px; }
 .flowHead, .flowRow { display: grid; grid-template-columns: minmax(240px, 1fr) 96px minmax(240px, 1fr); min-width: 596px; }
