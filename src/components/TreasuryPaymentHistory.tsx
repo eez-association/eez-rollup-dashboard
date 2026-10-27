@@ -3,7 +3,7 @@ import type { useTreasuryHistory } from "../hooks/useTreasuryHistory";
 import type { TreasuryConfig } from "../lib/treasury/client";
 import { treasuryTransactions } from "../lib/treasury/settlement";
 import { historyLabels, historyStatus } from "../lib/treasury/history";
-import type { HistoryStatus } from "../lib/treasury/history";
+import type { HistoryEntry, HistoryStatus } from "../lib/treasury/history";
 import { formatUSDC } from "../lib/treasury/payments";
 import { TreasuryOutcomeDetails } from "./TreasuryOutcomeDetails";
 import { TreasuryChainLink } from "./TreasuryPaymentFlow";
@@ -26,7 +26,11 @@ export function TreasuryPaymentHistory({ history, deployment }: { history: Retur
     setExpanded(previous => new Set([...previous, ...incoming.map(entry => entry.id)]));
     setFilter("all");
   }, [history.entries]);
-  const entries = ordered.filter(e => filter === "all" || historyStatus(e, history.observations[e.id]) === filter);
+  const category = (entry: HistoryEntry) => {
+    const observation = history.observations[entry.id];
+    return historyStatus(entry, observation?.checking && observation.outcome ? { ...observation, checking: false } : observation);
+  };
+  const entries = ordered.filter(e => filter === "all" || category(e) === filter);
   const names = { l1: deployment.l1.chainId === 10200 ? "Chiado" : "Ethereum", l2: "EEZ-X" };
   return <section className={styles.card} aria-label="Payment history">
     <div className={styles.cardHeader}><div><h3 className={styles.cardTitle}>Payment history</h3><p className={styles.noHash}>Newest first · Saved in this browser</p></div>
@@ -35,7 +39,7 @@ export function TreasuryPaymentHistory({ history, deployment }: { history: Retur
     {!!ordered.length && <div className={`${treasury.fields} ${layout.historyFilter}`}><label htmlFor="treasury-history-filter">Filter history</label>
       <select id="treasury-history-filter" value={filter} onChange={e => setFilter(e.target.value as typeof filter)}>
         <option value="all">All outcomes ({ordered.length})</option>
-        {(Object.keys(historyLabels) as HistoryStatus[]).map(status => <option key={status} value={status}>{historyLabels[status]} ({ordered.filter(e => historyStatus(e, history.observations[e.id]) === status).length})</option>)}
+        {(Object.keys(historyLabels) as HistoryStatus[]).map(status => <option key={status} value={status}>{historyLabels[status]} ({ordered.filter(e => category(e) === status).length})</option>)}
       </select></div>}
     {history.error && <p className={styles.lookupError} role="alert">{history.error}</p>}
     {!entries.length && <p className={styles.emptyState}>{ordered.length ? "No payments match this filter." : "Your payment attempts will appear here."}</p>}
@@ -44,7 +48,8 @@ export function TreasuryPaymentHistory({ history, deployment }: { history: Retur
       const observation = history.observations[entry.id], outcome = observation?.outcome;
       const status = historyStatus(entry, observation), intent = entry.kind === "submitted" ? entry.intent : undefined;
       const payment = entry.kind === "submitted" ? entry.intent.payment! : entry.payment;
-      const actual = status === "settled" && outcome?.contributions;
+      const settledResult = outcome?.kind === "settled";
+      const actual = settledResult && outcome?.contributions;
       const amount = actual ? formatUSDC(BigInt(actual.fromL1) + BigInt(actual.fromL2)) : formatUSDC(BigInt(payment.amount));
       const source = payment.source ?? "l2", hash = outcome?.hash ?? intent?.hash;
       const settlement = history.settlementFor(outcome);
@@ -65,22 +70,23 @@ export function TreasuryPaymentHistory({ history, deployment }: { history: Retur
               <span className={treasury.chainLabel} data-chain={tx.chain}>{names[tx.chain]}{tx.role === "settlement" ? " · settlement" : ""}</span>
               <TreasuryChainLink deployment={deployment} chain={tx.chain} value={tx.hash}>{tx.hash.slice(0, 8)}…{tx.hash.slice(-6)}</TreasuryChainLink>
             </div>) : <span className={styles.noHash}>{entry.kind === "preparation" ? "Not submitted" : "Awaiting wallet"}</span>}
-            {status === "settled" && !settlement && <span className={styles.noHash}>{names.l1} settlement link {settlement === null ? "unavailable" : "loading…"}</span>}
+            {settledResult && !settlement && <span className={styles.noHash}>{names.l1} settlement link {settlement === null ? "unavailable" : "loading…"}</span>}
           </div>
           <div className={styles.blockCol} role="group" aria-label="Blocks">{blocks.length ? blocks.map(tx =>
             <TreasuryChainLink key={`${tx.chain}:${tx.block}`} deployment={deployment} chain={tx.chain} type="block" value={tx.block!}>{names[tx.chain]} #{BigInt(tx.block!).toLocaleString()}</TreasuryChainLink>) : <span className={styles.noHash}>—</span>}</div>
-          <div className={styles.statusCol}><span className={`${styles.badge} ${badge} ${layout.paymentBadge}`} data-outcome={status}>{historyLabels[status]}</span></div>
+          <div className={styles.statusCol}><span className={`${styles.badge} ${badge} ${layout.paymentBadge}`} data-outcome={status}>{observation?.checking ? outcome ? "Rechecking…" : "Checking…" : !observation && entry.kind === "submitted" && history.checking ? "Checking…" : historyLabels[status]}</span></div>
           <time className={styles.timeCol} dateTime={entry.recordedAt} title={new Date(entry.recordedAt).toLocaleString()}>{new Date(entry.recordedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time>
           <div className={styles.actionsCol}><button className={styles.inspectBtn} aria-label={open ? "Hide payment details" : "Show payment details"} aria-expanded={open} aria-controls={detailsId} onClick={() => setExpanded(previous => { const next = new Set(previous); if (open) next.delete(entry.id); else next.add(entry.id); return next; })}>{open ? "−" : "+"}</button></div>
         </div>
         {open && <div id={detailsId} className={treasury.historyDetails}>
           {entry.kind === "preparation" ? <><p>{entry.detail}</p><p>Stopped during preparation. Not signed or submitted; no transaction hash.</p></> : <>
-            {status !== "settled" && <p>{observation?.error ? `Verification unavailable: ${observation.error}` : observation?.checking ? "Checking this saved request…" : outcome?.detail ?? "Checking this saved request. Its outcome is not yet verified."}</p>}
+            {!settledResult && <p>{observation?.error ? `Verification unavailable: ${observation.error}` : observation?.checking ? "Checking this saved request…" : outcome?.detail ?? "Checking this saved request. Its outcome is not yet verified."}</p>}
+            {observation?.checking && outcome && <p className={styles.noHash}>Last verified result · rechecking against the network…</p>}
             <TreasuryOutcomeDetails outcome={outcome} prefix="history-" deployment={deployment} intent={intent} settlement={settlement} />
             {trace && <div><a className="btn btn-sm btn-outline" href={`#/visualizer?mode=trace&chain=${trace.chain}&tx=${encodeURIComponent(trace.hash)}`}>See in trace decoder</a></div>}
-            {status !== "settled" && <p>Recipient: <TreasuryChainLink deployment={deployment} chain={payment.destination} type="address" value={payment.recipient}>{payment.recipient.slice(0, 8)}…{payment.recipient.slice(-6)}</TreasuryChainLink> on {names[payment.destination]}.</p>}
-            {hash && status !== "settled" && <p><TreasuryChainLink deployment={deployment} chain={source} value={hash}>Submitted transaction</TreasuryChainLink></p>}
-            {status === "pending" && <p>This saved request is being verified. It will not be resubmitted automatically.</p>}
+            {!settledResult && <p>Recipient: <TreasuryChainLink deployment={deployment} chain={payment.destination} type="address" value={payment.recipient}>{payment.recipient.slice(0, 8)}…{payment.recipient.slice(-6)}</TreasuryChainLink> on {names[payment.destination]}.</p>}
+            {hash && !settledResult && <p><TreasuryChainLink deployment={deployment} chain={source} value={hash}>Submitted transaction</TreasuryChainLink></p>}
+            {status === "pending" && !settledResult && <p>This saved request is being verified. It will not be resubmitted automatically.</p>}
           </>}
         </div>}
       </li>;
