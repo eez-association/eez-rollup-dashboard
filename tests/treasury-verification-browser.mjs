@@ -10,7 +10,7 @@ process.env.TMPDIR = `${process.cwd()}/${directory}/tmp`;
 const requests = [1, 2, 3].map(n => ({ build: 'ab'.repeat(32), chainId: n === 1 ? 10200 : 906969, transactionHash: `0x${String(n).repeat(64)}` }));
 const key = 'eez:treasury:source-outbox';
 const outbox = JSON.stringify({ sourceRequests: requests });
-const delivered = [], errors = [], passed = [];
+const delivered = [], dependencies = [], errors = [], passed = [];
 let unavailable = true, complete = false, sourceOnly = false, undiscovered = false, sourceMissing = false, retryCalls = 0;
 const server = await createServer({ configFile: false, envFile: false, plugins: [react()], server: { host: '127.0.0.1', port: 0 }, base: '/' });
 await server.listen();
@@ -26,7 +26,12 @@ await context.route('**/*', async route => {
   if (url.pathname === '/verification-fixture') return route.fulfill({ contentType: 'text/html', body: '<!doctype html><div id="root"></div><script type="module">import RefreshRuntime from "/@react-refresh";RefreshRuntime.injectIntoGlobalHook(window);window.$RefreshReg$=()=>{};window.$RefreshSig$=()=>type=>type;window.__vite_plugin_react_preamble_installed__=true;</script>' });
   if (/\/jobs\/[a-f\d]{64}\/retry$/.test(url.pathname)) { retryCalls++; return route.fulfill({ status: 202, json: {} }); }
   if (url.pathname !== '/treasury-verification/jobs') return route.fallback();
-  const request = route.request().postDataJSON(), index = requests.findIndex(r => r.transactionHash === request.transactionHash);
+  const request = route.request().postDataJSON();
+  if (request.address) {
+    dependencies.push(request);
+    return route.fulfill({ json: { id: request.address.slice(-1).repeat(64), status: 'verified', contracts: [{ address: request.address, name: 'Reused dependency', status: 'verified' }] } });
+  }
+  const index = requests.findIndex(r => r.transactionHash === request.transactionHash);
   assert(index >= 0); assert.deepEqual(request, requests[index]);
   delivered.push(index);
   if (unavailable && index === 0) return route.fulfill({ status: 400, json: { error: 'Wait for a successful canonical receipt' } });
@@ -53,7 +58,7 @@ try {
   unavailable = false;
   await page.clock.fastForward(15_001);
   await details.locator('summary').filter({ hasText: 'Publishing to explorers · 2 of 3 verified' }).waitFor();
-  assert.deepEqual(delivered, [0, 1, 2, 0, 1, 2]);
+  assert.deepEqual(delivered, [0, 1, 2, 0, 2], 'recently verified jobs are cached while unfinished requests are retried');
   assert.equal(await details.getByRole('status').count(), 0);
   passed.push('the automatic retry recovers the original request and clears the transient error');
 
@@ -88,6 +93,31 @@ try {
   assert.equal(await page.evaluate(key => localStorage.getItem(key), key), outbox);
   passed.push('all independent jobs can finish without losing the durable outbox');
   await page.evaluate(() => window.unmountVerification());
+  const deployment = { version: 1, environment: 'dashboard-testnet', payments: { pair: { version: 1 } },
+    l1: { chainId: 10200 }, l2: { chainId: 906969 }, code: [
+      { chain: 'l1', address: '0x'+'44'.repeat(20) }, { chain: 'l2', address: '0x'+'55'.repeat(20) },
+      { chain: 'l2', address: '0x'+'66'.repeat(20) },
+    ] };
+  await page.evaluate(async deployment => {
+    window.unmountVerification(); localStorage.clear();
+    const { mount } = await import('/tests/fixtures/treasury-verification-browser.tsx');
+    window.unmountVerification = mount(deployment);
+  }, deployment);
+  await details.locator('summary').filter({ hasText: 'Contract sources verified on explorers' }).waitFor();
+  await page.waitForFunction(() => document.querySelectorAll('[aria-label="Contract source verification"] li').length === 3);
+  assert.deepEqual(dependencies.map(r=>[r.chainId,r.address]),deployment.code.map(r=>[deployment[r.chain].chainId,r.address]));
+  assert(dependencies.every(r=>!r.transactionHash),'existing contracts do not require a new creation transaction');
+  dependencies.length=0;
+  await page.evaluate(async ({deployment,build}) => {
+    window.unmountVerification();
+    localStorage.setItem('eez:treasury:paired-setup:saved',JSON.stringify({build}));
+    localStorage.setItem('eez:treasury:paired-setup:saved:manifest',JSON.stringify(deployment));
+    const { mount } = await import('/tests/fixtures/treasury-verification-browser.tsx');
+    window.unmountVerification = mount();
+  }, {deployment,build:requests[0].build});
+  await page.waitForFunction(() => document.querySelectorAll('[aria-label="Contract source verification"] li').length === 3);
+  assert.equal(dependencies.length,3);assert(dependencies.every(r=>r.build===requests[0].build));
+  passed.push('configured and saved treasuries automatically verify reused contracts without new transactions or journal rewrites');
   assert.deepEqual(errors, []);
   await writeFile(`${directory}/result.json`, JSON.stringify({ passed, scope: 'React source delivery with controlled HTTP responses; no chain or wallet writes' }, null, 2) + '\n');
   console.log(passed.join('\n'));

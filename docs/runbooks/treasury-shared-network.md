@@ -81,6 +81,22 @@ discovers top-level and nested creations (including Safe factories), matches
 runtime bytecode including metadata, and submits the retained standard JSON
 compiler input. Only compiler-declared immutable locations may differ.
 
+Opening a configured or saved paired treasury also automatically queues its
+existing contract addresses, including reused tokens, allowance modules, Safe
+implementations, bridges and protocol bindings. Address verification reads code
+at a fixed canonical block; it does not require a creation transaction, so it
+also covers genesis contracts and old deployments whose receipts are unavailable.
+Known proxy layouts reveal their implementation, and normal bridges reveal their
+local manager and counterpart proxy. Dependency discovery is bounded to 16
+addresses per job and never accepts caller-supplied RPC URLs or compiler inputs.
+
+Verification-only inputs for already deployed protocol revisions are retained in
+`verification/supplemental/`, independently recompiled, and matched including
+metadata and constructor immutable references. Adding these inputs does not
+upgrade deployed contracts, change the dashboard's protocol dependency pin, or
+rewrite an immutable treasury release. Unsupported bytecode remains visibly
+`source-unavailable`; it is never published using an approximate source match.
+
 Build with `npm run build:treasury-release` and check with
 `npm run check:treasury-release`. The release builder compiles portable source
 paths, retains each exact compiler/version/settings/source input, and independently
@@ -120,8 +136,10 @@ where the worker publishes, even when ordinary transaction links use Etherscan.
 Completed jobs are periodically rechecked
 against canonical chain state. Jobs for another configured network remain stored
 but cannot run through a mismatching RPC. Unknown build IDs and unconfirmed
-transaction hashes cannot enter the public queue. Admission requires at least
-one newly observed deployment with exact retained bytecode. Configuration-only
+transaction hashes cannot enter the public queue. Transaction admission requires at least
+one newly observed deployment with exact retained bytecode. Address admission
+requires a match against retained compiler output; already fully verified third-party
+contracts can be reported without allocating queue capacity. Configuration-only
 confirmations return `not-applicable`; unknown code returns a visible
 `source-unavailable` result without allocating a persistent job. Events naming
 already existing contracts do not establish a new deployment. Candidate discovery

@@ -18,7 +18,7 @@ async function start() {
       const response = await fetch(rpc, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_chainId', params: [] }), signal: AbortSignal.timeout(10_000) });
       const r = await response.json(); if (r.error || !r.result) throw new Error('Cannot identify verification network');
       // Etherscan API keys are not required: Ethereum uses public Blockscout.
-      networks[Number(BigInt(r.result))] = { rpc, explorerApi: BigInt(r.result) === 1n ? 'https://eth.blockscout.com/api' : blockscoutApiUrl(c[`${chain}ExplorerApiUrl`], c[`${chain}ExplorerUrl`], dashboard) };
+      networks[Number(BigInt(r.result))] = { rpc, peerRollupId: chain === 'l2' ? 0 : Number.isSafeInteger(Number(c.rollupId)) && Number(c.rollupId) > 0 ? Number(c.rollupId) : undefined, explorerApi: BigInt(r.result) === 1n ? 'https://eth.blockscout.com/api' : blockscoutApiUrl(c[`${chain}ExplorerApiUrl`], c[`${chain}ExplorerUrl`], dashboard) };
     }
     worker = new VerificationWorker({ directory, builds: loadBuilds('verification/builds'), additionalSources: loadAdditionalSources('verification/supplemental'), networks });
     console.log('Treasury source verification ready');
