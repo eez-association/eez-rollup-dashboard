@@ -49,6 +49,8 @@ export function TreasuryPaymentHistory({ history, deployment }: { history: Retur
       const source = payment.source ?? "l2", hash = outcome?.hash ?? intent?.hash;
       const settlement = history.settlementFor(outcome);
       const transactions = treasuryTransactions(intent, outcome, settlement);
+      const trace = transactions.find(tx => tx.role === "execution" && tx.chain === (intent?.submissionChain ?? source))
+        ?? transactions.find(tx => tx.role === "execution");
       const blocks = transactions.filter((tx, i) => tx.block && !transactions.slice(0, i).some(previous => previous.chain === tx.chain && previous.block === tx.block));
       const open = expanded.has(entry.id), detailsId = `payment-${entry.id}`;
       const badge = status === "settled" ? styles.confirmed : status === "pending" ? styles.pending : styles.failed;
@@ -75,6 +77,7 @@ export function TreasuryPaymentHistory({ history, deployment }: { history: Retur
           {entry.kind === "preparation" ? <><p>{entry.detail}</p><p>Stopped during preparation. Not signed or submitted; no transaction hash.</p></> : <>
             {status !== "settled" && <p>{observation?.error ? `Verification unavailable: ${observation.error}` : observation?.checking ? "Checking this saved request…" : outcome?.detail ?? "Checking this saved request. Its outcome is not yet verified."}</p>}
             <TreasuryOutcomeDetails outcome={outcome} prefix="history-" deployment={deployment} intent={intent} settlement={settlement} />
+            {trace && <div><a className="btn btn-sm btn-outline" href={`#/visualizer?mode=trace&chain=${trace.chain}&tx=${encodeURIComponent(trace.hash)}`}>See in trace decoder</a></div>}
             {status !== "settled" && <p>Recipient: <TreasuryChainLink deployment={deployment} chain={payment.destination} type="address" value={payment.recipient}>{payment.recipient.slice(0, 8)}…{payment.recipient.slice(-6)}</TreasuryChainLink> on {names[payment.destination]}.</p>}
             {hash && status !== "settled" && <p><TreasuryChainLink deployment={deployment} chain={source} value={hash}>Submitted transaction</TreasuryChainLink></p>}
             {status === "pending" && <p>This saved request is being verified. It will not be resubmitted automatically.</p>}

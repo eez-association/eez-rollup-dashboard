@@ -33,5 +33,19 @@ try {
   for(const width of [390,320]){await page.setViewportSize({width,height:900});assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));}
   await mkdir('.runtime/local-validation/history-ux',{recursive:true});
   await page.screenshot({path:'.runtime/local-validation/history-ux/newest-expanded.png',fullPage:true});
-  assert.deepEqual(errors,[]);console.log('PASS newest-first history, automatic expansion, preserved older toggles, new-payment filter reset and mobile widths');
+  assert.equal(await page.getByRole('link',{name:'See in trace decoder',exact:true}).count(),0,'unsent preparation has no transaction to decode');
+  for(const [id,source,submissionChain] of [[5,'l2','l1'],[6,'l1','l1'],[7,'l2','l2']]) {
+    const hash='0x'+String(id).repeat(64);
+    const submitted={id:String(id),kind:'submitted',recordedAt:entry(id).recordedAt,intent:{payment:{...entry(id).payment,source},hash,submissionChain}};
+    await page.evaluate(entries=>window.setHistoryEntries(entries),[submitted]);
+    await rows.first().getByText(`${id} USDC → EEZ-X`,{exact:true}).waitFor();
+    const link=page.getByRole('link',{name:'See in trace decoder',exact:true});await link.waitFor();
+    const target=`#/visualizer?mode=trace&chain=${submissionChain}&tx=${hash}`;
+    assert.equal(await link.getAttribute('href'),target,'trace follows the submitted transaction chain, including L2 signatures submitted on L1');
+    await link.click();assert.equal(new URL(page.url()).hash,target);
+  }
+  await page.evaluate(entries=>window.setHistoryEntries(entries),[{id:'8',kind:'submitted',recordedAt:entry(8).recordedAt,intent:{payment:entry(8).payment}}]);
+  await rows.first().getByText('8 USDC → EEZ-X',{exact:true}).waitFor();
+  assert.equal(await page.getByRole('link',{name:'See in trace decoder',exact:true}).count(),0,'an unresolved wallet response without a hash cannot open a trace');
+  assert.deepEqual(errors,[]);console.log('PASS newest-first history, automatic expansion, preserved older toggles, new-payment filter reset, mobile widths and transaction trace links');
 } finally {await browser.close();await server.close();}
