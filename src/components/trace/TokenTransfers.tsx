@@ -26,6 +26,35 @@ function partyName(model: TraceModel, chain: TraceChain, address: string): strin
 /** Height a card needs for its notes (two shown, then a "+N more" line). */
 export const tokenNotesHeight = (count: number) => count ? Math.min(2, count) * 64 + (count > 2 ? 20 : 0) : 0;
 
+export function TokenTransferSummary({ model }: { model: TraceModel }) {
+  const seen = new Set<string>();
+  const transfers = model.nodes.flatMap(node => {
+    if (node.kind === "ghost" || node.failed || node.reverted || node.inFlow === false) return [];
+    return (node.tokenTransfers ?? []).filter(transfer => {
+      const key = `${node.chain}:${node.tx}:${transfer.eventId}`;
+      if (seen.has(key)) return false;
+      seen.add(key); return true;
+    }).map(transfer => ({ chain: node.chain, tx: node.tx, transfer }));
+  });
+  if (!transfers.length) return null;
+  const party = (chain: TraceChain, address: string) => <span title={address}>
+    {partyName(model, chain, address) || short(address)}
+  </span>;
+  return <section className={styles.summary} aria-label="Token transfer summary">
+    <h2>Token transfers <small>experimental</small></h2>
+    <ul className={styles.summaryList}>{transfers.map(({ chain, tx, transfer }) => {
+      const token = transfer.symbol || partyName(model, chain, transfer.token) || short(transfer.token);
+      return <li key={`${chain}:${tx}:${transfer.eventId}`} className={styles.summaryRow} data-kind={transfer.kind}>
+        <strong title={transfer.token}>{token} · {action[transfer.kind]} <small>{chain}</small></strong>
+        <span className={styles.summaryRoute}><small>From</small> {party(chain, transfer.from)}
+          <span aria-hidden="true"> → </span><small>To</small> {party(chain, transfer.to)}</span>
+        <span className={styles.summaryAmount}><small>Amount</small> {tokenAmount(transfer)}{transfer.decimals != null ? ` ${token}` : ""}</span>
+      </li>;
+    })}</ul>
+    <p className={styles.caveat}>Receipt-confirmed transfers in this flow, not net balance changes.</p>
+  </section>;
+}
+
 export function TokenNotes({ model, chain, transfers, compact = false }: {
   model: TraceModel; chain: TraceChain; transfers: TraceTokenTransfer[]; compact?: boolean;
 }) {

@@ -16,7 +16,12 @@ const model = {
     contract: "Counter", address, from: address, fn: "increment()", signature: "increment()",
     args: [{ name: "amount", type: "uint256", value: "7" }], ret: { status: "ok", items: [{ name: "count", type: "uint256", value: "8" }] },
     value: "0", isStatic: false, failed: false, reverted: false, gasUsed: "21000", tx: hash, block: 42,
-    path: "0", input: "0x12345678", output: "0x", children: [] }],
+    path: "0", input: "0x12345678", output: "0x", children: [], tokenTransfers: [
+      { kind: "transfer", token: "0x" + "22".repeat(20), from: address, to: "0x" + "33".repeat(20),
+        amount: "1234567", symbol: "TESTUSDC", decimals: 6, eventId: "transfer-1", evidence: "receipt-and-trace" },
+      { kind: "transfer", token: "0x" + "22".repeat(20), from: address, to: "0x" + "33".repeat(20),
+        amount: "1234567", symbol: "TESTUSDC", decimals: null, eventId: "transfer-2", evidence: "receipt-and-trace" },
+    ] }],
   settlements: [], unresolved: [], stats: { frames: 1, crossings: 0, matched: 0, events: 0 },
 };
 // Independent recorded trees exercise the native view switch and chain numbering.
@@ -68,6 +73,22 @@ model.recordedView = { ...model, mode: "physical", recordedView: null,
     });
     await page.goto(url + "#/visualizer?mode=trace&chain=l2&tx=" + hash);
     await page.getByRole("heading", { name: "Counter.increment()" }).waitFor();
+    assert.equal(await page.getByRole("region", { name: "Token transfer summary" }).count(), 0);
+    const requestsBeforeTokens = creates;
+    await page.getByRole("checkbox", { name: /Token transfers/ }).check();
+    const tokenSummary = page.getByRole("region", { name: "Token transfer summary" });
+    await tokenSummary.waitFor();
+    assert.equal(await tokenSummary.locator("li").count(), 2, "distinct receipt events retain multiplicity");
+    assert.match(await tokenSummary.innerText(), /TESTUSDC · Sent/);
+    assert.match(await tokenSummary.innerText(), /From Counter/);
+    assert.match(await tokenSummary.innerText(), /To 0x3333…3333/);
+    assert.match(await tokenSummary.innerText(), /1\.234567 TESTUSDC/);
+    assert.match(await tokenSummary.innerText(), /1234567 raw units/);
+    assert.equal(await tokenSummary.getByText("Counter", { exact: true }).first().getAttribute("title"), address);
+    await page.screenshot({ path: `${directory}/token-summary.png`, fullPage: true });
+    await page.getByRole("checkbox", { name: /Token transfers/ }).uncheck();
+    assert.equal(await tokenSummary.count(), 0);
+    assert.equal(creates, requestsBeforeTokens, "the summary does not refetch the trace");
     assert.equal(await page.locator("iframe").count(), 0);
     assert.equal(await page.getByRole("button", { name: "Call map", exact: true }).getAttribute("aria-pressed"), "true");
     const call = page.getByRole("region", { name: "Call map canvas" })

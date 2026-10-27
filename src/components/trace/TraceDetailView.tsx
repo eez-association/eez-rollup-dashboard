@@ -3,7 +3,7 @@ import { useDecodedTrace } from "../../hooks/useDecodedTrace";
 import { config } from "../../config";
 import { ExplorerLink } from "../ExplorerLink";
 import { TraceDiagram, textValue } from "./TraceDiagram";
-import { TokenDetails } from "./TokenTransfers";
+import { TokenDetails, TokenTransferSummary } from "./TokenTransfers";
 import type { TraceChain, TraceGas, TraceModel, TraceNode, TraceResult, TraceSource } from "../../../trace-decoder/service/types";
 import styles from "./TraceDetailView.module.css";
 import visualizerStyles from "../visualizer/ExecutionDebugger.module.css";
@@ -159,6 +159,7 @@ export function TraceDetailView({ hash, source, ready, onBack }: {
         <div className={styles.actions}><button className="btn btn-sm btn-outline" onClick={trace.refresh}>Refresh</button>
           <button className="btn btn-sm btn-outline" onClick={() => trace.result && download(trace.result)}>Download JSON</button></div>
       </section>
+      {tokens && <TokenTransferSummary model={model} />}
       {trace.result.partial && <div className={styles.warning} role="status"><strong>Some evidence is missing</strong>
         <p>The diagram shows the available data. Missing traces or settlement data do not establish success or failure.</p>
         <ul>{model.unresolved.slice(0, 8).map((item, index) => <li key={index}>{item.message}</li>)}</ul>
