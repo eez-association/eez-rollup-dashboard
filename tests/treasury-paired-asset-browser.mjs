@@ -94,6 +94,15 @@ try {
   await mount('unconfigured'); await page.getByText('Configure the treasury token before setting up your Safes.', { exact: true }).waitFor();
   await page.evaluate(async () => (await import('/tests/fixtures/treasury-paired-asset.tsx')).mountLegacy());
   await page.getByRole('alert').getByText('This dashboard supports only paired policies and normal bridges. Configure a new paired treasury.', { exact: true }).waitFor();
+  await page.evaluate(() => localStorage.clear());
+  await mount(); await faucet('l1').waitFor();
+  await faucet('l1').click(); await faucet('l2').click();
+  await page.waitForFunction(() => [...document.querySelectorAll('button')].filter(b => b.textContent === 'Get USDC').length === 2
+    && [...document.querySelectorAll('button')].filter(b => b.textContent === 'Get USDC').every(b => b.disabled));
+  await page.evaluate(() => { window.confirmFixture = true; });
+  await page.waitForFunction(() => window.refreshes === 1
+    && [...document.querySelectorAll('button')].filter(b => b.textContent === 'Get USDC').every(b => !b.disabled));
+  assert.equal(await page.evaluate(() => window.refreshes), 1, 'two claims confirmed together need only one dashboard refresh');
   assert.deepEqual(errors, []);
   console.log('PASS configured-token setup without claims; both Safe faucet wallet requests, cancellation/reload/uncertain-response locks, real-token exclusion and 25/50/75 presets (sandbox enabled)');
 } finally { await browser?.close(); await server.close(); }

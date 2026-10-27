@@ -333,26 +333,35 @@ export class TreasuryClient {
     requireThat(count > 0 && count <= sorted.length, "Invalid L1 Safe threshold");
     return { source, owners: sorted, threshold: count, nonce: nonce as bigint, value: value as bigint, l1Block: String(BigInt(l1.number)), fingerprint: `${count}:${sorted.join(",").toLowerCase()}` };
   }
-  async wallet(provider: EthereumProvider, expectedAddress?: string, source: "l1" | "l2" = "l2") {
-    const c = this.config;
-    const accounts = await provider.request({ method: "eth_accounts" }) as string[];
+  private async walletIdentity(provider: EthereumProvider, expectedAddress?: string, source: "l1" | "l2" = "l2") {
+    const [accounts, id] = await Promise.all([
+      provider.request({ method: "eth_accounts" }) as Promise<string[]>,
+      provider.request({ method: "eth_chainId" }) as Promise<string>,
+    ]);
     requireThat(accounts[0] && (!expectedAddress || same(accounts[0], expectedAddress)), "Wallet account changed; try again with the selected owner");
-    const id = await provider.request({ method: "eth_chainId" }) as string;
-    requireThat(BigInt(id) === BigInt(c[source].chainId), "Switch your wallet to the selected Safe’s network first");
+    requireThat(BigInt(id) === BigInt(this.config[source].chainId), "Switch your wallet to the selected Safe’s network first");
+    return getAddress(accounts[0]);
+  }
+  async wallet(provider: EthereumProvider, expectedAddress?: string, source: "l1" | "l2" = "l2") {
+    const c = this.config, sender = await this.walletIdentity(provider, expectedAddress, source);
     const result = await probeComposer(provider, { l1ChainId: toHex(c.l1.chainId), l2ChainId: toHex(c.l2.chainId), registryAddress: c.registry, l2Address: c.manager });
     requireThat(result.status === "detected", `Wallet RPC: ${result.detail}`);
     const genesis = await provider.request({ method: "eth_getBlockByNumber", params: [c[source].checkpoint?.number ?? "0x0", false] }) as Block;
     requireThat(genesis && same(genesis.hash, c[source].checkpoint?.hash ?? c[source].genesis!), "Wallet is connected to a different treasury deployment");
-    return getAddress(accounts[0]);
+    return sender;
   }
   async approve(provider: EthereumProvider, tx: ReviewedSafeTransaction, snapshot: Snapshot, address: Address): Promise<Approval> {
     const source = this.transactionSource(tx);
+    // The testnet signs the immutable reviewed transaction without another
+    // complete audit. Keep the production gate and delegatecall helper checks.
     if (this.config.environment === "ethereum-mainnet") await this.validate();
     if (tx.message.operation === 1) await verifyTransferHelper(this);
-    await this.wallet(provider, address, source);
+    requireThat((snapshot.source ?? "l2") === source && snapshot.nonce === tx.message.nonce,
+      "Safe signing snapshot does not match the reviewed transaction");
+    await this.walletIdentity(provider, address, source);
     requireThat(snapshot.owners.some(owner => same(owner, address)), "This wallet is not an L1 Safe owner");
     const signature = await provider.request({ method: "eth_signTypedData_v4", params: [address, safeTypedDataJSON(tx)] }) as Hex;
-    await this.wallet(provider, address, source);
+    await this.walletIdentity(provider, address, source);
     // Threshold 1 validates this one recovered EOA approval. The real threshold
     // is enforced when packing the complete quorum and again by the L1 Safe.
     await packEOAApprovals(tx, snapshot.owners, 1, [{ owner: address, signature }]);

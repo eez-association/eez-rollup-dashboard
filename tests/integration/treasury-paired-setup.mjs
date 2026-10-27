@@ -111,7 +111,14 @@ try {
     const epoch = BigInt((await rpc('eth_getBlockByNumber',['latest',false])).timestamp)/600n;
     const tx = buildSafeTransaction({chainId:BigInt(ids[source]),safe,to:policy,nonce:await engine.io.read(source,safe,'Safe','nonce'),
       data:encodeFunctionData({abi:artifacts.PairedTreasuryPolicy.abi,functionName:'paySplit',args:[recipient,20_000_000n,destination==='l1',epoch,10_000_000n]})});
-    const approvals = await Promise.all([A,B].map(async owner => ({owner:owner.address,signature:await owner.signTypedData(tx)})));
+    const signingClient = new TreasuryClient(evidence.manifest);
+    signingClient.rpc = async () => assert.fail('Payment signing must not repeat RPC reads');
+    const snapshot = {source,owners:[A.address,B.address],threshold:2,nonce:tx.message.nonce};
+    const approvals = await Promise.all([A,B].map(owner => signingClient.approve({request:async({method,params})=>{
+      if(method==='eth_accounts')return [owner.address];
+      if(method==='eth_chainId')return toHex(ids[source]);
+      assert.equal(method,'eth_signTypedData_v4');return owner.signTypedData(JSON.parse(params[1]));
+    }},tx,snapshot,owner.address)));
     const sig = source==='l1' ? await packEOAApprovals(tx,[A.address,B.address],2,approvals) : await packOwnerApprovals(tx,a.adapter,[A.address,B.address],2,approvals);
     const receipt = await send(source,safe,encodeSafeExecution(tx,sig)); evidence.payments.push({source,destination,hash:receipt.transactionHash});
   }

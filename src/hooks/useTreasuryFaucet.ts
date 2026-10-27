@@ -55,6 +55,7 @@ export function useTreasuryFaucet(deployment: TreasuryConfig, wallet: TreasuryWa
       try { await navigator.locks.request(key, { ifAvailable: true }, async lock => {
         if (!lock || !alive) return;
         const failures: string[] = [];
+        let didConfirm = false;
         for (const chain of ['l1', 'l2'] as const) {
           if (active.current[chain]) continue;
           try {
@@ -62,9 +63,10 @@ export function useTreasuryFaucet(deployment: TreasuryConfig, wallet: TreasuryWa
             if (!alive) return;
             saveReconciledFaucet(deployment, localStorage, chain, saved, next);
             setClaims(previous => ({ ...previous, [chain]: next }));
-            if (saved.pending && !next.pending) { setError(''); await confirmed.current(); }
+            if (saved.pending && !next.pending) { setError(''); didConfirm = true; }
           } catch (e) { failures.push(`${chain === 'l1' ? 'L1' : 'EEZ-X'} faucet: ${(e as Error).message}`); }
         }
+        if (alive && didConfirm) await confirmed.current();
         if (alive) setTrackingError(failures.join(' '));
       }); } catch (e) { if (alive) setTrackingError((e as Error).message); }
     };

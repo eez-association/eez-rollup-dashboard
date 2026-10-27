@@ -282,15 +282,11 @@ function PairedTreasuryConnected({ deployment, wallet, payments = false, guardAc
     const selected = refs.current.wallet;
     const current = refs.current.review;
     if (!current || !selected.provider || !selected.address) throw new Error("Connect an owner wallet first");
-    await ensureReviewedNetwork(current, selected, "Waiting for owner signature…", assertActive);
-    const latest = await refresh();
-    if (!unchanged(current.snapshot, latest)) throw new Error("Owners or Safe nonce changed. Review the action again.");
-    if (current.payment) fundingPreview(await paymentState(client), current.payment);
     if (approvals.some(a => a.owner.toLowerCase() === selected.address!.toLowerCase())) throw new Error("This owner has already approved");
-    const approval = await client.approve(guardWalletRequests(selected.provider, assertActive), current.transaction, latest, selected.address as Address);
-    const after = await refresh();
+    await ensureReviewedNetwork(current, selected, "Waiting for owner signature…", assertActive);
+    const approval = await client.approve(guardWalletRequests(selected.provider, assertActive), current.transaction, current.snapshot, selected.address as Address);
     assertActive();
-    if (refs.current.review !== current || !unchanged(current.snapshot, after)
+    if (refs.current.review !== current
       || refs.current.wallet.provider !== selected.provider || refs.current.wallet.address?.toLowerCase() !== selected.address.toLowerCase())
       throw new Error("The wallet or reviewed action changed while signing. Try again.");
     setApprovals(existing => [...existing, approval]);

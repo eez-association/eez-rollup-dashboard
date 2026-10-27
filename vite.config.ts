@@ -77,6 +77,8 @@ export default defineConfig(() => {
       allowedHosts: true as const,
       proxy: proxies as Record<string, ProxyOptions>,
     },
-    build: { outDir: "dist" },
+    // Open preview tabs can still request lazy chunks from the previous build.
+    // Content-hashed assets are immutable; retain them across local rebuilds.
+    build: { outDir: "dist", emptyOutDir: false },
   };
 });
