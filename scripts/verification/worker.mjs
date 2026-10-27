@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { decodeEventLog, encodeFunctionData, decodeFunctionResult, parseAbi, isAddress, keccak256 } from 'viem';
 import { matchesRuntime } from '../../src/lib/treasury/runtimeCode.ts';
 import { verificationEndpoint } from './network.mjs';
+import { Etherscan } from './etherscan.mjs';
 const hash = x => createHash('sha256').update(JSON.stringify(x)).digest('hex');
 const digest = x => typeof x === 'string' && /^0x[\da-f]{64}$/i.test(x);
 const buildId = x => typeof x === 'string' && /^[\da-f]{64}$/.test(x);
@@ -44,6 +45,7 @@ export class VerificationWorker {
   constructor({ directory, builds, networks, additionalSources = [], fetcher = fetch, now = Date.now, capacity = 10000 }) {
     if (!Number.isSafeInteger(capacity) || capacity < 1 || capacity > 10000) throw new Error('Invalid verification capacity');
     Object.assign(this, { directory, builds, networks, additionalSources, fetcher, now, capacity });
+    this.etherscan = new Etherscan(fetcher);
     mkdirSync(directory, { recursive: true }); this.jobs = new Map(); this.active = false;
     for (const name of readdirSync(directory).filter(n => /^[a-f\d]{64}\.json$/.test(n))) {
       const job = JSON.parse(readFileSync(join(directory, name), 'utf8'));
@@ -148,7 +150,7 @@ export class VerificationWorker {
       // A pre-existing third-party contract can already be fully verified.
       // Unknown bytecode never authorizes submitting a compiler input or taking
       // persistent queue capacity; retain an honest status in the dashboard.
-      if (network.explorerApi) try {
+      if (network.explorerApi && !network.etherscanKey) try {
         const info = await this.json(verificationEndpoint(network.explorerApi, `v2/smart-contracts/${contract.address}`));
         if (info.is_verified === true && info.is_partially_verified === false && info.deployed_bytecode?.toLowerCase() === contract.runtime.toLowerCase()) {
           contract.status = 'verified'; contract.explorer = 'verified'; contract.name = info.name;
@@ -187,8 +189,9 @@ export class VerificationWorker {
       .then(body => { if (body.error || body.result === undefined) throw new Error('Verification RPC unavailable'); return body.result; });
   }
   async verifyContract(job, contract, network, manifest, receipt) {
+    if (!network.etherscanKey) delete contract.explorerUrl;
     let info;
-    if (network.explorerApi) {
+    if (network.explorerApi && !network.etherscanKey) {
       try {
         info = await this.json(verificationEndpoint(network.explorerApi, `v2/smart-contracts/${contract.address}`));
         if (info.is_verified === true && info.is_partially_verified === false && info.deployed_bytecode?.toLowerCase() === contract.runtime.toLowerCase()) {
@@ -203,9 +206,15 @@ export class VerificationWorker {
     if (!a) { contract.status = 'source-unavailable'; contract.error = 'No exact compiler input for this deployed bytecode'; return; }
     contract.name = a.target.split(':').at(-1); contract.input = a.input; contract.status = 'pending';
     const input = a.sourceInput ?? manifest.inputs[a.input]; if (!input) throw new Error('Missing retained compiler input');
+    if (network.etherscanKey) {
+      try {
+        await this.etherscan.publish(network.etherscanKey, job.request.chainId, contract, a, input, this.now(), () => this.save(job));
+        if (contract.status === 'verified') return;
+      } catch (e) { contract.error = e.message; contract.explorer = 'retrying'; }
+    }
     // Only address-specific, full explorer verification is success. A twin,
     // queued response, partial match or HTTP 200 is insufficient.
-    if (network.explorerApi) {
+    if (network.explorerApi && !network.etherscanKey) {
       try {
         if (info?.is_partially_verified === true) contract.explorer = 'partial';
         const last = contract.submittedAt ?? 0;

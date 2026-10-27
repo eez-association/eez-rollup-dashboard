@@ -67,7 +67,7 @@ export function TreasurySourceVerification() {
     {error && <p role="status">{error}</p>}
     {sourceOnly > 0 && <p>{sourceOnly} exact source {sourceOnly === 1 ? 'match' : 'matches'} on Sourcify; explorer publication is still pending.</p>}
     <ul>{unique.map(c => <li key={`${c.chainId}:${c.address}`}>
-      <a href={`${(c.chainId === 1 ? 'https://eth.blockscout.com' : c.chainId === Number(BigInt(L1_CHAIN.chainId)) ? config.l1Explorer : config.l2Explorer).replace(/\/$/, '')}/address/${c.address}?tab=contract`} target="_blank" rel="noreferrer">{c.name ?? 'Contract'} · {c.address.slice(0, 8)}…{c.address.slice(-4)}</a>{' · '}
+      <a href={c.explorerUrl ?? `${(c.chainId === 1 ? 'https://eth.blockscout.com' : c.chainId === Number(BigInt(L1_CHAIN.chainId)) ? config.l1Explorer : config.l2Explorer).replace(/\/$/, '')}/address/${c.address}?tab=contract`} target="_blank" rel="noreferrer">{c.name ?? 'Contract'} · {c.address.slice(0, 8)}…{c.address.slice(-4)}</a>{' · '}
       {c.status === 'verified' ? 'Verified on explorer' : c.status === 'sourcify-verified' ? <><a href={`https://repo.sourcify.dev/${c.chainId}/${c.address}`} target="_blank" rel="noreferrer">Exact source verified</a> · {c.explorer === 'partial' ? 'explorer reports partial verification' : 'explorer publication pending'}</> : c.status === 'source-unavailable' ? 'Source build needs attention' : c.explorer === 'partial' ? 'Explorer reports partial verification; checking exact sources' : 'Publishing automatically'}
       {c.error && c.status !== 'verified' && <span> · {c.error}</span>}
     </li>)}</ul>

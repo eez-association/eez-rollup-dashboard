@@ -3,7 +3,7 @@ import type { TreasuryConfig } from './client.ts';
 export type SourceRequest = { build: string; chainId: number } & (
   { transactionHash: string; address?: never } | { address: string; transactionHash?: never }
 );
-export type SourceJob = { id: string; status: string; error?: string; contracts: { address: string; name?: string; status: string; error?: string; explorer?: string; sourcify?: string }[] };
+export type SourceJob = { id: string; status: string; error?: string; contracts: { address: string; name?: string; status: string; error?: string; explorer?: string; explorerUrl?: string; sourcify?: string }[] };
 const contractAddress = (value: unknown): value is string => typeof value === 'string' && /^0x[a-f\d]{40}$/i.test(value) && BigInt(value) > 0n;
 const valid = (r: SourceRequest) => r && /^[a-f\d]{64}$/.test(r.build) && Number.isSafeInteger(r.chainId)
   && r.chainId > 0 && (r.address !== undefined ? contractAddress(r.address) && r.transactionHash === undefined : /^0x[a-f\d]{64}$/i.test(r.transactionHash));

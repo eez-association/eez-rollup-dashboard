@@ -113,7 +113,12 @@ inputs live in `verification/dependencies/` and are also recompiled exactly.
 Solidity compiler inside the frontend image.
 
 Docker Compose starts `verification` alongside `ui`; it uses the UI's existing
-runtime RPC/explorer settings. There are no new `.env` variables or signing keys.
+runtime RPC/explorer settings. No signing keys are needed. Optionally set
+`ETHERSCAN_API_KEY` in the server's local `.env` to publish Ethereum mainnet
+sources through Etherscan V2. Compose passes it only to `verification`; it is
+never included in browser configuration or build arguments. Restart that service
+after changing the key. For a standalone worker, export it in that process's
+environment (the Node worker does not load `.env` itself).
 Its `/data` volume (`treasury-verification`) preserves jobs across restarts. It
 shares the UI network namespace, listens only on loopback port 18081, and is
 proxied at `/treasury-verification/`. When recreating the UI, recreate the worker
@@ -131,8 +136,16 @@ disclosure reports address-specific progress and explorer links.
 Jobs retry provider errors with bounded backoff. A queued submission, verified
 twin or partial match never counts as full verification. Exact Sourcify runtime
 verification on Chiado/Ethereum is recorded separately from explorer publication;
-creation matches are also separate. Ethereum source links point to Blockscout,
-where the worker publishes, even when ordinary transaction links use Etherscan.
+creation matches are also separate. With `ETHERSCAN_API_KEY`, Ethereum source
+links point to Etherscan; without it they point to public Blockscout. EEZ and
+Chiado continue using their configured Blockscout explorers. Etherscan requests
+use the official fixed V2 endpoint, are paced, and persist submission IDs for
+status polling after restarts. Queued responses and similar-contract matches
+never count as full verification. API failures retain retryable jobs and expose
+only generic errors, never credential-bearing URLs. Constructor arguments are
+left to Etherscan detection; deployments it cannot resolve remain pending rather
+than being reported verified. Source publication and status polling follow the
+[Etherscan verification API](https://docs.etherscan.io/api-reference/endpoint/verifysourcecode).
 Completed jobs are periodically rechecked
 against canonical chain state. Jobs for another configured network remain stored
 but cannot run through a mismatching RPC. Unknown build IDs and unconfirmed

@@ -36,7 +36,7 @@ await context.route('**/*', async route => {
   delivered.push(index);
   if (unavailable && index === 0) return route.fulfill({ status: 400, json: { error: 'Wait for a successful canonical receipt' } });
   const status = sourceMissing ? 'source-unavailable' : undiscovered && index === 2 ? 'pending' : sourceOnly ? 'sourcify-verified' : complete || index < 2 ? 'verified' : 'pending';
-  return route.fulfill({ json: { id: String(index + 1).repeat(64), status, contracts: undiscovered && index === 2 ? [] : [{ address: `0x${String(index + 1).repeat(40)}`, name: `Contract ${index + 1}`, status }] } });
+  return route.fulfill({ json: { id: String(index + 1).repeat(64), status, contracts: undiscovered && index === 2 ? [] : [{ address: `0x${String(index + 1).repeat(40)}`, name: `Contract ${index + 1}`, status, ...(index === 1 ? { explorerUrl: `https://etherscan.io/address/0x${'2'.repeat(40)}#code` } : {}) }] } });
 });
 try {
   await page.clock.install();
@@ -51,6 +51,7 @@ try {
   assert.deepEqual(delivered, [0, 1, 2], 'an unavailable receipt must not block later verification requests');
   await details.locator('summary').click();
   await details.getByRole('link', { name: /Contract 2/ }).waitFor();
+  assert.equal(await details.getByRole('link', { name: /Contract 2/ }).getAttribute('href'), `https://etherscan.io/address/0x${'2'.repeat(40)}#code`);
   await details.getByRole('link', { name: /Contract 3/ }).waitFor();
   assert.equal(await page.evaluate(key => localStorage.getItem(key), key), outbox);
   passed.push('one rejected admission preserves its intent while later contracts are delivered and displayed');

@@ -3,7 +3,8 @@ import { resolve } from 'node:path';
 import { VerificationWorker, loadBuilds, loadAdditionalSources, publicJob } from './worker.mjs';
 import { blockscoutApiUrl } from './network.mjs';
 // The existing dashboard config is the sole network authority. No user-supplied
-// URLs, compiler inputs, private keys or new .env settings are accepted.
+// URLs, compiler inputs or private keys are accepted. Provider credentials are
+// server-only environment settings and never come from browser requests.
 const dashboard = process.argv[2] ?? 'http://127.0.0.1:8080';
 const directory = resolve(process.argv[3] ?? '/data');
 let worker, starting = false, admitting = 0;
@@ -17,8 +18,10 @@ async function start() {
       const rpc = new URL(c[`${chain}RpcUrl`], dashboard).href;
       const response = await fetch(rpc, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_chainId', params: [] }), signal: AbortSignal.timeout(10_000) });
       const r = await response.json(); if (r.error || !r.result) throw new Error('Cannot identify verification network');
-      // Etherscan API keys are not required: Ethereum uses public Blockscout.
+      // Opt in on Ethereum only; the EEZ chain keeps its configured Blockscout.
       networks[Number(BigInt(r.result))] = { rpc, peerRollupId: chain === 'l2' ? 0 : Number.isSafeInteger(Number(c.rollupId)) && Number(c.rollupId) > 0 ? Number(c.rollupId) : undefined, explorerApi: BigInt(r.result) === 1n ? 'https://eth.blockscout.com/api' : blockscoutApiUrl(c[`${chain}ExplorerApiUrl`], c[`${chain}ExplorerUrl`], dashboard) };
+      if (BigInt(r.result) === 1n && process.env.ETHERSCAN_API_KEY?.trim())
+        networks[1].etherscanKey = process.env.ETHERSCAN_API_KEY.trim();
     }
     worker = new VerificationWorker({ directory, builds: loadBuilds('verification/builds'), additionalSources: loadAdditionalSources('verification/supplemental'), networks });
     console.log('Treasury source verification ready');
