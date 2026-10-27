@@ -94,18 +94,19 @@ export class MainnetSetup {
   readonly network: SetupNetwork;
   constructor(target: MainnetTarget, artifacts: DeploymentArtifacts, network: SetupNetwork = networkDefault) { this.network = network; this.target = target; this.artifacts = artifacts; this.io = new DeploymentIO(target, artifacts); }
   async validate() {
-    for (const chain of ["l1", "l2"] as const) {
+    await Promise.all((["l1", "l2"] as const).map(async chain => {
       const expected = this.network.chains[chain], protocol = this.network.protocol.find(x => x.chain === chain)!;
       const [id, block, slot] = await Promise.all([this.io.rpc<Hex>(chain, "eth_chainId"),
         this.io.rpc<{ hash: Hex }>(chain, "eth_getBlockByNumber", [expected.number, false]),
         this.io.rpc<Hex>(chain, "eth_getStorageAt", [protocol.proxy, EIP1967_IMPLEMENTATION_SLOT, "latest"])]);
       check(BigInt(id) === BigInt(expected.chainId) && block?.hash === expected.hash && same(`0x${slot.slice(-40)}`, protocol.implementation), "The Ethereum treasury network binding changed");
-      for (const [address, hash] of [[protocol.proxy, protocol.proxyHash], [protocol.implementation, protocol.implementationHash]])
+      await Promise.all([[protocol.proxy, protocol.proxyHash], [protocol.implementation, protocol.implementationHash]].map(async ([address, hash]) => {
         check(keccak256(await this.io.rpc<Hex>(chain, "eth_getCode", [address, "latest"])) === hash, "The protocol implementation changed; review it before setup");
+      }));
       const discovery = await probeComposer({ request: ({ method, params }) => this.io.rpc(chain, method, (params ?? []) as unknown[], true) },
         { l1ChainId: toHex(this.network.chains.l1.chainId), l2ChainId: toHex(this.network.chains.l2.chainId), registryAddress: this.network.registry, l2Address: this.network.manager });
       check(discovery.status === "detected", discovery.detail);
-    }
+    }));
     await readInBatches(Object.values(this.network.contracts), async binding => {
       check(keccak256(await this.io.rpc<Hex>(binding.chain as Chain, "eth_getCode", [binding.address, "latest"])) === binding.hash, "The reviewed USDC or bridge code changed");
     });
@@ -114,13 +115,13 @@ export class MainnetSetup {
       const { decodeFunctionResult } = await import("viem");
       return decodeFunctionResult({ abi, functionName: name, data: await this.io.rpc<Hex>(chain, "eth_call", [{ to, data: encodeFunctionData({ abi, functionName: name, args }) }, "latest"]) });
     };
-    for (const chain of ["l1", "l2"] as const) {
+    await Promise.all((["l1", "l2"] as const).map(async chain => {
       const bridge = this.network.contracts[chain === "l1" ? "bridgeL1" : "bridgeL2"];
       const [manager, rollup, counterpart, implementation] = await Promise.all([read(chain, bridge.address, "manager"), read(chain, bridge.address, "rollupId"), read(chain, bridge.address, "canonicalBridgeAddress"),
         this.io.rpc<Hex>(chain, "eth_getStorageAt", [bridge.address, EIP1967_IMPLEMENTATION_SLOT, "latest"])]);
       const remote = same(counterpart as string, zeroAddress) ? bridge.address : counterpart as string;
       check(same(manager as string, bridge.bindings.manager) && rollup === BigInt(bridge.bindings.rollupId) && same(remote, bridge.bindings.counterpart) && BigInt(implementation) === 0n, "The shared bridge connection changed");
-    }
+    }));
     const [wrapped, origin, authority, paused] = await Promise.all([read("l2", this.network.contracts.bridgeL2.address, "getWrappedToken", [this.network.contracts.usdcProxy.address, 0n]),
       read("l2", this.network.contracts.bridgeL2.address, "wrappedTokenInfo", [this.network.contracts.wrappedUSDC.address]), read("l2", this.network.contracts.wrappedUSDC.address, "BRIDGE"), this.network.testnet ? false : read("l1", this.network.contracts.usdcProxy.address, "paused")]);
     check(same(wrapped as string, this.network.contracts.wrappedUSDC.address) && same((origin as [string, bigint])[0], this.network.contracts.usdcProxy.address)
@@ -131,28 +132,43 @@ export class MainnetSetup {
     } else {
       const token = getAddress(this.network.contracts.usdcProxy.address);
       check(this.io.runtimeMatches(await this.io.rpc<Hex>("l1", "eth_getCode", [token, "latest"]), "TestUSDC"), "Use the current TestUSDC contract");
-      check(same(await this.io.read<Address>("l1", token, "TestUSDC", "bridgeL1"), this.network.contracts.bridgeL1.address)
-        && await this.io.read<bigint>("l1", token, "TestUSDC", "destinationRollup") === BigInt(this.network.rollupId), "TestUSDC bridge binding changed");
+      const [bridge, rollup] = await Promise.all([this.io.read<Address>("l1", token, "TestUSDC", "bridgeL1"),
+        this.io.read<bigint>("l1", token, "TestUSDC", "destinationRollup")]);
+      check(same(bridge, this.network.contracts.bridgeL1.address) && rollup === BigInt(this.network.rollupId), "TestUSDC bridge binding changed");
     }
   }
-  async configure(deployer: Address, safeL1: Address, safeL2?: Address): Promise<MainnetSetupState> {
+  async configure(deployer: Address, safeL1: Address, safeL2?: Address, progress: (message: string) => void = () => {}): Promise<MainnetSetupState> {
     check(pairedSetupAvailable(this.artifacts), "A current paired-policy release is required");
     check(isAddress(deployer) && BigInt(deployer) > 1n && isAddress(safeL1), "Enter an existing Ethereum Safe address and connect a wallet");
-    await this.validate();
-    const l1 = await inspectSafe(this.io, "l1", safeL1);
+    progress("Checking network bindings and Safe ownership…");
+    const [, l1, l2] = await Promise.all([this.validate(), inspectSafe(this.io, "l1", safeL1),
+      safeL2 ? inspectSafe(this.io, "l2", safeL2) : undefined]);
     const addresses: Record<string, Address> = { safeL1: l1.address, singletonL1: l1.singleton };
     const code: TreasuryConfig["code"] = [{ chain: "l1", address: l1.address, hash: l1.proxyHash }, { chain: "l1", address: l1.singleton, hash: l1.singletonHash }];
-    if (safeL2) {
-      const l2 = await inspectSafe(this.io, "l2", safeL2);
+    if (l2) {
       check(l2.adapter && same(l2.adapter.safeL1, safeL1) && same(l2.adapter.manager, this.network.manager), "Choose a mirror already connected to this Ethereum Safe");
       Object.assign(addresses, { safeL2: l2.address, singletonL2: l2.singleton, adapter: l2.adapter.address });
-      for (const address of [l2.address, l2.singleton, l2.adapter.address]) code.push({ chain: "l2", address, hash: keccak256(await this.io.rpc<Hex>("l2", "eth_getCode", [address, "latest"])) });
+      code.push(...await Promise.all([l2.address, l2.singleton, l2.adapter.address].map(async address =>
+        ({ chain: "l2" as const, address, hash: keccak256(await this.io.rpc<Hex>("l2", "eth_getCode", [address, "latest"])) }))));
     }
-    for (const chain of ["l1", "l2"] as const) for (const item of official.deployments) {
-      const key = `${item.kind}${chain === "l1" ? "L1" : "L2"}`;
-      if (addresses[key] || chain === "l1" && item.kind !== "multiSend") continue;
-      const bytes = await this.io.rpc<Hex>(chain, "eth_getCode", [item.address, "latest"]);
-      if (keccak256(bytes) === item.codeHash) { addresses[key] = getAddress(item.address); code.push({ chain, address: getAddress(item.address), hash: item.codeHash as Hex }); }
+    progress("Finding verified Safe contracts to reuse…");
+    // Independent contract roles can be inspected together. Within each role,
+    // preserve the reviewed candidate order and stop at the first exact match.
+    const roles = (["l1", "l2"] as const).flatMap(chain =>
+      ["singleton", "factory", "multiSend"].map(kind => ({ chain, kind, key: `${kind}${chain === "l1" ? "L1" : "L2"}` })))
+      .filter(({ chain, kind, key }) => !addresses[key] && (chain !== "l1" || kind === "multiSend"));
+    const [infrastructure, officialBindings] = await Promise.all([
+      discoverSafeInfrastructure(this.io, this.network.chains.l2.chainId, this.network.chains.l2.number as Hex,
+        { manager: getAddress(this.network.manager), safeL1: addresses.safeL1! }),
+      Promise.all(roles.map(async ({ chain, kind, key }) => {
+        for (const item of official.deployments.filter(item => item.kind === kind)) {
+          const bytes = await this.io.rpc<Hex>(chain, "eth_getCode", [item.address, "latest"]);
+          if (keccak256(bytes) === item.codeHash) return { key, chain, address: getAddress(item.address), hash: item.codeHash as Hex };
+        }
+      })),
+    ]);
+    for (const binding of officialBindings) if (binding) {
+      const { key, ...entry } = binding; addresses[key] = entry.address; code.push(entry);
     }
     // Ethereum reuses its pinned shared module. Testnet deploys the current module
     // or discovers current Safe infrastructure on its own network.
@@ -169,7 +185,6 @@ export class MainnetSetup {
       const again = await this.io.rpc<{ hash: Hex }>("l1", "eth_getBlockByNumber", [block.number, false]);
       check(again?.hash === block.hash, "Shared Ethereum contracts changed during inspection; try again");
     }
-    const infrastructure = await discoverSafeInfrastructure(this.io, this.network.chains.l2.chainId, this.network.chains.l2.number as Hex, { manager: getAddress(this.network.manager), safeL1: addresses.safeL1! });
     for (const [key, binding] of Object.entries(infrastructure)) if (!addresses[key]) {
       addresses[key] = binding.address; code.push({ chain: "l2", ...binding });
     }
@@ -177,17 +192,23 @@ export class MainnetSetup {
   }
   async unchanged(s: MainnetSetupState) {
     check(s.version === 3 && s.build === this.artifacts.build && pairedSetupAvailable(this.artifacts), "Legacy treasury setup is retired; start a new paired setup");
-    await this.validate();
-    await readInBatches(s.code, async b => { check(keccak256(await this.io.rpc<Hex>(b.chain, "eth_getCode", [b.address, "latest"])) === b.hash, "A selected treasury contract changed"); });
-    await readInBatches(s.completed, async r => { check((await this.io.rpc<{ hash: Hex }>(r.chain, "eth_getBlockByNumber", [r.number, false]))?.hash === r.blockHash, "A setup confirmation was reorganized; preserve this setup for reconciliation"); });
-    const safe = await inspectSafe(this.io, "l1", s.addresses.safeL1!);
+    // These are independent reads. All must pass before the snapshot is used;
+    // canonical block checks still run inside each Safe inspection.
+    const [, , , safe] = await Promise.all([
+      this.validate(),
+      readInBatches(s.code, async b => { check(keccak256(await this.io.rpc<Hex>(b.chain, "eth_getCode", [b.address, "latest"])) === b.hash, "A selected treasury contract changed"); }),
+      readInBatches(s.completed, async r => { check((await this.io.rpc<{ hash: Hex }>(r.chain, "eth_getBlockByNumber", [r.number, false]))?.hash === r.blockHash, "A setup confirmation was reorganized; preserve this setup for reconciliation"); }),
+      inspectSafe(this.io, "l1", s.addresses.safeL1!),
+    ]);
     check(same(safe.singleton, s.addresses.singletonL1!), "The Ethereum Safe implementation changed");
+    return safe;
   }
-  async wallet(provider: EthereumProvider, chain: Chain, expected?: Address) {
+  async wallet(provider: EthereumProvider, chain: Chain, expected?: Address, verifyComposer = true) {
     const [accounts, id] = await Promise.all([provider.request({ method: "eth_accounts" }), provider.request({ method: "eth_chainId" })]);
     const sender = (accounts as Address[])[0];
     check(sender && isAddress(sender) && (!expected || same(sender, expected)), "Connect the wallet selected for this setup");
     check(BigInt(id as string) === BigInt(this.network.chains[chain].chainId), `Switch to ${chain === "l1" ? "Ethereum" : "EEZ-X"}`);
+    if (!verifyComposer) return sender;
     const discovery = await probeComposer(provider, { l1ChainId: toHex(this.network.chains.l1.chainId), l2ChainId: toHex(this.network.chains.l2.chainId), registryAddress: this.network.registry, l2Address: this.network.manager });
     check(discovery.status === "detected", discovery.detail);
     return sender;
@@ -208,13 +229,17 @@ export class MainnetSetup {
     return buildSafeTransaction({ chainId: BigInt(this.network.chains[chain].chainId), safe, to: a[`multiSend${suffix}`]!, operation: 1, nonce: BigInt(review.nonce),
       data: encodeFunctionData({ abi: this.io.abi("MultiSendCallOnly"), functionName: "multiSend", args: [packSafeCalls(calls)] }) });
   }
-  async review(s: MainnetSetupState): Promise<Review> {
+  async review(s: MainnetSetupState, onProgress: (message: string) => void = () => {}): Promise<Review> {
     check(!s.pending && s.completed.length >= 4 && s.completed.length < 6, "This step does not need owner approvals");
-    await this.unchanged(s);
+    check(s.version === 3 && s.build === this.artifacts.build && pairedSetupAvailable(this.artifacts), "Restore this paired setup’s original contract release");
+    onProgress("Reading the Safe owners, threshold and nonce…");
     const chain = s.completed.length === 4 ? "l1" : "l2";
-    const owners = await inspectSafe(this.io, "l1", s.addresses.safeL1!);
-    const local = chain === "l1" ? owners : await inspectSafe(this.io, "l2", s.addresses.safeL2!);
+    const [owners, mirror] = await Promise.all([inspectSafe(this.io, "l1", s.addresses.safeL1!),
+      chain === "l2" ? inspectSafe(this.io, "l2", s.addresses.safeL2!) : undefined]);
+    const local = mirror ?? owners;
+    check(same(owners.singleton, s.addresses.singletonL1!), "The Ethereum Safe implementation changed");
     if (chain === "l2") check(local.adapter && same(local.adapter.address, s.addresses.adapter!) && same(local.adapter.safeL1, owners.address), "The mirror’s owner connection changed");
+    onProgress("Preparing the exact Safe approval…");
     const r: Review = { step: s.completed.length, chain, nonce: local.nonce, owners: owners.owners, threshold: owners.threshold,
       fingerprint: ownerFingerprint(owners.owners, owners.threshold), hash: zeroHash, approvals: [],
       moduleEnabled: await this.io.read<boolean>(chain, local.address, "Safe", "isModuleEnabled", [s.addresses[chain === "l1" ? "moduleL1" : "moduleL2"]!], local.block) };
@@ -225,25 +250,37 @@ export class MainnetSetup {
     check(s.review && s.review.hash === fresh.hash && s.review.fingerprint === fresh.fingerprint, "Owners, threshold, Safe nonce or module configuration changed. Review this step again");
     return s.review;
   }
-  async approve(s: MainnetSetupState, provider: EthereumProvider) {
-    const r = await this.currentReview(s), sender = await this.wallet(provider, r.chain), tx = this.tx(s, r);
+  private savedReview(s: MainnetSetupState) {
+    const r = s.review;
+    check(!s.pending && s.completed.length >= 4 && s.completed.length < 6 && r
+      && r.step === s.completed.length && r.chain === (s.completed.length === 4 ? "l1" : "l2")
+      && r.fingerprint === ownerFingerprint(r.owners, r.threshold)
+      && r.hash === safeTransactionHash(this.tx(s, r)), "Review this Safe step before signing or submitting");
+    return r;
+  }
+  async approve(s: MainnetSetupState, provider: EthereumProvider, onProgress: (message: string) => void = () => {}) {
+    const r = this.savedReview(s);
+    onProgress("Checking your wallet account and network…");
+    const sender = await this.wallet(provider, r.chain, undefined, false), tx = this.tx(s, r);
     check(r.owners.some(a => same(a, sender)) && !r.approvals.some(a => same(a.owner, sender)), "Connect a current owner who has not approved this step");
+    onProgress("Waiting for the owner signature in your wallet…");
     const signature = await provider.request({ method: "eth_signTypedData_v4", params: [sender, safeTypedDataJSON(tx)] }) as Hex;
-    await this.wallet(provider, r.chain, sender); await this.currentReview(s);
+    onProgress("Signature received. Checking the signer and saving your approval…");
+    await this.wallet(provider, r.chain, sender, false);
     const approval = { owner: sender, signature }; await packEOAApprovals(tx, r.owners, 1, [approval]); return approval;
   }
   async prepare(s: MainnetSetupState, provider: EthereumProvider, onProgress: (message: string) => void = () => {}) {
     check(!s.build || s.build === this.artifacts.build, "Restore this setup’s original source build");
     check(!s.pending && s.completed.length < 6, "Finish the pending setup transaction first");
-    onProgress("Checking the network, deployed contracts and completed steps…"); await this.unchanged(s);
     const step = s.completed.length, chain = mainnetSetupSteps[step]!.chain;
+    check(s.version === 3 && s.build === this.artifacts.build && pairedSetupAvailable(this.artifacts), "Restore this paired setup’s original contract release");
     onProgress("Checking your wallet connection…");
     const sender = await this.wallet(provider, chain, step < 4 ? s.deployer : undefined);
     const nonce = await this.io.rpc<Hex>(chain, "eth_getTransactionCount", [sender, "pending"]);
     let pending: Pending = { id: String(step), chain, sender, nonce, data: "0x", outputs: [] };
     if (step >= 4) {
-      onProgress("Rechecking Safe owners, nonce and collected approvals…");
-      const r = await this.currentReview(s), tx = this.tx(s, r);
+      onProgress("Checking collected signatures…");
+      const r = this.savedReview(s), tx = this.tx(s, r);
       const signature = r.chain === "l1" ? await packEOAApprovals(tx, r.owners, r.threshold, r.approvals)
         : await packOwnerApprovals(tx, s.addresses.adapter!, r.owners, r.threshold, r.approvals);
       pending = { ...pending, safe: tx.domain.verifyingContract, safeChain: r.chain, safeHash: r.hash,
@@ -251,15 +288,22 @@ export class MainnetSetup {
     } else pending = { ...pending, ...await this.batch(s, nonce) };
     let request: Record<string, string> = { from: sender, chainId: toHex(this.network.chains[chain].chainId), nonce, data: pending.data, value: "0x0", ...(pending.to ? { to: pending.to } : {}) };
     let expiresAt: string | undefined;
-    if (step === 5) {
-      onProgress("Quoting cross-chain execution fees with Composer…");
-      pending.l2StartBlock = await this.io.rpc<Hex>("l2", "eth_blockNumber");
-      const quote = await quoteCrossChainFees({ tx: request, from: sender, chainId: request.chainId!, wallet: provider,
-        rpc: (method, params) => this.io.rpc(chain, method, params, true), maxTotalFee: BigInt(this.target.fees.l1) });
-      request = quote.transaction; expiresAt = quote.expiresAt;
-    } else { onProgress("Estimating transaction gas…"); request.gas = toHex(BigInt(await this.io.rpc<Hex>(chain, "eth_estimateGas", [request], true)) * 120n / 100n); }
+    try {
+      if (step === 5) {
+        onProgress("Quoting cross-chain execution fees with Composer…");
+        pending.l2StartBlock = await this.io.rpc<Hex>("l2", "eth_blockNumber");
+        const quote = await quoteCrossChainFees({ tx: request, from: sender, chainId: request.chainId!, wallet: provider,
+          rpc: (method, params) => this.io.rpc(chain, method, params, true), maxTotalFee: BigInt(this.target.fees.l1) });
+        request = quote.transaction; expiresAt = quote.expiresAt;
+      } else { onProgress("Estimating transaction gas…"); request.gas = toHex(BigInt(await this.io.rpc<Hex>(chain, "eth_estimateGas", [request], true)) * 120n / 100n); }
+    } catch (simulationError) {
+      onProgress("Simulation failed. Checking network bindings, Safe state and completed steps…");
+      try { await this.unchanged(s); if (step >= 4) await this.currentReview(s); }
+      catch (diagnosticError) { throw new Error(`Transaction simulation failed: ${(simulationError as Error).message}. ${(diagnosticError as Error).message}`); }
+      throw simulationError;
+    }
     onProgress("Rechecking your wallet before opening confirmation…");
-    await this.wallet(provider, chain, sender); return { pending, request, expiresAt };
+    await this.wallet(provider, chain, sender, false); return { pending, request, expiresAt };
   }
   private async batch(s: MainnetSetupState, nonce: Hex) {
     check(s.version === 3 && pairedSetupAvailable(this.artifacts), "Restore this paired setup’s original contract release");

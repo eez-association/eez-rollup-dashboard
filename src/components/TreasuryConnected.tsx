@@ -138,14 +138,15 @@ function PairedTreasuryConnected({ deployment, wallet, payments = false, guardAc
     setHealthy(false);
     setOwnerRevision(revision => revision + 1);
   }, []);
-  const refresh = useCallback(async () => {
+  const backgroundValidationAt = useRef(0);
+  const refresh = useCallback(async (includePayments = true) => {
     let ownersRead = false;
     try {
-      await client.validate();
+      await client.validate(); backgroundValidationAt.current = Date.now();
       const next = await client.snapshot(payments ? source : "l2");
       acceptSnapshot(next);
       ownersRead = true;
-      if (payments) acceptPayments(await paymentState(client));
+      if (payments && includePayments) acceptPayments(await paymentState(client));
       setHealthy(true);
       return next;
     } catch (failure) {
@@ -157,11 +158,15 @@ function PairedTreasuryConnected({ deployment, wallet, payments = false, guardAc
   const faucet = useTreasuryFaucet(deployment, wallet, refresh, guardAction);
   useEffect(() => {
     let active = true;
-    let timer: ReturnType<typeof setTimeout>;
+    let timer: ReturnType<typeof setTimeout>, failures = 0;
     const poll = async () => {
+      // Foreground review/signing owns its fresh reads; avoid a competing sweep.
+      if (refs.current.busy) { if (active) timer = setTimeout(poll, 5000); return; }
       let ownersRead = false;
       try {
-        await client.validate();
+        if (Date.now() - backgroundValidationAt.current >= 30_000) {
+          await client.validate(); backgroundValidationAt.current = Date.now();
+        }
         const next = await client.snapshot(payments ? source : "l2");
         if (!active) return;
         acceptSnapshot(next);
@@ -171,8 +176,8 @@ function PairedTreasuryConnected({ deployment, wallet, payments = false, guardAc
         const result = current ? await client.outcome(current) : null;
         if (!active) return;
         if (amounts) acceptPayments(amounts);
-        setHealthy(true);
-        setError(previous => (previous.startsWith("Connection check failed:") || (terminal(result) && previous.startsWith("Submission response uncertain:"))) ? "" : previous);
+        setHealthy(true); failures = 0;
+        setError(previous => (previous.startsWith("Connection check failed:") || previous.startsWith("Network busy:") || (terminal(result) && previous.startsWith("Submission response uncertain:"))) ? "" : previous);
         if (current === refs.current.intent) {
           if (current && result) {
             const tracked = result.hash && current.hash !== result.hash ? { ...current, hash: result.hash } : current;
@@ -194,6 +199,7 @@ function PairedTreasuryConnected({ deployment, wallet, payments = false, guardAc
         }
       } catch (failure) {
         if (!active) return;
+        failures++; backgroundValidationAt.current = 0;
         if (!ownersRead) setOwnerRead("unavailable");
         setHealthy(false);
         if (refs.current.intent) {
@@ -204,8 +210,10 @@ function PairedTreasuryConnected({ deployment, wallet, payments = false, guardAc
           const unresolved: Outcome = { kind: "unknown", detail: "Payment verification is temporarily unavailable. Retrying automatically." };
           setOutcome(unresolved); observe(refs.current.intent, unresolved);
         }
-        setError(`Connection check failed: ${message(failure)}. Submitted work remains unresolved until verified.`);
-      } finally { if (active) timer = setTimeout(poll, 2500); }
+        setError(/429|rate limit/i.test(message(failure))
+          ? "Network busy: the RPC is limiting requests. Retrying after a pause; your saved payment will not be sent again."
+          : `Connection check failed: ${message(failure)}. Submitted work remains unresolved until verified.`);
+      } finally { if (active) timer = setTimeout(poll, failures ? Math.min(30_000, 2500 * 2 ** failures) : 5000); }
     };
     void poll();
     return () => { active = false; clearTimeout(timer); };
@@ -225,10 +233,10 @@ function PairedTreasuryConnected({ deployment, wallet, payments = false, guardAc
     if (refs.current.intent && !terminal(refs.current.outcome)) return;
     if (refs.current.intent) { saveIntent(null); setOutcome(null); setFee(null); }
     sourceChosen.current = true;
-    const latest = await refresh();
+    const latest = await refresh(false);
     let next: Review;
     if (payments) {
-      const amounts = await paymentState(client);
+      const amounts = await paymentState(client); acceptPayments(amounts);
       const identity = { source, recipient: recipient as Address, destination, epoch: String(amounts.epoch) };
       if (kind === "transfer") await verifyTransferHelper(client);
       const payment = checkedPayment(kind === "transfer"
@@ -457,7 +465,9 @@ function PairedTreasuryConnected({ deployment, wallet, payments = false, guardAc
     </div>
     {notice && <p className={styles.notice}>{notice}</p>}
     {error && <p className={styles.error} role="alert">{error}</p>}
-    {(busy || intent || outcome) && <section className={styles.card} aria-label="Safe transaction status"><h3 aria-live="polite">{outcome?.rollback ? "Rollback verified" : outcome?.kind === "settled" ? `Settled on ${l1Name}` : "Transaction status"}</h3>
+    {payments && busy && <p className={styles.notice} role="status">{busy}</p>}
+    {payments && fee && !terminal(outcome) && <p className={styles.hint}>Quoted network fee ceiling: {formatUnits(fee.maximum, 18)} {deployment.l1.chainId === 10200 ? "xDAI" : "ETH"}.</p>}
+    {!payments && (busy || intent || outcome) && <section className={styles.card} aria-label="Safe transaction status"><h3 aria-live="polite">{outcome?.rollback ? "Rollback verified" : outcome?.kind === "settled" ? `Settled on ${l1Name}` : "Transaction status"}</h3>
       {(!terminal(outcome) || (outcome?.kind === "rejected" && !outcome.rollback)) && <p role="status" aria-live="polite">{displayStatus}</p>}
       {fee && !terminal(outcome) && <p>Quoted network fee ceiling: {formatUnits(fee.maximum, 18)} {deployment.l1.chainId === 10200 ? "xDAI" : "ETH"}. The wallet submits these fees separately from the Safe’s USDC payment.</p>}
       {intent?.payment && outcome?.kind !== "settled" && <p>{formatUSDC(BigInt(intent.payment.amount))} USDC to <code>{intent.payment.recipient}</code> on {intent.payment.destination === "l1" ? l1Name : "EEZ-X"}</p>}

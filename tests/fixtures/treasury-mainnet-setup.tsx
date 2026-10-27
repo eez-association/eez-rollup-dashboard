@@ -32,7 +32,11 @@ export async function mountUX(fixture: any) {
     const tx = fixture.state.completed.find((x: any) => x.number === params[0]);
     return tx ? { number:tx.number,hash:tx.blockHash,timestamp:'0x65000000' } : {number:'0x0',hash:fixture.state.salt,timestamp:'0x65000000'};
   };
-  MainnetSetup.prototype.configure = async (_deployer, safeL1) => ({...fixture.state,completed:[],addresses:{...fixture.state.addresses,safeL1}});
+  MainnetSetup.prototype.configure = async (_deployer, safeL1, _safeL2, progress) => {
+    progress?.('Checking network bindings and Safe ownership…');
+    if (fixture.holdConfigure) await new Promise(resolve => { (control as any).releaseConfigure = resolve; });
+    return {...fixture.state,completed:[],addresses:{...fixture.state.addresses,safeL1}};
+  };
   MainnetSetup.prototype.review = async state => ({step:state.completed.length,chain:state.completed.length===5?'l2':'l1',nonce:'7',owners:fixture.owners,threshold:2,fingerprint:'fixture',hash:fixture.state.salt,approvals:[]});
   MainnetSetup.prototype.approve = async (_state, provider) => ({owner:(await provider.request({method:'eth_accounts'}))[0],signature:'0x1234'});
   MainnetSetup.prototype.prepare = async (state, _provider, progress) => {

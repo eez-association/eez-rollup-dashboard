@@ -53,7 +53,17 @@ async function fixture(browser, options = {}) {
       async request(request) {
         window.walletCalls.push({ name, ...request });
         const { method, params } = request;
-        if (method === 'eth_accounts' || method === 'eth_requestAccounts') return [account];
+        if (method === 'wallet_addEthereumChain') {
+          if (options.savedSymbol && params[0].nativeCurrency.symbol !== options.savedSymbol) {
+            throw Object.assign(new Error('nativeCurrency.symbol does not match currency symbol for a network the user already has added with the same chainId.'), { code: -32602 });
+          }
+          if (options.addMode === 'reject') throw Object.assign(new Error('Rejected'), { code: 4001 });
+          if (options.addMode === 'held') await new Promise(resolve => { window.releaseNetworkAdd = resolve; });
+          if (options.addMode === 'update') window.walletModes[name] = 'detected';
+          return null;
+        }
+        if (method === 'wallet_switchEthereumChain') return null;
+        if (method === 'eth_accounts'  || method === 'eth_requestAccounts') return [account];
         if (method === 'eth_chainId') {
           if (window.walletModes[name] === 'chain-error') throw new Error('Cannot read wallet network');
           return window.walletChains[name];
@@ -159,6 +169,56 @@ async function fixture(browser, options = {}) {
     await connected.page.getByRole('button', { name: 'Connect Wallet', exact: true }).first().waitFor();
     assert.equal(await connected.page.getByText('Composer not detected', { exact: true }).count(), 0, 'disconnect clears status');
     await connected.close(); passed++;
+
+    for (const addMode of ['update', 'unchanged', 'reject', 'held']) {
+      const setup = await fixture(browser, { addMode });
+      await setup.page.getByRole('button', { name: 'Connect Wallet', exact: true }).first().click();
+      await setup.page.getByRole('button', { name: 'MetaMask', exact: true }).click();
+      await setup.page.getByText('Composer not detected', { exact: true }).waitFor();
+      await setup.page.getByRole('button', { name: 'Connect network', exact: true }).click();
+      if (addMode === 'held') {
+        await setup.page.getByRole('button', { name: 'Check your wallet…' }).waitFor();
+        await setup.openMenu();
+        assert.equal(await setup.menu.getByRole('button', { name: 'Check your wallet…' }).isDisabled(), true);
+        await setup.page.evaluate(() => { window.walletListeners.MetaMask.accountsChanged([]); window.releaseNetworkAdd(); });
+        await setup.page.getByRole('button', { name: 'Connect Wallet', exact: true }).first().waitFor();
+      } else if (addMode === 'update') {
+        await until(async () => await setup.page.getByText('Composer not detected', { exact: true }).count() === 0, 'successful setup rechecks Composer');
+        await setup.openMenu();
+        await setup.menu.getByText('Composer detected', { exact: true }).waitFor();
+      } else {
+        await setup.page.getByText(addMode === 'reject' ? 'Network request cancelled. You can try again.'
+          : 'Composer may be saved without being selected. If the warning remains, open the RPC setup instructions above, select the Composer URL as the network’s default RPC, save, then click Recheck.', { exact: true }).waitFor();
+        await setup.page.getByText('Composer not detected', { exact: true }).waitFor();
+      }
+      const requests = await setup.page.evaluate(() => window.walletCalls.filter(call => call.method.startsWith('wallet_')));
+      assert.equal(requests.length, ['reject', 'held'].includes(addMode) ? 1 : 2);
+      assert.equal(requests[0].name, 'MetaMask', 'network request goes to selected wallet');
+      assert.equal(requests[0].method, 'wallet_addEthereumChain');
+      assert.equal(requests[0].params[0].chainId, '0x27d8');
+      assert.deepEqual(requests[0].params[0].rpcUrls, [new URL('/composer/l1', origin).href]);
+      await setup.close(); passed++;
+    }
+
+    for (const savedSymbol of ['XDAI', 'xDAI', 'OTHER']) {
+      const setup = await fixture(browser, { addMode: 'update', savedSymbol });
+      await setup.connect();
+      await setup.page.evaluate(() => { window.walletModes.Rabby = 'not-detected'; window.dispatchEvent(new Event('focus')); });
+      await setup.page.getByText('Composer not detected', { exact: true }).waitFor();
+      await setup.page.getByRole('button', { name: 'Connect network', exact: true }).click();
+      if (savedSymbol === 'OTHER') {
+        await setup.page.getByText('Your saved network uses a different currency symbol. Edit its RPC URL in your wallet using the instructions above; keep its existing symbol.', { exact: true }).waitFor();
+      } else {
+        await until(async () => await setup.page.getByText('Composer not detected', { exact: true }).count() === 0, 'saved symbol accepted');
+        await setup.openMenu();
+        await setup.menu.getByText('Composer detected', { exact: true }).waitFor();
+      }
+      const adds = await setup.page.evaluate(() => window.walletCalls.filter(call => call.method === 'wallet_addEthereumChain'));
+      assert.deepEqual(adds.map(call => call.params[0].nativeCurrency.symbol), savedSymbol === 'XDAI' ? ['XDAI'] : ['XDAI', 'xDAI']);
+      assert.ok(adds.every(call => call.params[0].chainId === '0x27d8' && call.params[0].rpcUrls[0] === new URL('/composer/l1', origin).href));
+      if (savedSymbol === 'OTHER') assert.equal(await setup.page.evaluate(() => window.walletCalls.filter(call => call.method === 'wallet_switchEthereumChain').length), 0);
+      await setup.close(); passed++;
+    }
 
     const restored = await fixture(browser, { saved: true, chain: '0xdd6d9' });
     await restored.page.getByRole('button', { name: /Rabby ·/ }).waitFor();

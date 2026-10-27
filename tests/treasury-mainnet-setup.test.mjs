@@ -142,10 +142,10 @@ test('paired Safe approvals skip module enablement only when already enabled',as
  const {engine,safe,deployer}=fixture(),s=await engine.configure(deployer,safe);
  Object.assign(s.addresses,{moduleL1:shared.contracts.moduleL1.address,policyL1:addr(301),policy:addr(302),multiSendL1:addr(303)});
  s.completed=Array.from({length:4},()=>({hash:zeroHash,chain:'l1',number:'0xa',blockHash:zeroHash}));
- engine.unchanged=async()=>{};
- const read=engine.io.read;let enabled=false;
- engine.io.read=(chain,address,name,method)=>method==='isModuleEnabled'?enabled:read(chain,address,name,method);
+ const read=engine.io.read;let enabled=false,ownerReads=0;
+ engine.io.read=(chain,address,name,method)=>{if(method==='getOwners')ownerReads++;return method==='isModuleEnabled'?enabled:read(chain,address,name,method);};
  const initial=await engine.review(s),before=safeBatchCalls(engine.tx(s,initial));
+ assert.equal(ownerReads,1,'one canonical ownership snapshot per review');
  assert.equal(before.length,4);
  assert.equal(decodeFunctionData({abi:artifacts.contracts.Safe.abi,data:before[1].data}).functionName,'enableModule');
  const legacy={...initial};delete legacy.moduleEnabled;assert.deepEqual(engine.tx(s,initial),engine.tx(s,legacy));
@@ -199,4 +199,59 @@ test('a first wallet prepares shared EEZ-X contracts; another wallet reuses the 
  const secondBudget=await engine.batch(second,'0xa');assert.deepEqual(secondBudget.outputs.map(o=>o.key),['policy']);
  assert.notEqual(second.addresses.safeL2,first.addresses.safeL2);
  assert.equal(second.addresses.aliasReaderL1,undefined);
+});
+
+test('overlapping Safe inspection cannot bypass a failed network validation',async()=>{
+ const {engine,safe,deployer}=fixture();
+ let rejectValidation;
+ engine.validate=()=>new Promise((_,reject)=>{rejectValidation=reject;});
+ const pending=engine.configure(deployer,safe);
+ await new Promise(resolve=>setImmediate(resolve));
+ rejectValidation(Error('Network binding changed'));
+ await assert.rejects(pending,/Network binding changed/);
+});
+
+test('full failure diagnostics still reject changed contracts, confirmations and owners',async()=>{
+ for(const failure of ['network','code','confirmation','owners']) {
+  const {engine,safe,deployer}=fixture(),s=await engine.configure(deployer,safe);
+  Object.assign(s.addresses,{policyL1:addr(301),policy:addr(302),multiSendL1:addr(303)});
+  s.completed=Array.from({length:4},()=>({hash:zeroHash,chain:'l1',number:'0xa',blockHash:zeroHash}));
+  const rpc=engine.io.rpc,read=engine.io.read;
+  if(failure==='network')engine.validate=async()=>{throw Error('Network binding changed');};
+  if(failure==='code')engine.io.rpc=(chain,method,params)=>method==='eth_getCode'&&params[0]===shared.contracts.moduleL1.address?'0x':rpc(chain,method,params);
+  if(failure==='confirmation')s.completed[0].blockHash=toHex(1n,{size:32});
+  if(failure==='owners')engine.io.read=(chain,address,name,method,...rest)=>method==='getThreshold'?2n:read(chain,address,name,method,...rest);
+  await assert.rejects(engine.unchanged(s),/Network binding changed|contract changed|reorganized|owners or threshold/);
+ }
+});
+
+test('a returned signature is rejected if the wallet account changed without repeating network audits',async()=>{
+ const {engine,safe,deployer}=fixture(),s=await engine.configure(deployer,safe);
+ Object.assign(s.addresses,{policyL1:addr(301),policy:addr(302),multiSendL1:addr(303)});
+ s.completed=Array.from({length:4},()=>({hash:zeroHash,chain:'l1',number:'0xa',blockHash:zeroHash}));
+ s.review=await engine.review(s);
+ let signed=false;const progress=[];
+ engine.currentReview=async()=>{throw Error('Unexpected repeated review');};
+ engine.validate=async()=>{throw Error('Unexpected network audit');};
+ const provider={request:async({method})=>{
+  if(method==='eth_accounts')return [signed?addr(201):deployer];
+  if(method==='eth_chainId')return '0x1';
+  assert.equal(method,'eth_signTypedData_v4');signed=true;
+  assert.equal(progress.at(-1),'Waiting for the owner signature in your wallet…');return '0x';
+ }};
+ await assert.rejects(engine.approve(s,provider,message=>progress.push(message)),/Connect the wallet selected/);
+ assert(signed);assert.match(progress.at(-1),/^Signature received/);assert.equal(s.review.approvals.length,0);
+});
+
+test('normal preparation estimates gas first and only diagnoses a failed simulation',async()=>{
+ for(const failure of [false,true]) {
+  const {engine,safe,deployer}=fixture(),s=await engine.configure(deployer,safe),phases=[];
+  engine.wallet=async()=>deployer;
+  engine.batch=async()=>({data:'0x1234',outputs:[]});
+  engine.io.rpc=async(_chain,method)=>{if(method==='eth_getTransactionCount')return '0x1';assert.equal(method,'eth_estimateGas');if(failure)throw Error('execution reverted');return '0x5208';};
+  let diagnoses=0;engine.unchanged=async()=>{diagnoses++;throw Error('The selected contract changed');};
+  const prepared=engine.prepare(s,{},message=>phases.push(message));
+  if(failure){await assert.rejects(prepared,/execution reverted.*selected contract changed/);assert.equal(diagnoses,1);}
+  else {assert.equal((await prepared).request.gas,'0x6270');assert.equal(diagnoses,0);}
+ }
 });

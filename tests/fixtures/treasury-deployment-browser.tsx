@@ -16,10 +16,13 @@ export function mount(fixture: any) {
   const reconcile = MainnetSetup.prototype.reconcile;
   MainnetSetup.prototype.reconcile = function(state) { return state.pending?.id === '5' ? w.reconcileMirror(state) : reconcile.call(this, state); };
   TreasuryClient.prototype.validate = function() { return w.verifyPair(this.config); };
-  const control = { owner: 'A', chain: toHex(fixture.network.chains.l1.chainId), rejectNext: false, select: (_:string) => {} };
+  const control = { owner: 'A', chain: toHex(fixture.network.chains.l1.chainId), rejectNext: false, rejectSignature: false, select: (_:string) => {} };
   const provider = { request: async ({ method, params }: any) => {
     if (method === 'eth_chainId') return control.chain;
     if (method === 'eth_accounts') return [fixture.owners[control.owner]];
+    if (method === 'eth_signTypedData_v4' && control.rejectSignature) {
+      control.rejectSignature = false; throw Object.assign(new Error('User rejected signature'), { code: 4001 });
+    }
     if (method === 'eth_sendTransaction' && control.rejectNext) {
       control.rejectNext = false; throw Object.assign(new Error('User rejected transaction'), { code: 4001 });
     }

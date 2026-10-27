@@ -355,10 +355,14 @@ export function App() {
         composerConnection={wallet.composerConnection}
         checkingComposer={wallet.checkingComposer}
         onRecheckComposer={wallet.recheckComposer}
+        onConnectComposer={wallet.connectComposer}
+        connectingComposer={wallet.connectingComposer}
+        composerSetupMessage={wallet.composerSetupMessage}
       />
 
       {wallet.isConnected && <ComposerStatus connection={wallet.composerConnection}
-        checking={wallet.checkingComposer} onRecheck={wallet.recheckComposer} walletName={wallet.walletName} variant="notice" />}
+        checking={wallet.checkingComposer} onRecheck={wallet.recheckComposer} walletName={wallet.walletName} variant="notice"
+        onConnectNetwork={wallet.connectComposer} connectingNetwork={wallet.connectingComposer} setupMessage={wallet.composerSetupMessage} />}
 
       {view === "monitor" ? (
         <NetworkMonitorView />

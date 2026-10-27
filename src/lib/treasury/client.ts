@@ -1,3 +1,4 @@
+import { treasuryRpc } from "./rpcTransport.ts";
 import pairedTestnet from './paired-testnet-network.json' with { type: 'json' };
 import { validatePairedPayments } from "./pairedPolicy.ts";
 import { readPaymentDeployment, paymentVersion, recordedPaymentTransaction, verifiesL1Initiation, verifiesReverseFunding } from "./savedPayments.ts";
@@ -202,18 +203,19 @@ export class TreasuryClient {
   readonly config: TreasuryConfig;
   constructor(config: TreasuryConfig) { this.config = config; }
   async rpc<T>(url: string, method: string, params: unknown[] = []): Promise<T> {
-    const response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }), signal: AbortSignal.timeout(12_000) });
-    requireThat(response.ok, `Treasury RPC unavailable (${response.status})`);
-    const body = await response.json();
-    if (body.error) throw new Error(body.error.message || "Treasury RPC failed");
-    return body.result as T;
+    return treasuryRpc<T>(url, method, params);
   }
   async read(url: string, address: Address, abi: typeof safeAbi | typeof actionAbi | typeof l1OwnersAbi, functionName: "getOwners" | "getThreshold" | "nonce" | "VERSION" | "safeL1" | "manager" | "safe" | "value", tag = "latest"): Promise<unknown> {
     const result = await this.rpc<Hex>(url, "eth_call", [{ to: address, data: encodeFunctionData({ abi, functionName }) }, tag]);
     return decodeFunctionResult({ abi, functionName, data: result });
   }
+  private validation?: Promise<void>;
   async validate() {
+    if (this.validation) return this.validation;
+    const pending = this.validateBindings(); this.validation = pending;
+    try { await pending; } finally { if (this.validation === pending) this.validation = undefined; }
+  }
+  private async validateBindings() {
     const c = this.config;
     await Promise.all((["l1", "l2"] as const).map(async name => {
       const chain = c[name];

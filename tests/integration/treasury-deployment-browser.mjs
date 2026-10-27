@@ -15,6 +15,8 @@ export async function deploymentBrowser(f) {
   const server = await createServer({ configFile:false, envFile:false, plugins:[react()], server:{host:'127.0.0.1',port:0}, base:'/' }); await server.listen();
   let browser, page, held = true;
   const hashes = new Set(), submissions = [], signatures = [], errors = [];
+  const timings = { scope: 'isolated EVM; automated wallet, includes reload/recovery polling; not live network confirmation time', steps: [] };
+  let submissionStarted = 0, walletOpened = 0;
   const key = `eez:treasury:paired-setup:${setupIdentity(network)}`;
   const origin = `http://127.0.0.1:${server.httpServer.address().port}`;
   try {
@@ -53,6 +55,7 @@ export async function deploymentBrowser(f) {
         return account.signTypedData(tx);
       }
       assert.equal(method,'eth_sendTransaction'); assert.equal(owner,'A');
+      walletOpened = performance.now();
       const [request]=params,s=await state(),step=s.completed.length;
       const source=step===1||step===2?'l2':'l1';
       assert.equal(BigInt(request.chainId),BigInt(ids[source])); assert.equal(BigInt(request.nonce),BigInt(await rpc('eth_getTransactionCount',[A.address,'pending'])));
@@ -79,23 +82,32 @@ export async function deploymentBrowser(f) {
       return route.continue();
     });
     const mount=async()=>{await page.goto(`${origin}/deployment`);await page.evaluate(async fixture=>(await import('/tests/fixtures/treasury-deployment-browser.tsx')).mount(fixture),{network,target,owners:{A:A.address,B:B.address}});};
-    await mount(); await page.getByLabel('Chiado Safe address',{exact:true}).fill(safeL1); await page.getByRole('button',{name:'Start setup',exact:true}).click();
+    await mount(); await page.getByLabel('Chiado Safe address',{exact:true}).fill(safeL1);
+    const flowStarted = performance.now();
+    await page.getByRole('button',{name:'Start setup',exact:true}).click();
     for(let step=0;step<6;step++) {
       held=true;
       await page.waitForFunction(({key,step})=>JSON.parse(localStorage.getItem(key)??'null')?.completed.length===step,{key,step});
+      if(step===0) timings.safeCheckMs = Math.round(performance.now()-flowStarted);
       assert.equal(await page.getByRole('progressbar',{name:'Setup progress'}).getAttribute('value'),String(step));
       await page.getByRole('region',{name:'About this step'}).waitFor();
       if(step>=4) {
-        await page.getByRole('button',{name:'Review Safe step',exact:true}).click();
+        if(step===4)await page.evaluate(()=>{window.setupControls.rejectSignature=true;});
+        await page.getByRole('button',{name:'Review and sign',exact:true}).click();
+        if(step===4){
+          await page.getByRole('status').getByText('Signature cancelled. Your setup is saved; you can sign again.',{exact:true}).waitFor();
+          assert.equal((await state()).review.approvals.length,0);
+          await mount();
+          await page.getByRole('button',{name:'Sign Safe approval',exact:true}).click();
+        }
         await page.getByText('Current owners',{exact:true}).click();
-        assert(await page.getByRole('button',{name:'Approve Safe step',exact:true}).evaluate(e=>e.classList.contains('btn-solid')));
+        await page.getByText('1 of 2 owner approvals',{exact:true}).waitFor();
         assert(await page.getByRole('button',{name:'Submit approved Safe step',exact:true}).isDisabled());
         if(step===5)await page.getByText('Sign for your',{exact:false}).waitFor();
         await page.screenshot({path:`${directory}/setup-approval-${step}.png`,fullPage:true});
-        await page.getByRole('button',{name:'Approve Safe step',exact:true}).click();
-        await page.getByText('1 of 2 owner approvals',{exact:true}).waitFor();
+
         await page.evaluate(()=>window.setupControls.select('B'));
-        await page.getByRole('button',{name:'Approve Safe step',exact:true}).click();
+        await page.getByRole('button',{name:'Sign Safe approval',exact:true}).click();
         await page.getByText('2 of 2 owner approvals',{exact:true}).waitFor();
         await page.evaluate(()=>window.setupControls.select('A'));
       }
@@ -105,8 +117,10 @@ export async function deploymentBrowser(f) {
         await page.getByRole('status').getByText('Wallet cancelled. No transaction was authorized.',{exact:true}).waitFor();
         assert.equal((await state()).pending,undefined); assert.equal(submissions.length,0);
       }
+      submissionStarted = performance.now();
       await page.getByRole('button',{name:step>=4?'Submit approved Safe step':'Approve next deployment step',exact:true}).click();
       await page.waitForFunction(key=>!!JSON.parse(localStorage.getItem(key)??'null')?.pending?.hash,key);
+      timings.steps.push({step:step+1,preparationToWalletMs:Math.round(walletOpened-submissionStarted),throughSubmissionMs:Math.round(performance.now()-submissionStarted)});
       assert.equal(submissions.length,step+1);
       const before=await state(); await mount();
       await page.getByRole('status').filter({hasText:'Waiting for confirmation'}).waitFor();
@@ -115,10 +129,11 @@ export async function deploymentBrowser(f) {
       if(step<5) await page.waitForFunction(({key,step})=>JSON.parse(localStorage.getItem(key)??'null')?.completed.length===step+1,{key,step});
     }
     await page.getByRole('heading',{name:'Shared treasury ready',exact:true}).waitFor();
+    timings.totalMs = Math.round(performance.now()-flowStarted);
     const completed=await page.evaluate(()=>window.completedState);
     assert.equal(completed.completed.length,6); assert.equal(signatures.length,4); assert.deepEqual(signatures.map(s=>Number(BigInt(s.chainId))),[ids.l1,ids.l1,ids.l2,ids.l2]);
     assert.deepEqual(errors,[]); await page.screenshot({path:`${directory}/deployment-browser.png`,fullPage:true});
-    evidence.browser={passed:true,sandbox:true,steps:6,walletCancellation:true,reloadEveryStep:true,singleSubmissionPerStep:true,submissions,signatures,
+    evidence.browser={passed:true,sandbox:true,timings,steps:6,walletCancellation:true,reloadEveryStep:true,singleSubmissionPerStep:true,submissions,signatures,
       limitation:'Final L1 alias request is checked but executed directly on logical L2 in the single-EVM fixture; native relay/settlement is not proven.'};
     console.log('PASS all six setup steps through browser: real deployment/approvals, cancellation, six pending reloads, activation and manifest validation');
     return completed;

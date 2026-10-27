@@ -24,6 +24,14 @@ export function TreasuryMainnetSetup({ wallet, target, onComplete, network = def
   const [busy, setBusy] = useState(false), [error, setError] = useState("");
   const [status, setStatus] = useState("Loading setup…");
   const [elapsed, setElapsed] = useState(0);
+  const [confirmationElapsed, setConfirmationElapsed] = useState(0);
+  const confirmationKey = state?.pending?.hash ? `${state.salt}:${state.pending.hash}` : null;
+  useEffect(() => {
+    setConfirmationElapsed(0);
+    if (!confirmationKey) return;
+    const start = Date.now(), timer = setInterval(() => setConfirmationElapsed(Math.floor((Date.now() - start) / 1000)), 1000);
+    return () => clearInterval(timer);
+  }, [confirmationKey]);
   const [balances, setBalances] = useState<{ address: Address; l1: bigint; l2: bigint } | null>(null);
   const [balanceError, setBalanceError] = useState("");
   const heading = useRef<HTMLHeadingElement>(null);
@@ -137,6 +145,25 @@ export function TreasuryMainnetSetup({ wallet, target, onComplete, network = def
     if (selectedWallet.current.provider !== selected.provider || !same(selectedWallet.current.address, selected.address)) throw new Error("Wallet changed while switching networks");
     return selected.provider;
   };
+  const signSafeStep = () => void run(async (s, assertActive) => {
+    if (!s || s.pending || s.completed.length < 4) throw new Error("Deployment progress changed");
+    const progress = (message: string) => { assertActive(); setStatus(message); };
+    const provider = await switchTo(s.completed.length === 4 ? "l1" : "l2", assertActive);
+    const reviewed = s.review ? s : { ...s, review: await engine!.review(s, progress) };
+    assertActive();
+    if (!s.review) persist(reviewed);
+    try {
+      const approval = await engine!.approve(reviewed, guardWalletRequests(provider, assertActive), progress);
+      assertActive();
+      if (selectedWallet.current.provider !== provider || !same(selectedWallet.current.address, approval.owner)) throw new Error("Wallet changed while signing");
+      persist({ ...reviewed, review: { ...reviewed.review!, approvals: [...reviewed.review!.approvals, approval] } });
+      setStatus("Owner approval saved.");
+    } catch (error) {
+      assertActive();
+      if ((error as { code?: number }).code !== 4001) throw error;
+      setStatus("Signature cancelled. Your setup is saved; you can sign again.");
+    }
+  });
   const connect = <div className={styles.owners}>{wallet.walletOptions.map((option, index) => <button className={`btn ${index === 0 ? "btn-solid" : "btn-outline"}`} key={option.id}
     onClick={() => void run(async () => { await selectedWallet.current.connect(option.id); })}>Connect {option.name}</button>)}
     {!wallet.walletOptions.length && <p>Open this dashboard in a browser with your wallet extension.</p>}</div>;
@@ -162,7 +189,8 @@ export function TreasuryMainnetSetup({ wallet, target, onComplete, network = def
         if (!pairedReady) throw new Error("Treasury setup is awaiting an updated contract release");
         const selected = selectedWallet.current;
         if (!selected.address) throw new Error("Connect your deployment wallet");
-        const next = await engine!.configure(getAddress(selected.address), getAddress(safeL1.trim()), existingMirror ? getAddress(safeL2.trim()) : undefined);
+        const next = await engine!.configure(getAddress(selected.address), getAddress(safeL1.trim()), existingMirror ? getAddress(safeL2.trim()) : undefined,
+          message => { assertActive(); setStatus(message); });
         assertActive();
         if (selectedWallet.current.provider !== selected.provider || !same(selectedWallet.current.address, selected.address)) throw new Error("Wallet changed during setup. Review your selection again.");
         persist(next); setStatus("Setup reviewed. Approve each named transaction when ready.");
@@ -190,14 +218,16 @@ export function TreasuryMainnetSetup({ wallet, target, onComplete, network = def
       {noGas && !state.pending && <p className={styles.notice}>Add {symbol} to your wallet on {step.chain === "l1" ? l1Name : "EEZ-X"} before submitting.{needsOwners && " You can still sign an approval; a funded wallet can submit once the quorum is collected."}</p>}
       {state.pending ? <div className={styles.notice} role="status">
         <p>{state.pending.hash ? "Waiting for confirmation…" : "Waiting for the wallet transaction…"} Keep this recorded request; it will be checked automatically after reload.</p>
+        {state.pending.hash && <p>{confirmationElapsed}s checking confirmation on this screen. Network confirmation time varies.</p>}
         {state.pending.hash && <a href={`${target[state.pending.chain].explorer.replace(/\/$/, "")}/tx/${state.pending.hash}`} target="_blank" rel="noreferrer">View transaction ↗</a>}
       </div> : <>
         {needsOwners && <div className={styles.approvalStep}>
           <p>Approve with {review ? `${review.threshold} current owner${review.threshold === 1 ? "" : "s"}` : "this Safe’s current owners"}, then submit the transaction.</p>
-          <button className={`btn ${review ? "btn-ghost" : "btn-solid"}`} disabled={!engine || busy} onClick={() => void run(async s => {
+          {review ? <button className="btn btn-ghost" disabled={!engine || busy} onClick={() => void run(async s => {
             if (!s || s.pending) throw new Error("Deployment progress changed");
-            persist({ ...s, review: await engine!.review(s) }); setStatus("");
-          })}>{review ? "Refresh Safe step review" : "Review Safe step"}</button>
+            persist({ ...s, review: await engine!.review(s, setStatus) }); setStatus("");
+          })}>Refresh Safe details</button> : <button className="btn btn-solid" disabled={!engine || busy || !wallet.address || !wallet.provider}
+            onClick={signSafeStep}>{busy ? "Reading Safe details…" : "Review and sign"}</button>}
           {review && <>
             <strong className={styles.quorum} data-testid="setup-quorum">{review.approvals.length} of {review.threshold} owner approvals</strong>
             <p>Signing Safe: {review.chain === "l1" ? l1Name : "EEZ-X"} · Safe nonce {review.nonce}</p>
@@ -205,14 +235,8 @@ export function TreasuryMainnetSetup({ wallet, target, onComplete, network = def
               <span><code>{address}</code>{same(address, wallet.address) && <span className={styles.hint}>Connected wallet</span>}</span>
               {review.approvals.some(a => same(a.owner, address)) && <span className={styles.badge} data-positive="true">Approved</span>}
             </li>)}</ul></details>
-            <button className={`btn ${quorum ? "btn-outline" : "btn-solid"}`} disabled={busy || !owner || signed || quorum} onClick={() => void run(async (s, assertActive) => {
-              if (!s?.review || s.pending) throw new Error("Deployment progress changed");
-              const provider = await switchTo(s.review.chain, assertActive); setStatus("Waiting for the owner signature in your wallet…");
-              const approval = await engine!.approve(s, guardWalletRequests(provider, assertActive));
-              assertActive();
-              if (selectedWallet.current.provider !== provider || !same(selectedWallet.current.address, approval.owner)) throw new Error("Wallet changed while signing");
-              persist({ ...s, review: { ...s.review, approvals: [...s.review.approvals, approval] } }); setStatus("Owner approval saved.");
-            })}>{signed ? "Owner approved" : "Approve Safe step"}</button>
+            <button className={`btn ${quorum ? "btn-outline" : "btn-solid"}`} disabled={busy || !owner || signed || quorum} onClick={signSafeStep}>{signed ? "Owner approved" : busy && status.startsWith("Signature received") ? "Signature received — checking…"
+              : busy && status.startsWith("Waiting for the owner signature") ? "Waiting for your signature…" : "Sign Safe approval"}</button>
             {!owner && !quorum && <p className={styles.hint}>Select one of these current owners in your wallet to approve.</p>}
             {signed && !quorum && <p className={styles.hint}>Switch accounts in your wallet to collect another owner’s approval.</p>}
             {quorum && <p className={styles.hint}>Required approvals collected. Any funded connected wallet can submit this Safe batch.</p>}
@@ -234,7 +258,7 @@ export function TreasuryMainnetSetup({ wallet, target, onComplete, network = def
             if ((e as { code?: number }).code === 4001) { persist(s); setStatus("Wallet cancelled. No transaction was authorized."); }
             else throw new Error(`Wallet response uncertain: ${(e as Error).message}. We’ll keep checking the recorded request automatically.`);
           }
-        })}>{busy ? status.startsWith("Confirm") || status.includes("owner signature") ? "Waiting for wallet…" : "Preparing transaction…" : needsOwners ? "Submit approved Safe step" : "Approve next deployment step"}</button>
+        })}>{busy ? status.startsWith("Confirm") || status.startsWith("Waiting for the owner signature") ? "Waiting for wallet…" : "Preparing transaction…" : needsOwners ? "Submit approved Safe step" : "Approve next deployment step"}</button>
         {!state.completed.length && <button className="btn btn-ghost" disabled={busy} onClick={() => void run(async saved => {
           if (!saved || saved.pending || saved.completed.length) throw new Error("Setup has started; keep its recorded wallet and Safes");
           localStorage.setItem(mainnetSetupKey, ""); setState(null); setStatus(""); heading.current?.focus();
@@ -244,7 +268,7 @@ export function TreasuryMainnetSetup({ wallet, target, onComplete, network = def
       {verificationError ? <><h3>Couldn’t verify your treasury</h3><p className={styles.error} role="alert">{verificationError}</p><button className="btn btn-solid" onClick={() => setVerificationAttempt(x => x + 1)}>Retry verification</button></> : <p role="status">Verifying your treasury…</p>}
     </section>}
     {status && <p className={styles.hint} role="status">{status}</p>}
-    {busy && elapsed >= 3 && <p className={styles.hint}>{elapsed}s elapsed.{status.startsWith("Quoting") && " Composer is simulating the cross-chain call. MetaMask opens after this finishes."}</p>}
+    {busy && <p className={styles.hint}>{elapsed}s elapsed.{status.startsWith("Quoting") && " Composer is simulating the cross-chain call. MetaMask opens after this finishes."}</p>}
     {error && <p className={styles.error} role="alert">{error}</p>}
     <TreasuryPairedHistory target={target} network={network} />
   </section>;

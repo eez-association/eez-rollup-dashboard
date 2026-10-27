@@ -26,7 +26,12 @@ export function appendSourceRequest(previous: SourceRequest[] | undefined, build
 export async function deliverSourceRequest(request: SourceRequest, endpoint: string, fetcher = fetch): Promise<SourceJob> {
   if (!valid(request)) throw new Error('Invalid source verification identity');
   const result = await fetcher(endpoint, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(request), keepalive: true, signal: AbortSignal.timeout(10_000) });
-  if (!result.ok) throw new Error('Source verification is waiting for its service; it will retry automatically.');
+  if (!result.ok) {
+    const body = await result.json().catch(() => null) as { error?: unknown } | null;
+    const detail = typeof body?.error === 'string' ? body.error.slice(0, 300) : '';
+    throw new Error(detail ? `Source verification: ${detail}. It will retry automatically.`
+      : 'Source verification is waiting for its service; it will retry automatically.');
+  }
   const job = await result.json() as SourceJob;
   if (!/^[a-f\d]{64}$/.test(job.id) || !Array.isArray(job.contracts)) throw new Error('Invalid verification response');
   return job;

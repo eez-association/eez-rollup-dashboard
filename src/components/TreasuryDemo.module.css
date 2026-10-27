@@ -70,7 +70,7 @@
 .amount span { font-size: 14px; font-weight: 400; color: var(--text-dim); }
 .safeBalanceRow { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 12px; }
 .safeFaucetAction { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; max-width: 128px; }
-.safeFaucetAction :global(.btn) { white-space: normal; line-height: 1.35; max-width: 128px; }
+.safeFaucetAction :global(.btn) { white-space: nowrap; line-height: 1.35; min-height: 34px; padding-inline: 14px; max-width: 128px; }
 .safeFaucetAction p { font-size: 12px; }
 .setupProgress { display: flex; align-items: center; gap: 16px; margin-bottom: 8px; }
 .card .stepCount { flex-shrink: 0; font: 500 12px/1.5 var(--mono); color: var(--text-dim); }

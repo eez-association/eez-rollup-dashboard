@@ -142,6 +142,7 @@ test('confirmation outbox ignores historical and incomplete setup, survives deli
   const storage={length:entries.size,key:i=>[...entries.keys()][i],getItem:key=>entries.get(key)};
   assert.deepEqual(sourceRequests(storage),outbox);
   await assert.rejects(deliverSourceRequest(outbox[0],'/jobs',async()=>new Response('',{status:503})),/retry automatically/);
+  await assert.rejects(deliverSourceRequest(outbox[0],'/jobs',async()=>Response.json({error:'Wait for a successful canonical receipt'},{status:400})),/successful canonical receipt.*retry automatically/);
   assert.deepEqual(sourceRequests(storage),outbox);
 });
 

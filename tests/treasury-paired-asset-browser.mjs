@@ -21,7 +21,7 @@ try {
     return route.continue();
   });
   const mount = async (mode = 'test') => { await page.goto(`${origin}/paired`); await page.evaluate(async mode => (await import('/tests/fixtures/treasury-paired-asset.tsx')).mount(mode), mode); };
-  const faucet = chain => page.getByRole('region', { name: `${chain} Safe`, exact: true }).getByRole('button', { name: 'Get USDC from faucet', exact: true });
+  const faucet = chain => page.getByRole('region', { name: `${chain} Safe`, exact: true }).getByRole('button', { name: 'Get USDC', exact: true });
   await mount(); await faucet('l1').waitFor(); await faucet('l2').waitFor();
   assert.equal(await page.getByRole('button', { name: 'Deploy Test USDC', exact: true }).count(), 0);
   await page.evaluate(() => { window.rejectNext = true; }); await faucet('l1').click();
@@ -45,12 +45,12 @@ try {
   assert(await faucet('l1').isDisabled()); assert(await faucet('l2').isDisabled()); assert.equal(sends.length, 2);
   await page.evaluate(() => { window.confirmFixture = true; window.failTracking = 'l1'; });
   await page.waitForFunction(() => window.refreshes === 1);
-  await page.getByRole('region', { name: 'l2 Safe', exact: true }).getByText('1,000 test USDC received.', { exact: true }).waitFor();
+  await page.waitForFunction(() => ![...document.querySelectorAll('[aria-label="l2 Safe"] button')].find(button => button.textContent === 'Get USDC')?.disabled);
   assert(await faucet('l1').isDisabled()); assert(!(await faucet('l2').isDisabled()));
   await page.getByRole('alert').filter({ hasText: 'L1 faucet: Temporary claim RPC failure' }).waitFor();
   await page.evaluate(() => { window.failTracking = ''; });
   await page.waitForFunction(() => window.refreshes === 2);
-  assert.equal(await page.getByText('1,000 test USDC received.', { exact: true }).count(), 2);
+  assert.equal(await page.getByText('1,000 test USDC received.', { exact: true }).count(), 0);
   await page.evaluate(() => { window.confirmFixture = false; });
   // Presets follow the existing EEZ-X slider direction and preserve the exact total.
   const presets = page.getByRole('group', { name: 'EEZ-X share presets' });
@@ -68,7 +68,7 @@ try {
   await page.evaluate(() => { window.uncertainNext = true; }); await faucet('l1').click();
   await page.getByRole('alert').getByText('Wallet response lost', { exact: true }).waitFor();
   await mount(); await faucet('l1').waitFor(); assert(await faucet('l1').isDisabled()); assert.equal(sends.length, 2);
-  for (const mode of ['real','ordinary-token']) { await mount(mode); await page.getByRole('heading', { name: 'l1 Safe', exact: true }).waitFor(); await page.waitForTimeout(150); assert.equal(await page.getByRole('button', { name: 'Get USDC from faucet', exact: true }).count(), 0); }
+  for (const mode of ['real','ordinary-token']) { await mount(mode); await page.getByRole('heading', { name: 'l1 Safe', exact: true }).waitFor(); await page.waitForTimeout(150); assert.equal(await page.getByRole('button', { name: 'Get USDC', exact: true }).count(), 0); }
   await page.evaluate(() => localStorage.clear());
   await mount('flaky-token');
   await page.getByRole('alert').filter({ hasText: 'Temporary token RPC failure' }).waitFor();

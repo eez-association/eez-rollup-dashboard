@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { useTreasuryHistory } from "../hooks/useTreasuryHistory";
 import type { TreasuryConfig } from "../lib/treasury/client";
 import { treasuryTransactions } from "../lib/treasury/settlement";
@@ -15,11 +15,21 @@ import treasury from "./TreasuryDemo.module.css";
 export function TreasuryPaymentHistory({ history, deployment }: { history: ReturnType<typeof useTreasuryHistory>; deployment: TreasuryConfig }) {
   const [filter, setFilter] = useState<HistoryStatus | "all">("all");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  const ordered = history.entries;
+  const seen = useRef<Set<string> | null>(null);
+  const ordered = [...history.entries].reverse();
+  useEffect(() => {
+    if (!history.entries.length) return;
+    const incoming = seen.current === null ? [history.entries[history.entries.length - 1]!]
+      : history.entries.filter(entry => !seen.current!.has(entry.id));
+    seen.current = new Set(history.entries.map(entry => entry.id));
+    if (!incoming.length) return;
+    setExpanded(previous => new Set([...previous, ...incoming.map(entry => entry.id)]));
+    setFilter("all");
+  }, [history.entries]);
   const entries = ordered.filter(e => filter === "all" || historyStatus(e, history.observations[e.id]) === filter);
   const names = { l1: deployment.l1.chainId === 10200 ? "Chiado" : "Ethereum", l2: "EEZ-X" };
   return <section className={styles.card} aria-label="Payment history">
-    <div className={styles.cardHeader}><div><h3 className={styles.cardTitle}>Payment history</h3><p className={styles.noHash}>Oldest first · Saved in this browser</p></div>
+    <div className={styles.cardHeader}><div><h3 className={styles.cardTitle}>Payment history</h3><p className={styles.noHash}>Newest first · Saved in this browser</p></div>
       <div className={styles.headerRight}><span className={styles.count}>{ordered.length} {ordered.length === 1 ? "payment" : "payments"}</span>
         {!!ordered.length && <button className="btn btn-sm btn-ghost" disabled={history.checking} onClick={() => void history.refresh()}>{history.checking ? "Checking history…" : "Refresh history"}</button>}</div></div>
     {!!ordered.length && <div className={`${treasury.fields} ${layout.historyFilter}`}><label htmlFor="treasury-history-filter">Filter history</label>
