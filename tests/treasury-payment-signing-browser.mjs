@@ -38,8 +38,9 @@ try{
     const before=await page.evaluate(()=>{window.ownersTest.balanceFailure=true;return window.ownersTest.reads;});
     await page.getByRole('button',{name:'Sign approval',exact:true}).click();
     await page.getByRole('button',{name:'Owner approved',exact:true}).waitFor();
-    const result=await page.evaluate(()=>({reads:window.ownersTest.reads,approvals:window.ownersTest.approvals,signatures:window.ownersTest.signatures}));
+    const result=await page.evaluate(()=>({reads:window.ownersTest.reads,approvals:window.ownersTest.approvals,signatures:window.ownersTest.signatures,capacityTags:window.ownersTest.capacityTags}));
     assert.equal(result.reads,before,'signing does not refresh the Safe snapshot');assert.equal(result.approvals,1);
+    assert(result.capacityTags.length>0&&result.capacityTags.every(tag=>tag==='latest'),'display and review use latest capacity');
     assert.equal(result.signatures[0].chainId,String(config[source].chainId));
     assert.equal(decodeFunctionData({abi:paymentAbi,data:result.signatures[0].data}).args[3],pairVersion===2?0n:25n);
     assert.equal(await page.getByRole('alert').count(),0,'no redundant balance read can interrupt signing');

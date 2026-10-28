@@ -133,8 +133,9 @@ export async function contractRead(client: TreasuryClient, chain: "l1" | "l2", a
   const result = await client.rpc<Hex>(client.config[chain].rpc, "eth_call", [{ to: address, data }, tag]);
   return decodeFunctionResult({ abi, functionName: name, data: result });
 }
-/** Payments use settled L2 state; setup can verify newly included configuration
- * against latest state without waiting for the safe checkpoint. */
+/** Read one coherent capacity snapshot. Interactive capacity checks explicitly
+ * select latest; callers needing a settled observation can retain safe. This
+ * helper does not establish payment settlement. */
 export async function paymentState(client: TreasuryClient, l2Tag: "safe" | "latest" = "safe"): Promise<PaymentState> {
   const c = client.config, p = c.payments!;
   const [l1, l2] = await Promise.all((["l1", "l2"] as const).map(chain => client.rpc<{ number: Hex; hash: Hex; timestamp: Hex }>(c[chain].rpc, "eth_getBlockByNumber", [chain === "l1" ? "latest" : l2Tag, false])));

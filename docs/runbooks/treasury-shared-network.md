@@ -53,8 +53,12 @@ owner signatures, balances and spending limits are still enforced.
 
 Each Safe's 100-token allowance is checked in its own execution-time period.
 The shared 150-token budget is counted once in L2's execution-time period;
-`Paid` reports that L2 period even when initiated on L1. UI capacity reads use
-observed local periods, and version-2 reconciliation matches the signed deadline
+`Paid` reports that L2 period even when initiated on L1. UI capacity display, review and pre-submission checks use L2 `latest` state,
+with balances, allowances, timestamps and spending pinned to the same observed
+block per chain and block hashes rechecked afterward. No extra reads are added.
+A stalled latest block does not reset capacity merely because wall-clock time
+passed. Settlement and recovery retain their safe/canonical evidence.
+Version-2 reconciliation matches the signed deadline
 in the exact peer call rather than requiring the preview period in the event.
 
 A new immutable release contains this behavior. Already deployed version-1

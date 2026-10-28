@@ -147,7 +147,7 @@ function PairedTreasuryConnected({ deployment, wallet, payments = false, network
       const next = await client.snapshot(payments ? source : "l2");
       acceptSnapshot(next);
       ownersRead = true;
-      if (payments && includePayments) acceptPayments(await paymentState(client));
+      if (payments && includePayments) acceptPayments(await paymentState(client, "latest"));
       setHealthy(true);
       return next;
     } catch (failure) {
@@ -172,7 +172,7 @@ function PairedTreasuryConnected({ deployment, wallet, payments = false, network
         // Read display data first on reload. These are fresh chain observations,
         // not cached balances or permission to act: healthy stays false until
         // the full binding validation completes. Both display reads can overlap.
-        const [ownersResult, amountsResult] = await Promise.allSettled([client.snapshot(payments ? source : "l2"), payments ? paymentState(client) : null]);
+        const [ownersResult, amountsResult] = await Promise.allSettled([client.snapshot(payments ? source : "l2"), payments ? paymentState(client, "latest") : null]);
         if (!active) return;
         if (ownersResult.status === "fulfilled") { acceptSnapshot(ownersResult.value); ownersRead = true; }
         if (amountsResult.status === "fulfilled" && amountsResult.value) acceptPayments(amountsResult.value);
@@ -247,7 +247,7 @@ function PairedTreasuryConnected({ deployment, wallet, payments = false, network
     const latest = await refresh(false);
     let next: Review;
     if (payments) {
-      const amounts = await paymentState(client); acceptPayments(amounts);
+      const amounts = await paymentState(client, "latest"); acceptPayments(amounts);
       const identity = { source, recipient: recipient as Address, destination, epoch: String(amounts.epoch) };
       if (kind === "transfer") await verifyTransferHelper(client);
       const payment = checkedPayment(kind === "transfer"
@@ -308,7 +308,7 @@ function PairedTreasuryConnected({ deployment, wallet, payments = false, network
     const selected = refs.current.wallet;
     if (!current || !selected.provider || refs.current.intent) return;
     await ensureReviewedNetwork(current, selected, "Waiting for wallet submission…", assertActive, true);
-    if (current.payment) fundingPreview(await paymentState(client), current.payment);
+    if (current.payment) fundingPreview(await paymentState(client, "latest"), current.payment);
     const next = await client.prepare(guardWalletRequests(selected.provider, assertActive), current.transaction, current.snapshot, approvals, current.payment);
     assertActive();
     if (refs.current.review !== current || refs.current.wallet.provider !== selected.provider

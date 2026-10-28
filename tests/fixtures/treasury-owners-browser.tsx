@@ -15,7 +15,7 @@ export function mount(f: any) {
   const control = (window as any).ownersTest = {
     owners: [...f.owners], threshold: 1, timestamp: "0x3a98", receipt: "pending", unavailable: false,
     balanceFailure: !!f.balanceFailure, holdNext: false, release: undefined as undefined | (() => void),
-    reads: 0, approvals: 0, walletCalls: [] as string[], unmount: () => {},
+    reads: 0, capacityTags: [] as string[], approvals: 0, walletCalls: [] as string[], unmount: () => {},
     chainId: f.chainId ?? toHex(f.config.l2.chainId), address: f.disconnected ? undefined : f.owners[0],
     switchMode: "accept", switches: [] as string[], signatures: [] as any[], prepared: [] as any[],
     releaseSwitch: undefined as undefined | (() => void), selectWallet: undefined as any,
@@ -45,6 +45,7 @@ export function mount(f: any) {
   };
   TreasuryClient.prototype.rpc = async function (url, method, params: any = []) {
     if (control.unavailable) throw new Error("Controlled owner read failure");
+    if (url === f.config.l2.rpc && method === "eth_getBlockByNumber" && ["latest", "safe"].includes(params[0])) control.capacityTags.push(params[0]);
     if (method === "eth_getTransactionReceipt") return (control.receipt === "pending" ? null : f.receipt) as any;
     if (method === "eth_getTransactionByHash") return { from: f.pending.sender, to: f.config.safeL1, input: f.pending.data, nonce: f.pending.sourceNonce } as any;
     if (method === "eth_getBlockByNumber") return { number: "0x106", hash: control.receipt === "orphan" ? f.orphanHash : f.blockHash, timestamp: control.timestamp } as any;

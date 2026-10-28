@@ -88,7 +88,7 @@ test('reverse-payment recovery binds destination and funding and validates the p
  assert.equal(settledPayment(c, p, [log]), undefined);
 });
 
-test('setup can read included L2 configuration while payments retain settled reads', async () => {
+test('capacity snapshots support explicit latest and safe observations', async () => {
  for (const tag of ['safe', 'latest']) {
   const client=idleClient(), original=client.rpc.bind(client), tags=[];
   client.rpc=async (url,method,params)=>{
@@ -199,4 +199,40 @@ test('v2 quotes each local allowance period independently and reads the shared b
  const state=await paymentState(client);
  assert.equal(state.epoch,100n);assert.equal(state.resetsAt,60600);
  assert.equal(state.allowanceL1[3],1010n);assert.equal(state.allowanceL2[3],1000n);
+});
+
+function laggingCapacity(latestAdvanced=true){
+ const calls=[],abi=[...paymentAbi,...allowanceAbi,...tokenAbi];
+ const config={...expiryConfig,l1:{rpc:'l1'},l2:{rpc:'l2'},payments:{...expiryConfig.payments,tokenL2:address('5'),moduleL1:address('6'),moduleL2:address('7')}};
+ return{config,calls,async rpc(url,method,params){
+  calls.push({url,method,params});
+  if(method==='eth_getBlockByNumber'){
+   const fresh=url==='l1'||params[0]==='0x11'||params[0]==='latest'&&latestAdvanced;
+   const number=url==='l1'?'0x20':fresh?'0x11':'0x10';
+   return{number,hash:keccak256(stringToHex(url+number)),timestamp:toHex(fresh?60660n:60540n)};
+  }
+  assert.equal(method,'eth_call');
+  const{functionName,args}=decodeFunctionData({abi,data:params[0].data});
+  const old=url==='l2'&&params[1]==='0x10';
+  const result=functionName==='balanceOf'?300_000_000n:functionName==='getTokenAllowance'?[100_000_000n,old?100_000_000n:0n,10n,old?1000n:1010n,0n]:args[0]===100n?150_000_000n:0n;
+  return encodeFunctionResult({abi,functionName,result});
+ }};
+}
+test('latest capacity sees a reset ahead of safe without adding RPC calls or mixing blocks',async()=>{
+ const payment={...p,amount:'40000000',fromL1:'20000000',deadline:'0'};
+ for(const tag of ['safe','latest']){
+  const client=laggingCapacity(),state=await paymentState(client,tag);
+  assert.equal(client.calls.length,9,'same nine existing snapshot reads');
+  const calls=client.calls.filter(c=>c.url==='l2'&&c.method==='eth_call');
+  assert(calls.every(c=>c.params[1]=== (tag==='safe'?'0x10':'0x11')));
+  if(tag==='safe'){assert.equal(state.epoch,100n);assert.throws(()=>fundingPreview(state,payment),/Shared budget/);}
+  else{assert.equal(state.epoch,101n);assert.deepEqual(fundingPreview(state,payment),{fromL1:20_000_000n,fromL2:20_000_000n});}
+ }
+});
+test('stalled latest capacity stays exhausted and a changed observed block is rejected',async()=>{
+ const client=laggingCapacity(false),state=await paymentState(client,'latest');assert.equal(state.epoch,100n);
+ assert.throws(()=>fundingPreview(state,{...p,deadline:'0'}),/Shared budget/);
+ const reorg=laggingCapacity(),rpc=reorg.rpc.bind(reorg);
+ reorg.rpc=async(url,method,params)=>{const result=await rpc(url,method,params);return url==='l2'&&method==='eth_getBlockByNumber'&&params[0]==='0x11'?{...result,hash:keccak256(stringToHex('different block'))}:result;};
+ await assert.rejects(paymentState(reorg,'latest'),/Chain state changed/);
 });
