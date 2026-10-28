@@ -52,10 +52,14 @@ jobs:
           node tests/integration/treasury-paired-setup.mjs
       - name: Browser regressions
         env:
-          CHROME_DEVEL_SANDBOX: /opt/google/chrome/chrome-sandbox
+          CHROME_DEVEL_SANDBOX: /usr/local/sbin/eez-chromium-sandbox
         run: |
-          test -u "$CHROME_DEVEL_SANDBOX"
           npx playwright install --with-deps chromium
+          # Use the helper from the pinned browser, not the runner's Chrome image.
+          sandbox_source="$(node -e 'const { chromium } = require("playwright"); const path = require("node:path"); process.stdout.write(path.join(path.dirname(chromium.executablePath()), "chrome_sandbox"));')"
+          test -x "$sandbox_source"
+          sudo install -o root -g root -m 4755 "$sandbox_source" "$CHROME_DEVEL_SANDBOX"
+          test -u "$CHROME_DEVEL_SANDBOX"
           node tests/composer-wallet.cjs
           node tests/treasury-setup-completion-browser.mjs
           node tests/treasury-mainnet-setup-browser.mjs
