@@ -124,6 +124,7 @@ export function App() {
   const [visualizerRoute, setVisualizerRoute] = useState(() => window.location.hash);
   const visualizerParams = new URLSearchParams(visualizerRoute.split("?")[1] ?? "");
   const [dashboardTab, setDashboardTab] = useState<DashboardTab>(() => getInitialTab(treasuryVisible));
+  const [returnToTreasury, setReturnToTreasury] = useState(false);
   useEffect(() => {
     document.title = `${view === "debug" ? "Quote Debugger" : view === "visualizer" ? "Execution Visualizer" : view === "monitor" ? "Network Monitor" : dashboardTab === "counter-demo" ? "Counter Demo" : dashboardTab === "treasury-demo" ? "Treasury Demo" : "Dashboard"} — ${config.rollupName}`;
   }, [view, dashboardTab, configLoaded]);
@@ -133,6 +134,19 @@ export function App() {
     setDashboardTab(tab);
     window.location.hash = tab === "dashboard" ? "" : `#/${tab}`;
   }, []);
+
+  const openTreasuryGasBridge = (destination: "l1" | "l2") => {
+    const current = latestBridgeState.current;
+    if (!["idle", "confirmed", "failed"].includes(current.phase) || current.phase === "failed" && current.txHash) {
+      throw new Error("A bridge transfer is still unresolved. Open Bridge & Calls and finish checking it before starting another.");
+    }
+    bridgeHook.setDirection(destination === "l2" ? "l1-to-l2" : "l2-to-l1");
+    bridgeHook.setAsset("eth");
+    bridgeHook.setDestination("");
+    bridgeHook.setGasOverride(null);
+    setReturnToTreasury(true);
+    switchTab("dashboard");
+  };
 
   const navigate = useCallback((v: string) => {
     setView(v);
@@ -417,6 +431,12 @@ export function App() {
             {dashboardTab === "dashboard" && (
               <div className={styles.dashboardGrid}>
                 <section className={styles.bridgeColumn} aria-label="Bridge transfers">
+                  {returnToTreasury && treasuryVisible && <div className={styles.feeNotice} role="region" aria-label="Safe setup funding">
+                    <p>Your Safe setup is saved. Bridge native currency to your wallet, then return to continue.</p>
+                    <button type="button" className="btn btn-outline btn-sm" onClick={() => {
+                      setReturnToTreasury(false); switchTab("treasury-demo");
+                    }}>Return to Safe setup</button>
+                  </div>}
                   <BridgePanel
                     state={bridgeHook.state}
                     recentTokens={bridgeHook.recentTokens}
@@ -537,7 +557,7 @@ export function App() {
 
             {treasuryVisible && dashboardTab === "treasury-demo" && (
               <Suspense fallback={<p role="status">Loading treasury preview…</p>}>
-                <TreasuryDemo wallet={wallet} ready={configLoaded} />
+                <TreasuryDemo wallet={wallet} ready={configLoaded} onBridgeGas={openTreasuryGasBridge} />
               </Suspense>
             )}
 

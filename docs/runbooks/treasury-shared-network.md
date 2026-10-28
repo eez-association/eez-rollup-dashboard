@@ -4,7 +4,7 @@
 for production use, including the Ethereum mainnet integration.** Source
 verification and passing tests do not constitute a security audit.
 
-Target the existing Chiado **10200** and EEZ-X **699069**, rollup **1**. All code,
+Target the existing Chiado **10200** and EEZ-X **699169**, rollup **2**. All code,
 checks and deployment records belong in this repository. The running protocol,
 operator wallets and chain data are not redeployed for this demo.
 
@@ -42,6 +42,37 @@ Its addresses, transaction receipts and current checks are recorded in the
 Infrastructure deployment is separate from each treasury setup and from
 real-wallet/Safe-app acceptance. The linked audit records the state observed at
 the time; the dashboard verifies the selected treasury before opening it.
+
+## Network configuration after the October 28 redeployment
+
+The treasury profile in `src/lib/treasury/paired-testnet-network.json` pins the
+chain IDs, registry, manager, bridge code and canonical block references. The
+main dashboard discovers chain IDs from RPC, while deployment addresses come
+from the server's runtime configuration. Both must describe the same deployment;
+changing the wallet network cannot repair a stale profile.
+
+The current public deployment uses registry
+`0x6258189D3a04EB31a196A8931077dfe001A9f6Fd` and the same-address `EEZBridge`
+`0xe993715bE7a0F60d484C5D19c4f008Ba79df1D4E` on Chiado and EEZ-X. Its rollup ID
+is **2**, distinct from chain ID **699169**. Compiler inputs for the bridge,
+its `EEZBridgedToken` children and the L1 protocol proxy are retained as
+verification-only supplemental sources. Existing release bundles are unchanged.
+
+Test USDC was provisioned for this bridge and rollup after the redeployment:
+
+- Chiado token: `0x5120287810Dbce61092a64b5E4BDD26B6079A601`.
+- EEZ-X wrapped token: `0x3f1CE94d61cE9B33993d94b1f5aac66f199DDBa3`.
+- Deployment transaction: `0xc2c05de5f37b351e8b874eb71fa0be480f591c7cfd5942d450c112919b1c0d1d` (Chiado).
+- Initial L2 claim: `0xf77652d6a1883b3c141f1d1f08c8bcc6825cd0f579717f4430f5c6e0136e26b0` (submitted on Chiado).
+
+The initial claim issued exactly 1,000 test tokens on EEZ-X and established the
+wrapped representation. Local runtime `treasuryTokenAddress` now selects the
+Chiado token. Token bindings, canonical bridge execution and the resulting
+network configuration were validated before enabling Safe setup. This local
+configuration change does not publish or update the public dashboard.
+The old token and saved treasury journals belong to the previous deployment;
+retain those records without relabeling them. Historical audits above describe
+their original deployment, not this one.
 
 ## Optional payment expiry (paired policy version 2)
 

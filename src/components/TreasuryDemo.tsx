@@ -13,7 +13,9 @@ import { TreasuryPairedHistory } from './TreasuryPairedHistory';
 import { TreasuryPairedRestart } from './TreasuryPairedRestart';
 import styles from './TreasuryDemo.module.css';
 
-function TreasuryDemoView({ wallet, ready }: { wallet: TreasuryWallet; ready: boolean }) {
+type TreasuryDemoProps = { wallet: TreasuryWallet; ready: boolean; onBridgeGas?: (destination: 'l1' | 'l2') => void };
+
+function TreasuryDemoView({ wallet, ready, onBridgeGas }: TreasuryDemoProps) {
   const [revision, setRevision] = useState(0);
   const [resetVersion, setResetVersion] = useState(0);
   const restart = () => { setResetVersion(x => x + 1); setRevision(x => x + 1); };
@@ -43,9 +45,9 @@ function TreasuryDemoView({ wallet, ready }: { wallet: TreasuryWallet; ready: bo
   if (!ready) return <p role="status">Loading treasury configuration…</p>;
   if (parsed.error) return <p role="alert">{parsed.error}</p>;
   if (!parsed.deployment && !config.treasury) {
-    if (mainnet) return <div className={styles.treasury}><TreasuryMainnetSetup key={resetVersion} wallet={wallet} target={target} onComplete={() => setRevision(x => x + 1)} />
+    if (mainnet) return <div className={styles.treasury}><TreasuryMainnetSetup key={resetVersion} wallet={wallet} target={target} onComplete={() => setRevision(x => x + 1)} onBridgeGas={onBridgeGas} />
       <TreasuryPairedRestart network={network} wallet={wallet} onRestart={restart} /></div>;
-    if (shared && config.l1FeesEnabled && config.l2FeesEnabled) return <TreasuryTestnet wallet={wallet} target={target} bridgeL1={config.l1Bridge} bridgeL2={config.l2Bridge} token={config.treasuryTokenAddress} />;
+    if (shared && config.l1FeesEnabled && config.l2FeesEnabled) return <TreasuryTestnet wallet={wallet} target={target} bridgeL1={config.l1Bridge} bridgeL2={config.l2Bridge} token={config.treasuryTokenAddress} onBridgeGas={onBridgeGas} />;
   }
   if (!parsed.deployment) return <p role="status">Connect a configured paired treasury for this network.</p>;
   const deployment = parsed.deployment;
@@ -57,6 +59,6 @@ function TreasuryDemoView({ wallet, ready }: { wallet: TreasuryWallet; ready: bo
   } : undefined} />{mainnet && !config.treasury && <><TreasuryPairedHistory target={target} network={network} />
     <TreasuryPairedRestart network={network} wallet={wallet} onRestart={restart} /></>}</div>;
 }
-export function TreasuryDemo(props: { wallet: TreasuryWallet; ready: boolean }) {
+export function TreasuryDemo(props: TreasuryDemoProps) {
   return <><TreasuryDemoView {...props} />{props.ready && <TreasurySourceVerification />}</>;
 }

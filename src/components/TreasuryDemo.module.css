@@ -4,6 +4,18 @@
 .heading p, .card p { color: var(--text-dim); line-height: 1.6; }
 .badge { border: 1px solid var(--border); border-radius: 100px; padding: 5px 10px; color: var(--text-dim); font: 500 12px/1.5 var(--mono); }
 .notice { border-left: 2px solid var(--yellow); background: var(--yellow-dim); border-radius: var(--radius-xs); padding: 12px 16px; color: var(--text); }
+.gasNotice { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; align-items: center; gap: 16px; padding: 18px; border: 1px solid var(--yellow-border); border-left: 3px solid var(--yellow); border-radius: var(--radius-sm); background: var(--yellow-dim); }
+.gasNoticeIcon { display: grid; place-items: center; width: 40px; height: 40px; border: 1px solid var(--yellow-border); border-radius: var(--radius-sm); color: var(--yellow); }
+.gasNoticeCopy { min-width: 0; }
+.gasNoticeCopy strong { color: var(--text-bright); font: 600 14px/1.5 var(--sans); }
+.gasNoticeCopy p { margin: 4px 0 0; font-size: 13px; }
+.gasNoticeCopy p.hint { font-size: 12px; }
+.gasNoticeAction { white-space: nowrap; }
+@media (max-width: 640px) {
+  .gasNotice { grid-template-columns: 32px minmax(0, 1fr); align-items: start; gap: 12px; padding: 16px; }
+  .gasNoticeIcon { width: 32px; height: 32px; }
+  .gasNoticeAction { grid-column: 1 / -1; width: 100%; }
+}
 .overview, .workflow { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
 .workflow { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); align-items: start; }
 .card { composes: eez-card from global; min-width: 0; padding: 24px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-card); display: flex; flex-direction: column; gap: 12px; }

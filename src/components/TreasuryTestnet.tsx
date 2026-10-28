@@ -13,8 +13,8 @@ import { TreasuryPairedRestart } from './TreasuryPairedRestart';
 import styles from './TreasuryDemo.module.css';
 
 /** Network asset provisioning is separate from a user's six Safe setup steps. */
-export function TreasuryTestnet({ wallet, target, bridgeL1, bridgeL2, token }: {
-  wallet: TreasuryWallet; target: MainnetTarget; bridgeL1: string; bridgeL2: string; token: string;
+export function TreasuryTestnet({ wallet, target, bridgeL1, bridgeL2, token, onBridgeGas }: {
+  wallet: TreasuryWallet; target: MainnetTarget; bridgeL1: string; bridgeL2: string; token: string; onBridgeGas?: (destination: 'l1' | 'l2') => void;
 }) {
   const cacheKey = savedNetworkKey(target, bridgeL1, bridgeL2, token);
   const [selection, setSelection] = useState<{ key: string; network: SetupNetwork | null; verified?: boolean }>(() => ({ key: cacheKey, network: savedNetwork(localStorage, cacheKey, bridgeL1, bridgeL2, token, target) }));
@@ -52,10 +52,10 @@ export function TreasuryTestnet({ wallet, target, bridgeL1, bridgeL2, token }: {
     window.addEventListener('storage', changed);
     return () => window.removeEventListener('storage', changed);
   }, [network]);
-  if (!isAddress(token)) return <p role="status">Configure the treasury token before setting up your Safes.</p>;
+  if (!isAddress(token)) return <p role="status">Test USDC is not configured for this deployment. Provision the token and its EEZ-X bridge representation before setting up your Safes.</p>;
   if (error || loaded.error) return <p role="alert">{error || loaded.error}</p>;
   if (!network) return <p role="status">Checking the configured treasury token…</p>;
-  if (!loaded.deployment) return <div className={styles.treasury}><TreasuryMainnetSetup key={resetVersion} wallet={wallet} target={target} network={network} onComplete={() => setRevision(x => x + 1)} />
+  if (!loaded.deployment) return <div className={styles.treasury}><TreasuryMainnetSetup key={resetVersion} wallet={wallet} target={target} network={network} onComplete={() => setRevision(x => x + 1)} onBridgeGas={onBridgeGas} />
     <TreasuryPairedRestart network={network} wallet={wallet} onRestart={restart} /></div>;
   const setupKey = `eez:treasury:paired-setup:${setupIdentity(network)}`;
   return <div className={styles.treasury}><TreasuryConnected key={loaded.deployment.instance} deployment={loaded.deployment} wallet={wallet} payments networkReady={selection.key === cacheKey && selection.verified === true} guardAction={async action => {

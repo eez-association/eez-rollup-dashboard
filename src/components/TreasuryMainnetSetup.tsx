@@ -14,7 +14,7 @@ import { guardWalletRequests } from "../lib/treasury/walletRequestScope";
 
 const same = (a?: string | null, b?: string | null) => !!a && !!b && a.toLowerCase() === b.toLowerCase();
 
-export function TreasuryMainnetSetup({ wallet, target, onComplete, network = defaultNetwork }: { wallet: TreasuryWallet; target: MainnetTarget; network?: SetupNetwork; onComplete: (c: TreasuryConfig) => void }) {
+export function TreasuryMainnetSetup({ wallet, target, onComplete, onBridgeGas, network = defaultNetwork }: { wallet: TreasuryWallet; target: MainnetTarget; network?: SetupNetwork; onComplete: (c: TreasuryConfig) => void; onBridgeGas?: (destination: "l1" | "l2") => void }) {
   const mainnetSetupKey = `eez:treasury:paired-setup:${setupIdentity(network)}`, mainnetManifestKey = `${mainnetSetupKey}:manifest`;
   const l1Name = network.testnet ? "Chiado" : "Ethereum";
   const [state, setState] = useState<MainnetSetupState | null>(null), [engine, setEngine] = useState<MainnetSetup | null>(null);
@@ -226,7 +226,20 @@ export function TreasuryMainnetSetup({ wallet, target, onComplete, network = def
       {wallet.address && <details className={styles.disclosure}><summary>Wallet gas balances</summary>
         {gasKnown ? <><p>{l1Name}: {formatEther(balances!.l1)} {symbol}</p><p>EEZ-X: {formatEther(balances!.l2)} {symbol}</p></> : <p>{balanceError || "Reading wallet gas balances…"}</p>}
       </details>}
-      {noGas && !state.pending && <p className={styles.notice}>Add {symbol} to your wallet on {step.chain === "l1" ? l1Name : "EEZ-X"} before submitting.{needsOwners && " You can still sign an approval; a funded wallet can submit once the quorum is collected."}</p>}
+      {noGas && !state.pending && <section className={styles.gasNotice} aria-label="Wallet gas required">
+        <span className={styles.gasNoticeIcon} aria-hidden="true"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M3 21V5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v16M2 21h12M3 10h10M13 13h2a2 2 0 0 1 2 2v3a2 2 0 0 0 4 0V9l-3-3M18 6v3h3" />
+        </svg></span>
+        <div className={styles.gasNoticeCopy}>
+          <strong>Gas needed on {step.chain === "l1" ? l1Name : "EEZ-X"}</strong>
+          <p>Add {symbol} to your wallet to submit this step.</p>
+          {needsOwners && <p>You can still sign an approval; a funded wallet can submit once the quorum is collected.</p>}
+          {onBridgeGas && <p className={styles.hint}>Your setup is saved. Bridge funds, then return to continue.</p>}
+        </div>
+        {onBridgeGas && <button type="button" className={`btn btn-solid ${styles.gasNoticeAction}`} disabled={busy || wrongDeployer} onClick={() => {
+          try { onBridgeGas(step.chain); } catch (e) { setError((e as Error).message); }
+        }}>Bridge to {step.chain === "l2" ? "L2" : "L1"}<span aria-hidden="true">→</span></button>}
+      </section>}
       {state.pending ? <div className={styles.notice} role="status">
         <p>{state.pending.hash ? "Waiting for confirmation…" : "Waiting for the wallet transaction…"} Keep this recorded request; it will be checked automatically after reload.</p>
         {state.pending.hash && <p>{confirmationElapsed}s checking confirmation on this screen. Network confirmation time varies.</p>}

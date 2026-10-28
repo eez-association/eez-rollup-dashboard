@@ -7,13 +7,14 @@ import { MainnetSetup, setupIdentity } from '../src/lib/treasury/mainnetSetup.ts
 import { transferAbi } from '../src/lib/treasury/transfers.ts';
 const read = path => JSON.parse(readFileSync(path));
 const release = read(`src/lib/treasury/builds/${read('src/lib/treasury/current-build.json').build}.json`);
+const currentProfile = read('src/lib/treasury/paired-testnet-network.json');
 const a = n => toHex(n, { size: 20 }), h = n => toHex(n, { size: 32 });
 const target = { l1: { rpc: 'http://127.0.0.1:1', front: 'http://127.0.0.1:1', explorer: 'https://example.com' },
   l2: { rpc: 'http://127.0.0.1:2', front: 'http://127.0.0.1:2', explorer: 'https://example.com' }, fees: { l1: '100', l2: '100' } };
 const fixture = () => new TestnetAsset(target, release, a(1), a(2));
 test('existing testnet bridge accepts the same-address default and rejects a changed counterpart or code', async () => {
   const profile = read('src/lib/treasury/paired-testnet-network.json');
-  const bridgeCode = read('verification/dependencies/testnet-bridge.json').runtime;
+  const bridgeCode = read(`verification/${profile.bridges.l1.verification}`).runtime;
   for (const [peer, code, accepted] of [[zeroAddress, bridgeCode, true], [profile.bridges.l2.address, bridgeCode, true], [a(9), bridgeCode, false], [zeroAddress, '0x6000', false]]) {
     const d = new TestnetAsset(target, release, profile.bridges.l1.address, profile.bridges.l2.address);
     d.read = async (_chain, _address, _abi, method) => ({manager:profile.registry, rollupId:0n, canonicalBridgeAddress:peer})[method];
@@ -36,7 +37,7 @@ test('testnet deploys genuine TestUSDC and claims cannot encode an arbitrary amo
   const d = fixture(), artifact = release.contracts.TestUSDC;
   const creation = d.data('deploy', a(3));
   const args = decodeAbiParameters(artifact.abi.find(x => x.type === 'constructor').inputs, `0x${creation.slice(artifact.bytecode.length)}`);
-  assert.deepEqual(args.map(String), [a(1), '1']);
+  assert.deepEqual(args.map(String), [a(1), String(currentProfile.rollupId)]);
   for (const [kind, method] of [['l1','claim'], ['l2','claimOnL2']]) {
     const call = decodeFunctionData({ abi: artifact.abi, data: d.data(kind, a(3)) });
     assert.equal(call.functionName, method); assert.deepEqual(call.args, [a(3)]);
@@ -44,10 +45,10 @@ test('testnet deploys genuine TestUSDC and claims cannot encode an arbitrary amo
   assert.equal(CLAIM_AMOUNT, 1_000_000_000n);
 });
 test('retired test tokens and mismatched immutable faucet bindings are rejected', async () => {
-  for (const patch of [{}, { bridgeL1: a(9) }, { destinationRollup: 2n }, { MAX_REQUEST_AMOUNT: 450_000_000n }, { code: '0x6000' }]) {
+  for (const patch of [{}, { bridgeL1: a(9) }, { destinationRollup: BigInt(currentProfile.rollupId) + 1n }, { MAX_REQUEST_AMOUNT: 450_000_000n }, { code: '0x6000' }]) {
     const d = fixture();
     d.rpc = async () => patch.code ?? release.contracts.TestUSDC.runtime;
-    d.read = async (_chain, _token, _abi, method) => ({ bridgeL1: a(1), destinationRollup: 1n, MAX_REQUEST_AMOUNT: CLAIM_AMOUNT, ...patch })[method];
+    d.read = async (_chain, _token, _abi, method) => ({ bridgeL1: a(1), destinationRollup: BigInt(currentProfile.rollupId), MAX_REQUEST_AMOUNT: CLAIM_AMOUNT, ...patch })[method];
     if (Object.keys(patch).length) await assert.rejects(d.validateToken(a(4)), /current fixed/);
     else await d.validateToken(a(4));
   }
