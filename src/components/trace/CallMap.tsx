@@ -78,7 +78,7 @@ export function CallMap({ model, rows, steps, physical, selected, onSelect, coll
     const blank = { lane: 0, x: 0, y: 0, w: F.w, h: F.h, row: 0 };
     // A box's first call stays on its row; later calls stack below the previous call's subtree.
     const visit = (row: TraceRow, col: number, pref: Partial<Record<TraceChain, number>>, parent: Item) => {
-      const item: Item = { ...blank, h: Math.max(F.h, boxHeight(row.node)) + (tokens ? tokenNotesHeight(row.node.tokenTransfers?.length ?? 0) : 0), id: String(row.node.id), node: row.node, chain: row.node.chain, col, parent, step: stepOf.get(row.node.id) };
+      const item: Item = { ...blank, h: Math.max(F.h, boxHeight(row.node)) + (tokens ? tokenNotesHeight(row.node.tokenTransfers ?? []) : 0), id: String(row.node.id), node: row.node, chain: row.node.chain, col, parent, step: stepOf.get(row.node.id) };
       place(item, pref);
       const reach: Partial<Record<TraceChain, number>> = { [item.chain]: item.row };
       const next = { ...pref, [item.chain]: item.row };

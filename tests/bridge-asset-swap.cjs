@@ -5,7 +5,7 @@ const {fixture,until,RAW_GAS}=require('./bridge-gas-fees.cjs');
 const units=value=>{const whole=value/10n**18n;const frac=(value%10n**18n).toString().padStart(18,'0').replace(/0+$/,'');return whole+(frac?'.'+frac:'');};
 const feeCap=1000000014n;
 (async()=>{
- const browser=await chromium.launch({headless:true});let scenarios=0;
+ const browser=await chromium.launch({ headless: true, chromiumSandbox: true });let scenarios=0;
  const close=async f=>{assert.deepEqual(f.errors,[]);await f.context.close();scenarios++;};
  try{
   const empty=await fixture(browser,{disconnected:true,multipleWallets:true});

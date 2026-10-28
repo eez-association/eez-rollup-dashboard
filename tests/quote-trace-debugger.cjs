@@ -15,7 +15,7 @@ test('dashboard Debug imports nested traces in an isolated frame under the build
   });
   let browser;
   try {
-    browser = await chromium.launch({ headless: true });
+    browser = await chromium.launch({ headless: true, chromiumSandbox: true });
     const page = await browser.newPage({ viewport: { width: 1440, height: 1100 } });
     const origin = `http://127.0.0.1:${server.httpServer.address().port}`;
     const url = `${origin}${base}`;

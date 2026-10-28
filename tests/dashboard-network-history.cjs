@@ -13,7 +13,7 @@ const incoming = { address: manager, topics: [keccak256(stringToHex('IncomingCro
   data: data(['bool','address','uint64','address','uint256','uint64','bytes'],[false,caller,0n,manager,1n,90000n,'0x1234']), blockHash: l2Block, blockNumber: '0x7', transactionHash: l2Tx };
 const settlement = { l1BlockNumber:'0x64',l1BlockHash:l1Block,l1TransactionHash:l1Tx,l2Blocks:[{number:'0x7',hash:l2Block}],canonicalL2:true };
 (async()=>{
-  const browser = await chromium.launch({headless:true,args:['--no-sandbox']});
+  const browser = await chromium.launch({headless:true,chromiumSandbox: true});
   try {
     const page = await browser.newPage({viewport:{width:1920,height:1080}});
     const errors=[],requests=[];let indexed=false,indexError=true,receiptError=true,receiptMissing=false;

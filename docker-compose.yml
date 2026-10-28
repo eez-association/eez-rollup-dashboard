@@ -156,6 +156,8 @@ services:
       context: .
       target: verification
     image: eez-treasury-verification:local
+    environment:
+      ETHERSCAN_API_KEY: "${ETHERSCAN_API_KEY:-}"
     network_mode: "service:ui"
     depends_on:
       ui:

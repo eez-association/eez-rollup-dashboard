@@ -9,12 +9,17 @@ import type { TreasurySettlement } from "../lib/treasury/settlement";
 
 export function useTreasuryHistory(client: TreasuryClient, restored: Intent | null, enabled: boolean) {
   const [store] = useState(() => new PaymentHistoryStore(client.config, { getItem: key => localStorage.getItem(key), setItem: (key, value) => localStorage.setItem(key, value) }));
-  const [entries, setEntries] = useState<HistoryEntry[]>([]);
+  const [initial] = useState(() => {
+    try { return { entries: enabled ? store.read() : [], error: "" }; }
+    catch { return { entries: [], error: "Payment history could not be read. Existing records have been kept." }; }
+  });
+  const [entries, setEntries] = useState<HistoryEntry[]>(initial.entries);
   const [observations, setObservations] = useState<Record<string, HistoryObservation>>({});
-  const [error, setError] = useState("");
+  const [error, setError] = useState(initial.error);
   const [checking, setChecking] = useState(false);
   const generation = useRef(0);
   const running = useRef(false);
+  const observationVersions = useRef(new Map<string, number>());
   const update = useCallback((action: () => HistoryEntry[]) => {
     try { const next = action(); setEntries(next); setError(""); return next; }
     catch (failure) { const message = `Payment history could not be saved or read: ${failure instanceof Error ? failure.message : String(failure)}. Existing records have been kept.`;
@@ -24,10 +29,13 @@ export function useTreasuryHistory(client: TreasuryClient, restored: Intent | nu
   const reject = useCallback((payment: Payment, detail: string) => update(() => store.reject(payment, detail)), [store, update]);
   const cancel = useCallback((intent: Intent) => update(() => store.cancel(intent)), [store, update]);
   const observe = useCallback((intent: Intent, outcome: Outcome) => {
-    if (intent.payment) setObservations(previous => ({ ...previous, [attemptId(intent)]: { outcome, checkedAt: new Date().toISOString() } }));
+    if (!intent.payment) return;
+    const id = attemptId(intent);
+    observationVersions.current.set(id, (observationVersions.current.get(id) ?? 0) + 1);
+    setObservations(previous => ({ ...previous, [id]: { outcome, checkedAt: new Date().toISOString() } }));
   }, []);
-  // One sequential reconciliation per refresh; no RPC fan-out proportional to
-  // the journal size. This never changes the active request or sends a payment.
+  // Two bounded workers check newest entries first. A slow old payment must
+  // not hold up every other row. This never submits or changes an active request.
   const refresh = useCallback(async () => {
     if (running.current) return;
     running.current = true; setChecking(true);
@@ -35,21 +43,28 @@ export function useTreasuryHistory(client: TreasuryClient, restored: Intent | nu
     try {
       const saved = restored?.payment ? update(() => store.remember(restored)) : update(() => store.read());
       await client.validate();
-      for (const entry of [...saved].reverse()) {
-        if (current !== generation.current) return;
-        if (entry.kind !== "submitted") continue;
-        setObservations(previous => ({ ...previous, [entry.id]: { checking: true } }));
-        try {
-          const config = historyConfig(client.config, entry.intent);
-          const outcome = await (config === client.config ? client : new TreasuryClient(config)).outcome(entry.intent);
-          if (current !== generation.current) return;
-          if (outcome.hash && outcome.hash !== entry.intent.hash) remember({ ...entry.intent, hash: outcome.hash });
-          observe(entry.intent, outcome);
-        } catch (failure) {
-          if (current !== generation.current) return;
-          setObservations(previous => ({ ...previous, [entry.id]: { error: failure instanceof Error ? failure.message : String(failure) } }));
+      const queue = [...saved].reverse(); let cursor = 0;
+      const reconcile = async () => {
+        while (cursor < queue.length && current === generation.current) {
+          const entry = queue[cursor++]!;
+          if (entry.kind !== "submitted") continue;
+          const version = observationVersions.current.get(entry.id) ?? 0;
+          setObservations(previous => ({ ...previous, [entry.id]: { ...previous[entry.id], error: undefined, checking: true } }));
+          try {
+            const config = historyConfig(client.config, entry.intent);
+            const outcome = await (config === client.config ? client : new TreasuryClient(config)).outcome(entry.intent);
+            if (current !== generation.current) return;
+            if ((observationVersions.current.get(entry.id) ?? 0) !== version) continue;
+            if (outcome.hash && outcome.hash !== entry.intent.hash) remember({ ...entry.intent, hash: outcome.hash });
+            observe(entry.intent, outcome);
+          } catch (failure) {
+            if (current !== generation.current) return;
+            if ((observationVersions.current.get(entry.id) ?? 0) !== version) continue;
+            setObservations(previous => ({ ...previous, [entry.id]: { error: failure instanceof Error ? failure.message : String(failure) } }));
+          }
         }
-      }
+      };
+      await Promise.all([reconcile(), reconcile()]);
     } catch (failure) {
       if (current === generation.current) { setError(failure instanceof Error ? failure.message : String(failure)); setObservations({}); }
     } finally { if (current === generation.current) { running.current = false; setChecking(false); } }
@@ -63,10 +78,11 @@ export function useTreasuryHistory(client: TreasuryClient, restored: Intent | nu
   }, [client, enabled, refresh]);
   // Share optional explorer evidence between collapsed rows and the active flow.
   // Reconcile sequentially even for a long journal; opening details adds no RPCs.
-  const queries = Object.values(observations).flatMap(({ outcome, checking, error }) =>
-    !checking && !error && settlementIdentity(outcome) ? [{ kind: "settled" as const, detail: "", block: outcome!.block, execution: { l2: outcome!.execution!.l2 } }] : []);
+  const queries = Object.values(observations).flatMap(({ outcome, error }) =>
+    !error && settlementIdentity(outcome) ? [{ kind: "settled" as const, detail: "", block: outcome!.block, execution: { l2: outcome!.execution!.l2 } }] : []);
   const queryKey = JSON.stringify(queries);
-  const [evidence, setEvidence] = useState<{ key: string; records: Record<string, TreasurySettlement | null> }>({ key: "", records: {} });
+  const [evidence, setEvidence] = useState<Record<string, TreasurySettlement | null>>({});
+  const evidenceCheckedAt = useRef(new Map<string, number>());
   const requestedEvidence = useRef({ key: queryKey, queries });
   requestedEvidence.current = { key: queryKey, queries };
   const refreshEvidence = useRef<(() => void) | null>(null);
@@ -78,11 +94,16 @@ export function useTreasuryHistory(client: TreasuryClient, restored: Intent | nu
       clearTimeout(timer); running = true;
       const request = requestedEvidence.current;
       for (const outcome of request.queries) {
-        if (!alive || requestedEvidence.current.key !== request.key) break;
+        if (!alive) break;
+        const identity = settlementIdentity(outcome)!;
+        const wanted = () => requestedEvidence.current.queries.some(item => settlementIdentity(item) === identity);
+        if (!wanted() || Date.now() - (evidenceCheckedAt.current.get(identity) ?? 0) < 10000) continue;
         let settlement: TreasurySettlement | null = null;
         try { settlement = await treasurySettlement(client, outcome); } catch { /* Optional links never change payment verification. */ }
-        if (!alive || requestedEvidence.current.key !== request.key) break;
-        setEvidence(previous => ({ key: request.key, records: { ...(previous.key === request.key ? previous.records : {}), [settlementIdentity(outcome)!]: settlement } }));
+        if (!alive) break;
+        if (!wanted()) continue;
+        evidenceCheckedAt.current.set(identity, Date.now());
+        setEvidence(previous => ({ ...previous, [identity]: settlement }));
       }
       running = false;
       if (alive) timer = setTimeout(reconcile, requestedEvidence.current.key === request.key ? 10000 : 0);
@@ -94,7 +115,7 @@ export function useTreasuryHistory(client: TreasuryClient, restored: Intent | nu
   useEffect(() => { refreshEvidence.current?.(); }, [queryKey]);
   const settlementFor = (outcome?: Outcome | null) => {
     const identity = settlementIdentity(outcome);
-    return identity && evidence.key === queryKey ? evidence.records[identity] : undefined;
+    return identity ? evidence[identity] : undefined;
   };
   return { entries, observations, error, checking, remember, reject, cancel, observe, refresh, settlementFor };
 }

@@ -1,0 +1,48 @@
+{
+  "version": 1,
+  "source": "https://eez.dev/dashboard/config.json",
+  "protocolCommit": "84a5b5207880f192a6a5896cbfe0bac5249db47f",
+  "registry": "0x6258189D3a04EB31a196A8931077dfe001A9f6Fd",
+  "manager": "0x4B2760F84B83d6b3829E30A7573B0172B6d6402C",
+  "rollupId": 2,
+  "bridges": {
+    "l1": {
+      "address": "0xe993715bE7a0F60d484C5D19c4f008Ba79df1D4E",
+      "codeHash": "0xb7d5c139683ac64486723ba6eb674b4dc6cf39ee4ea9f0cdd3a304d11e740e24",
+      "verification": "supplemental/a2a97d4ad17097b771a00be27ba408c36d66db1dd028bb175fc51f871dced9ba.json"
+    },
+    "l2": {
+      "address": "0xe993715bE7a0F60d484C5D19c4f008Ba79df1D4E",
+      "codeHash": "0xb7d5c139683ac64486723ba6eb674b4dc6cf39ee4ea9f0cdd3a304d11e740e24",
+      "verification": "supplemental/a2a97d4ad17097b771a00be27ba408c36d66db1dd028bb175fc51f871dced9ba.json"
+    }
+  },
+  "chains": {
+    "l1": {
+      "chainId": 10200,
+      "checkpoint": {
+        "number": "0x16a2a8b",
+        "hash": "0x661e2e02371c95760f01e7447cc8cd93a2fc37a471f2210de00c76d8a569f3e5"
+      },
+      "protocol": {
+        "proxy": "0x6258189D3a04EB31a196A8931077dfe001A9f6Fd",
+        "proxyCodeHash": "0x3bf0fc846b5e469ad259a0282a301aa7bc16d86f9385f13d75d1057642aa38ac",
+        "implementation": "0x0E2584F56B7d225697b0fbe71bbF42F576eDB2EA",
+        "implementationCodeHash": "0xe7c6836fb3fbe6d4db76efcd700c603fbc18537a8cfc2c6046bd416d768838ab"
+      }
+    },
+    "l2": {
+      "chainId": 699169,
+      "checkpoint": {
+        "number": "0x0",
+        "hash": "0x283b471b65276c23867b5351fe1973fc9438310d865b6f833d1cd6666478ccb0"
+      },
+      "protocol": {
+        "proxy": "0x4B2760F84B83d6b3829E30A7573B0172B6d6402C",
+        "proxyCodeHash": "0x88068de4c46d94b72f5d39f17b5407c958ec6920376ff1dd366995f65564372a",
+        "implementation": "0x4C3D971b1079E58843D0E1af155A2e54b9E54dbA",
+        "implementationCodeHash": "0x6608b15f95abba529ea700dcbeb0a3eaeeb6f425508c393d2f7c45519bfbb3fe"
+      }
+    }
+  }
+}

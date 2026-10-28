@@ -24,7 +24,7 @@ const snapshot = {generatedAt:new Date().toISOString(),healthy:true,stale:false,
     l2:{healthy:true,chainId:1337,latest:{number:7,hash:l2Hash,timestamp:1750000000},blocks:[]}},
   rollup:{status:'unavailable'},metrics:{},settlementHistory:{available:true},blobSettlements:settlements};
 (async()=>{
-  const browser=await chromium.launch({headless:true});
+  const browser=await chromium.launch({ headless: true, chromiumSandbox: true });
   const page=await browser.newPage({viewport:{width:1440,height:900}});
   const errors=[],requests=[];
   let state='awaiting';

@@ -7,6 +7,7 @@ const origin = process.env.EEZ_UI_URL || 'http://127.0.0.1:8080';
 const bridge = { l1: '0x' + '11'.repeat(20), l2: '0x' + '22'.repeat(20) };
 const manager = '0x' + '0'.repeat(24) + '33'.repeat(20);
 const zero = '0x' + '0'.repeat(64);
+const currentGetter = '0xb3f5aaab', legacyGetter = '0x481c6a75';
 const missing = 'Bridge contract not deployed or not initialized';
 const results = [];
 
@@ -78,15 +79,19 @@ async function fixture(browser, options = {}) {
     const reply = result => route.fulfill({ json: { jsonrpc: '2.0', id, result } });
     const isBridgeCode = method === 'eth_getCode' && params[0] === bridge[chain];
     const isManager = method === 'eth_call' && params[0]?.to === bridge[chain]
-      && params[0]?.data === '0x481c6a75';
+      && [currentGetter, legacyGetter].includes(params[0]?.data);
     if (isBridgeCode || isManager) {
-      calls.push({ chain, method });
+      calls.push({ chain, method, data: params[0]?.data });
       if (options.readGate) await options.readGate.promise;
       if (modes[chain] === 'rpc-error') {
         return route.fulfill({ json: { jsonrpc: '2.0', id,
           error: { code: -32000, message: 'RPC temporarily unavailable' } } });
       }
       if (isBridgeCode) return reply(modes[chain] === 'no-code' ? '0x' : '0x6000');
+      if (params[0].data === currentGetter && options.getters?.[chain] === 'legacy-revert') {
+        return route.fulfill({ json: { jsonrpc: '2.0', id, error: { code: 3, message: 'execution reverted' } } });
+      }
+      if (params[0].data === currentGetter && options.getters?.[chain] === 'legacy-empty') return reply('0x');
       if (modes[chain] === 'zero-manager') return reply(zero);
       if (modes[chain] === 'empty-manager') return reply('0x');
       if (modes[chain] === 'malformed-manager') return reply('not-an-address');
@@ -119,7 +124,7 @@ async function fixture(browser, options = {}) {
 }
 
 (async () => {
-  const browser = await chromium.launch({ headless: true, args: ['--no-sandbox'] });
+  const browser = await chromium.launch({ headless: true, chromiumSandbox: true });
   try {
     const configGate = gate(), readGate = gate();
     const f = await fixture(browser, { configGate, readGate });
@@ -145,6 +150,17 @@ async function fixture(browser, options = {}) {
       'a false missing-deployment warning appeared during startup');
     results.push('Delayed config/readiness: no false warning; disabled until ready; immediate check; no overlapping reads; both RPC directions');
     await f.clean();
+
+    for (const getter of ['current', 'legacy-revert', 'legacy-empty']) {
+      const f = await fixture(browser, { getters: { l1: getter } });
+      await f.page.getByLabel('Bridge amount', { exact: true }).fill('0.001');
+      await until(() => f.button.isEnabled(), getter + ' getter did not enable bridging');
+      assert.deepEqual(f.calls.filter(c => c.chain === 'l1' && c.method === 'eth_call').map(c => c.data),
+        getter === 'current' ? [currentGetter] : [currentGetter, legacyGetter]);
+      assert.deepEqual(f.calls.filter(c => c.chain === 'l2' && c.method === 'eth_call').map(c => c.data), [currentGetter]);
+      results.push(getter + ': getter order and mixed bridge versions accepted');
+      await f.clean();
+    }
 
     for (const mode of ['no-code', 'zero-manager', 'rpc-error', 'empty-manager', 'malformed-manager']) {
       const f = await fixture(browser, { modes: { l1: mode } });

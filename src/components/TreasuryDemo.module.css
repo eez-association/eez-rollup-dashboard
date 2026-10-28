@@ -4,6 +4,18 @@
 .heading p, .card p { color: var(--text-dim); line-height: 1.6; }
 .badge { border: 1px solid var(--border); border-radius: 100px; padding: 5px 10px; color: var(--text-dim); font: 500 12px/1.5 var(--mono); }
 .notice { border-left: 2px solid var(--yellow); background: var(--yellow-dim); border-radius: var(--radius-xs); padding: 12px 16px; color: var(--text); }
+.gasNotice { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; align-items: center; gap: 16px; padding: 18px; border: 1px solid var(--yellow-border); border-left: 3px solid var(--yellow); border-radius: var(--radius-sm); background: var(--yellow-dim); }
+.gasNoticeIcon { display: grid; place-items: center; width: 40px; height: 40px; border: 1px solid var(--yellow-border); border-radius: var(--radius-sm); color: var(--yellow); }
+.gasNoticeCopy { min-width: 0; }
+.gasNoticeCopy strong { color: var(--text-bright); font: 600 14px/1.5 var(--sans); }
+.gasNoticeCopy p { margin: 4px 0 0; font-size: 13px; }
+.gasNoticeCopy p.hint { font-size: 12px; }
+.gasNoticeAction { white-space: nowrap; }
+@media (max-width: 640px) {
+  .gasNotice { grid-template-columns: 32px minmax(0, 1fr); align-items: start; gap: 12px; padding: 16px; }
+  .gasNoticeIcon { width: 32px; height: 32px; }
+  .gasNoticeAction { grid-column: 1 / -1; width: 100%; }
+}
 .overview, .workflow { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
 .workflow { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); align-items: start; }
 .card { composes: eez-card from global; min-width: 0; padding: 24px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-card); display: flex; flex-direction: column; gap: 12px; }
@@ -26,7 +38,7 @@
 .route summary { cursor: pointer; color: var(--text); }
 .route details p { margin-top: 8px; font-size: 12px; }
 .quorum { color: var(--text-bright); font: 600 18px/1.5 var(--sans); }
-.error { color: var(--red) !important; }
+.error { color: var(--red) !important; overflow-wrap: anywhere; }
 @media (max-width: 800px) { .workflow { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 640px) {
   .overview, .ownerFields { grid-template-columns: minmax(0, 1fr); }
@@ -56,9 +68,12 @@
 .treasury a:not(:global(.btn)) { color: var(--text); text-decoration: underline; text-underline-offset: 3px; }
 
 .safeChoices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: 24px; margin-block: 8px; }
+.setupOptions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 32px; width: min(100%, 640px); align-self: center; margin: 12px auto; }
+.setupOptions > button { min-width: 0; min-height: 56px; padding: 14px 20px; font-size: 15px; white-space: normal; }
+@media (max-width: 640px) { .setupOptions { gap: 12px; } .setupOptions > button { padding: 12px 10px; font-size: 13px; } }
 .safeChoices input, .safeChoices select { height: 46px; }
 .startSetup { align-self: flex-end; min-width: 160px; }
-.hint { color: var(--text-dim); font-size: 12px; line-height: 1.6; }
+.hint { color: var(--text-dim); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
 .safeExplanation { max-width: 75ch; font-size: 14px; }
 .safeExplanation strong { color: var(--text-bright); font-weight: 600; }
 .safeIdentity { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
@@ -68,6 +83,10 @@
 .copyStatus { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .balanceSummary { display: grid; grid-template-columns: 1.2fr 1fr 1fr; gap: 16px; }
 .amount span { font-size: 14px; font-weight: 400; color: var(--text-dim); }
+.safeBalanceRow { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 12px; }
+.safeFaucetAction { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; max-width: 128px; }
+.safeFaucetAction :global(.btn) { white-space: nowrap; line-height: 1.35; min-height: 34px; padding-inline: 14px; max-width: 128px; }
+.safeFaucetAction p { font-size: 12px; }
 .setupProgress { display: flex; align-items: center; gap: 16px; margin-bottom: 8px; }
 .card .stepCount { flex-shrink: 0; font: 500 12px/1.5 var(--mono); color: var(--text-dim); }
 .setupProgress progress { max-width: 180px; height: 4px; }
@@ -97,6 +116,11 @@
 .splitHeading { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; }
 .splitReset { color: var(--muted, #9aa3b3); background: transparent; border: 0; padding: 4px 0; font: inherit; font-size: 12px; text-decoration: underline; cursor: pointer; }
 .splitReset:disabled { cursor: default; opacity: .5; }
+.splitPresets { display: flex; justify-content: center; align-items: center; gap: 8px; margin-top: 8px; }
+.splitPresets span { font-size: 12px; color: var(--muted, #9aa3b3); }
+.splitPresets button { border: 1px solid var(--edge, #333); border-radius: 6px; padding: 5px 10px; background: transparent; color: inherit; font: inherit; font-size: 12px; cursor: pointer; }
+.splitPresets button[aria-pressed="true"] { border-color: currentColor; background: rgba(255,255,255,.08); }
+.splitPresets button:disabled { opacity: .5; cursor: default; }
 .splitAmounts { display: flex; justify-content: space-between; gap: 16px; margin: 16px 0 8px; }
 .splitAmounts > div { display: grid; gap: 4px; min-width: 0; }
 .splitAmounts > div:last-child { text-align: right; }

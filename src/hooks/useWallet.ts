@@ -26,6 +26,65 @@ export function useWallet(log: Logger, configLoaded = false) {
   const walletOptions = useWalletProviders();
   const composer = useComposerDetection(selectedProvider, state.address, state.chainId, configLoaded && state.isConnected, walletRevision);
 
+  const [connectingComposer, setConnectingComposer] = useState(false);
+  const [composerSetupMessage, setComposerSetupMessage] = useState("");
+  const composerSetupBusy = useRef(false);
+
+  useEffect(() => { setComposerSetupMessage(""); }, [selectedProvider, state.chainId, state.address]);
+
+  const connectComposer = useCallback(async () => {
+    if (composerSetupBusy.current) return;
+    const provider = selectedProviderRef.current;
+    const snapshot = stateRef.current;
+    const chain = [L1_CHAIN, L2_CHAIN].find(item => {
+      try { return snapshot.chainId !== null && BigInt(item.chainId) === BigInt(snapshot.chainId); }
+      catch { return false; }
+    });
+    if (!provider || !snapshot.isConnected || !chain) return;
+    const active = () => selectedProviderRef.current === provider
+      && stateRef.current.isConnected && stateRef.current.address === snapshot.address
+      && stateRef.current.chainId === snapshot.chainId;
+    composerSetupBusy.current = true;
+    setConnectingComposer(true);
+    setComposerSetupMessage("");
+    try {
+      // An existing chain may keep its old RPC; only discovery establishes success.
+      // The chain registry uses XDAI for Gnosis/Chiado; older wallet entries
+      // (and viem's Chiado definition) use xDAI. MetaMask compares them exactly.
+      const gnosisChain = [100n, 10200n].includes(BigInt(chain.chainId));
+      const definition = { ...chain, rpcUrls: [...chain.rpcUrls],
+        nativeCurrency: { ...chain.nativeCurrency, symbol: gnosisChain ? "XDAI" : chain.nativeCurrency.symbol } };
+      try {
+        await provider.request({ method: "wallet_addEthereumChain", params: [definition] });
+      } catch (error) {
+        const rpcError = error as { code?: number; message?: string };
+        const symbolMismatch = rpcError.code === -32602
+          && /nativeCurrency\.symbol does not match currency symbol/.test(rpcError.message ?? "");
+        if (!active() || !symbolMismatch || !["XDAI", "xDAI"].includes(definition.nativeCurrency.symbol)) throw error;
+        // Retry only this known spelling mismatch, never a rejection or another error.
+        await provider.request({ method: "wallet_addEthereumChain", params: [{ ...definition,
+          nativeCurrency: { ...definition.nativeCurrency, symbol: definition.nativeCurrency.symbol === "XDAI" ? "xDAI" : "XDAI" },
+        }] });
+      }
+      if (!active()) return;
+      await provider.request({ method: "wallet_switchEthereumChain", params: [{ chainId: chain.chainId }] });
+      if (!active()) return;
+      setComposerSetupMessage("Composer may be saved without being selected. If the warning remains, open the RPC setup instructions above, select the Composer URL as the network’s default RPC, save, then click Recheck.");
+      composer.recheckComposer();
+    } catch (error) {
+      if (!active()) return;
+      const code = (error as { code?: number })?.code;
+      const symbolMismatch = code === -32602 && /nativeCurrency\.symbol does not match currency symbol/.test((error as Error).message ?? "");
+      setComposerSetupMessage(symbolMismatch ? "Your saved network uses a different currency symbol. Edit its RPC URL in your wallet using the instructions above; keep its existing symbol."
+        : code === 4001 ? "Network request cancelled. You can try again."
+        : code === -32002 ? "A wallet request is already open. Complete it in your wallet, then recheck."
+        : "Your wallet could not configure this RPC automatically. Use the RPC setup instructions above, then recheck.");
+    } finally {
+      composerSetupBusy.current = false;
+      setConnectingComposer(false);
+    }
+  }, [composer.recheckComposer]);
+
   const hasProvider = walletOptions.length > 0;
 
   useEffect(() => {
@@ -328,6 +387,9 @@ export function useWallet(log: Logger, configLoaded = false) {
     ...state,
     provider: selectedProvider,
     ...composer,
+    connectComposer,
+    connectingComposer,
+    composerSetupMessage,
     hasProvider,
     walletName: walletOptions.find((option) => option.provider === selectedProvider)?.name
       ?? null,

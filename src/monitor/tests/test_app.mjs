@@ -29,7 +29,7 @@ globalThis.document = {
   querySelector: selector => element(selector.slice(5, -2)), getElementById: element,
   createElement: () => element(`created-${elements.size}`),
 };
-globalThis.window = { location: { href: "https://eez.asuscomm.com/#/monitor", origin: "https://eez.asuscomm.com" } };
+globalThis.window = { location: { href: "https://dashboard.example/#/monitor", origin: "https://dashboard.example" } };
 globalThis.fetch = () => new Promise(() => {});
 globalThis.WebSocket = undefined;
 globalThis.setInterval = () => 0;
@@ -58,9 +58,9 @@ const assertions = String.raw`
 // timers have their own coverage in test_live_app.mjs.
 scheduledTimeouts.clear();
 state.snapshot = { configuration: { explorers: {
-  l1: "https://eez.asuscomm.com:4444",
-  l2: "https://eez.asuscomm.com:4445",
-  blobscan: "https://eez.asuscomm.com:4443",
+  l1: "https://dashboard.example:4444",
+  l2: "https://dashboard.example:4445",
+  blobscan: "https://dashboard.example:4443",
 } } };
 
 const txHash = "0x" + "11".repeat(32);
@@ -187,8 +187,8 @@ assert.match(element("l1-safe").innerHTML, /:4444\/block\/96/);
 assert.match(element("l1-finalized").innerHTML, /:4444\/block\/64/);
 
 renderComposerRpc({
-  l1ToL2: "https://eez.asuscomm.com/composer/l1",
-  l2ToL1: "https://eez.asuscomm.com/composer/l2",
+  l1ToL2: "https://dashboard.example/composer/l1",
+  l2ToL1: "https://dashboard.example/composer/l2",
 }, { l1: 7331, l2: 6290 });
 const composer = element("composer-rpc").innerHTML;
 assert.match(composer, /L1 → L2/);

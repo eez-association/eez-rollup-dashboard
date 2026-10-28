@@ -4,6 +4,8 @@ import { transferAbi } from "../../src/lib/treasury/transfers";
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { decodeFunctionData, encodeFunctionResult, toHex } from "viem";
+import { TreasuryTestnet } from "../../src/components/TreasuryTestnet";
+import { TestnetAsset } from "../../src/lib/treasury/testnetAsset";
 import { TreasuryConnected } from "../../src/components/TreasuryConnected";
 import { TreasuryClient } from "../../src/lib/treasury/client";
 import { allowanceAbi, paymentAbi, tokenAbi } from "../../src/lib/treasury/payments";
@@ -11,15 +13,21 @@ import "../../src/styles/global.css";
 
 export function mount(f: any) {
   const control = (window as any).ownersTest = {
-    owners: [...f.owners], threshold: 1, receipt: "pending", unavailable: false,
-    balanceFailure: false, holdNext: false, release: undefined as undefined | (() => void),
-    reads: 0, approvals: 0, walletCalls: [] as string[], unmount: () => {},
+    owners: [...f.owners], threshold: 1, timestamp: "0x3a98", receipt: "pending", unavailable: false,
+    balanceFailure: !!f.balanceFailure, holdNext: false, release: undefined as undefined | (() => void),
+    reads: 0, capacityTags: [] as string[], approvals: 0, walletCalls: [] as string[], unmount: () => {},
     chainId: f.chainId ?? toHex(f.config.l2.chainId), address: f.disconnected ? undefined : f.owners[0],
     switchMode: "accept", switches: [] as string[], signatures: [] as any[], prepared: [] as any[],
     releaseSwitch: undefined as undefined | (() => void), selectWallet: undefined as any,
   };
   const snapshot = TreasuryClient.prototype.snapshot;
-  TreasuryClient.prototype.validate = async () => {};
+  const validationReady = f.holdValidation ? new Promise<void>(resolve => { (control as any).releaseValidation = resolve; }) : Promise.resolve();
+  TreasuryClient.prototype.validate = async () => { await validationReady; if ((control as any).validationFailure) throw new Error("Controlled validation failure"); };
+  if (f.useTestnet) TestnetAsset.prototype.network = async () => {
+    if (f.holdNetwork) await new Promise<void>(resolve => { (control as any).releaseNetwork = resolve; });
+    if ((control as any).networkFailure) throw new Error("Controlled network failure");
+    return (control as any).networkResult ?? f.network;
+  };
   TreasuryClient.prototype.snapshot = async function (source) {
     const next = await snapshot.call(this, source);
     control.reads++;
@@ -37,9 +45,10 @@ export function mount(f: any) {
   };
   TreasuryClient.prototype.rpc = async function (url, method, params: any = []) {
     if (control.unavailable) throw new Error("Controlled owner read failure");
+    if (url === f.config.l2.rpc && method === "eth_getBlockByNumber" && ["latest", "safe"].includes(params[0])) control.capacityTags.push(params[0]);
     if (method === "eth_getTransactionReceipt") return (control.receipt === "pending" ? null : f.receipt) as any;
     if (method === "eth_getTransactionByHash") return { from: f.pending.sender, to: f.config.safeL1, input: f.pending.data, nonce: f.pending.sourceNonce } as any;
-    if (method === "eth_getBlockByNumber") return { number: "0x106", hash: control.receipt === "orphan" ? f.orphanHash : f.blockHash, timestamp: "0x3a98" } as any;
+    if (method === "eth_getBlockByNumber") return { number: "0x106", hash: control.receipt === "orphan" ? f.orphanHash : f.blockHash, timestamp: control.timestamp } as any;
     if (method === "eth_getCode" && f.helperRuntime) return f.helperRuntime;
     if (method === "eth_call") {
       if (control.balanceFailure) throw new Error("Controlled balance read failure");
@@ -86,7 +95,7 @@ export function mount(f: any) {
     };
     const wallet: any = { address, chainId, provider, walletOptions: [],
       switchToL1: () => switchNetwork("l1"), switchToL2: () => switchNetwork("l2") };
-    return <main style={{ maxWidth: 1200, margin: "32px auto", padding: 20 }}><TreasuryConnected deployment={f.config} wallet={wallet} payments /></main>;
+    return <main style={{ maxWidth: 1200, margin: "32px auto", padding: 20 }}>{f.useTestnet ? <TreasuryTestnet wallet={wallet} target={f.target} bridgeL1={f.config.payments.bridgeL1} bridgeL2={f.config.payments.bridgeL2} token={f.config.payments.tokenL1} /> : <TreasuryConnected deployment={f.config} wallet={wallet} payments />}</main>;
   }
   const key = `eez:treasury:owners:${f.config.instance}`;
   if (f.restore) localStorage.setItem(key, JSON.stringify(f.pending));

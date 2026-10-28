@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.34;
 
-import {StandardBridgeTreasuryPolicyTest} from "./StandardBridgeTreasuryPolicy.t.sol";
+import {PairedTreasuryPolicyTest} from "./PairedTreasuryPolicy.t.sol";
 import {ISafe} from "../src/interfaces/ISafe.sol";
 import {OwnerTestTarget} from "./helpers/OwnerFixture.sol";
 
 /// @dev Published Safe 1.5.0 bytecode with the current 1.4.1 mirror, adapter and
 ///      mainnet policy. Inherits the payment/rollback suite using read-through
 ///      EEZ managers; this does not exercise Composer or proof validation.
-contract Safe150CompatibilityTest is StandardBridgeTreasuryPolicyTest {
+contract Safe150CompatibilityTest is PairedTreasuryPolicyTest {
     function _singletonName() internal pure virtual returns (string memory) {
         return "Safe";
     }

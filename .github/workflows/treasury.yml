@@ -41,19 +41,35 @@ jobs:
         run: |
           npm test
           npm test --prefix trace-decoder
+          node src/monitor/tests/test_app.mjs
+          node src/monitor/tests/test_live_app.mjs
           npm run test:contracts
           forge fmt --check --root contracts
           npm run build:treasury-release
       - name: Isolated deployment and source verification
         run: |
           node tests/integration/treasury-source-verification.mjs
-          node tests/integration/treasury-deployment-batches.mjs --current-release
+          node tests/integration/treasury-paired-setup.mjs
       - name: Browser regressions
+        env:
+          CHROME_DEVEL_SANDBOX: /usr/local/sbin/eez-chromium-sandbox
         run: |
           npx playwright install --with-deps chromium
+          # Use the helper from the pinned browser, not the runner's Chrome image.
+          sandbox_source="$(node -e 'const { chromium } = require("playwright"); const path = require("node:path"); process.stdout.write(path.join(path.dirname(chromium.executablePath()), "chrome_sandbox"));')"
+          test -x "$sandbox_source"
+          sudo install -o root -g root -m 4755 "$sandbox_source" "$CHROME_DEVEL_SANDBOX"
+          test -u "$CHROME_DEVEL_SANDBOX"
+          node tests/composer-wallet.cjs
           node tests/treasury-setup-completion-browser.mjs
           node tests/treasury-mainnet-setup-browser.mjs
-          node tests/treasury-faucet-browser.mjs
+          node tests/treasury-setup-ux-browser.mjs
+          node tests/treasury-gas-bridge-browser.mjs
+          node tests/treasury-paired-asset-browser.mjs
+          node tests/treasury-payment-history-browser.mjs
+          node tests/treasury-history-loading-browser.mjs
+          node tests/treasury-payment-signing-browser.mjs
+          node tests/integration/treasury-paired-setup.mjs --browser
           node tests/treasury-verification-browser.mjs
           node tests/trace-details.cjs
       - name: Frontend, service images, and service coexistence

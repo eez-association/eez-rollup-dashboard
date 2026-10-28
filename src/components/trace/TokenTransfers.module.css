@@ -1,12 +1,25 @@
 /* Experimental token notes: yellow for transfers, green for mints, red for burns. */
 .notes { display: grid; gap: 4px; min-width: 0; margin-top: 2px; }
-.note { display: grid; gap: 1px; min-width: 0; padding: 6px 9px; border: 1px solid var(--yellow-border); border-left: 3px solid var(--yellow); border-radius: 6px; background: var(--yellow-dim); }
+.note { --note-accent: var(--yellow); display: flex; flex-direction: column; gap: 4px; box-sizing: border-box; height: 96px; min-width: 0; padding: 6px 8px; border: 1px solid var(--yellow-border); border-left: 3px solid var(--yellow); border-radius: 8px; background: var(--yellow-dim); text-align: left; }
+.note[data-kind="mint"] { --note-accent: var(--green); }
+.note[data-kind="burn"] { --note-accent: var(--red); }
+.note[data-kind="mint"], .note[data-kind="burn"] { height: 76px; }
 .note[data-kind="mint"], .detail[data-kind="mint"] { border-color: var(--green-border); border-left-color: var(--green); background: var(--green-dim); }
 .note[data-kind="burn"], .detail[data-kind="burn"] { border-color: var(--red-border); border-left-color: var(--red); background: var(--red-dim); }
-.note > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.title { font: 600 10px var(--sans); letter-spacing: .02em; color: var(--text); }
-.amount { font: 700 12px var(--mono); color: var(--text-bright); }
-.route { font: 10px var(--mono); color: var(--text-dim); }
+.noteHeader { display: flex; justify-content: space-between; align-items: center; line-height: 12px; }
+.noteAction { font: 600 10px/12px var(--sans); color: var(--note-accent); }
+.noteChain { font: 500 9px/12px var(--mono); color: var(--text-dim); }
+.amountLine { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.amount { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 11px/16px var(--mono); color: var(--text-bright); }
+.token { max-width: 48%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 11px/16px var(--sans); color: var(--text); }
+.parties { display: grid; align-content: start; gap: 3px; border-top: 1px solid var(--yellow-border); padding-top: 4px; }
+.note[data-kind="mint"] .parties { border-color: var(--green-border); }
+.note[data-kind="burn"] .parties { border-color: var(--red-border); }
+.party { display: grid; grid-template-columns: 40px minmax(0, 1fr); gap: 5px; align-items: center; min-height: 18px; }
+.partyLabel { font: 500 10px/16px var(--sans); color: var(--text-dim); }
+.partyIdentity { display: grid; min-width: 0; }
+.partyName { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 11px/16px var(--sans); color: var(--text-bright); }
+.partyAddress { font: 500 11px/16px var(--mono); color: var(--text-dim); }
 .more { font-size: 10px; color: var(--text-dim); }
 .chip { flex: none; padding: 0 6px; border-radius: 8px; background: var(--yellow-dim); color: var(--yellow); font: 700 10.5px var(--mono); }
 .chip[data-kind="mint"] { background: var(--green-dim); color: var(--green); }

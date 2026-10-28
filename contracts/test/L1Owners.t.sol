@@ -2,7 +2,7 @@
 pragma solidity 0.8.34;
 
 import {OwnerFixture, ReadThroughManager, OwnerTestTarget} from "./helpers/OwnerFixture.sol";
-import {L1Owners} from "../src/L1Owners.sol";
+import {L1Owners} from "../src/l2/L1Owners.sol";
 import {ISafe} from "../src/interfaces/ISafe.sol";
 import {IEEZProxyRegistry} from "../src/interfaces/IEEZProxyRegistry.sol";
 

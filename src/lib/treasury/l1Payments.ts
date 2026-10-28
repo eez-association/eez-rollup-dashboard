@@ -1,6 +1,9 @@
+import { paymentAuthorizationTime } from "./savedPayments.ts";
+import { pairedPolicyAbi } from "./pairedPolicy.ts";
+import { findIncomingCallEvidence } from "./mainnetSetupRelay.ts";
 import { recordedPaymentTransaction } from "./savedPayments.ts";
 import { transferOutcome } from "./transfers.ts";
-import { encodeEventTopics, keccak256 } from "viem";
+import { encodeEventTopics, encodeFunctionData, keccak256 } from "viem";
 import type { Address, Hex } from "viem";
 import type { Intent, Outcome, TreasuryClient } from "./client.ts";
 import { decodeSafeExecution, safeExecutionTopics } from "./safeEvents.ts";
@@ -14,8 +17,8 @@ const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 function check(value: unknown, message: string): asserts value { if (!value) throw new Error(message); }
 
 /** An L1 Safe receipt proves source execution, not canonical L2 payment effects.
- * Match the policy's authenticated nonce/calldata marker and its Paid event in a
- * canonical L2 receipt, then recheck both block hashes before reporting settlement.
+ * Paired policies require the local Paid event and exact canonical peer call.
+ * Historical policies retain their authenticated L2 nonce/calldata marker.
  */
 export async function l1PaymentOutcome(client: TreasuryClient, intent: Intent): Promise<Outcome> {
   const c = client.config, p = intent.payment;
@@ -52,6 +55,26 @@ export async function l1PaymentOutcome(client: TreasuryClient, intent: Intent): 
   });
   if (!sourceSuccess) return { kind: "rejected", hash, sourceBlock: String(BigInt(receipt.blockNumber)), rejectionStage: "execution", detail: "The canonical L1 Safe transaction failed." };
   if (p.kind === "transfer") return transferOutcome(client, intent, hash, receipt);
+  if (c.payments!.pair) {
+    check(p.kind === undefined || p.kind === "fixed", "Paired policies only support fixed payments here");
+    check("fromL1" in p, "Missing signed paired-policy contribution");
+    const contributions = settledPayment(c, p, receipt.logs);
+    check(contributions, "Missing matching local policy payment event");
+    const peerData = encodeFunctionData({ abi: pairedPolicyAbi, functionName: "payFromPeer", args: [
+      p.recipient, BigInt(p.amount), p.destination === "l1", paymentAuthorizationTime(c.payments!, p), BigInt(p.fromL1),
+    ] });
+    const incoming = await findIncomingCallEvidence({
+      rpc<T>(chain: "l1" | "l2", method: string, params: unknown[], front = false): Promise<T> {
+        return client.rpc<T>(front ? c[chain].front! : c[chain].rpc, method, params);
+      },
+    }, c.payments!.policy,
+      { id: "paired-payment", chain: "l1", sender: c.payments!.pair.policyL1, to: c.payments!.alias,
+        nonce: intent.sourceNonce, data: peerData }, receipt, c, intent.l2StartBlock);
+    if (!incoming) return { kind: "pending", hash, detail: "L1 Safe executed. Waiting for the exact peer-policy call to settle on EEZ-X." };
+    return { kind: "settled", hash, contributions, execution: { l1: hash, l2: incoming.transactionHash },
+      sourceBlock: String(BigInt(receipt.blockNumber)), block: String(BigInt(incoming.blockNumber)),
+      detail: "The local Safe payment and exact peer-policy call are canonically settled." };
+  }
   const safe = await client.rpc<Block | null>(c.l2.rpc, "eth_getBlockByNumber", ["safe", false]);
   if (!safe || BigInt(safe.number) < BigInt(intent.l2StartBlock)) return { kind: "pending", hash, detail: "L1 Safe executed. Waiting for canonical L2 payment evidence." };
   const topics = encodeEventTopics({ abi: paymentAbi, eventName: "L1PaymentAuthorized", args: {

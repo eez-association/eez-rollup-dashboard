@@ -12,7 +12,7 @@ const records = ['l1', 'l2'].map(side => ({ id: side, type: 'cross-chain-call', 
   hash: hashes[side], status: 'confirmed', label: 'Test call on ' + side.toUpperCase(), timestamp: Date.now() }));
 
 (async () => {
-  const browser = await chromium.launch({ headless: true, args: ['--no-sandbox'] });
+  const browser = await chromium.launch({ headless: true, chromiumSandbox: true });
   try {
     const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
     const errors = [], requests = [];

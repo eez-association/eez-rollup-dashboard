@@ -65,7 +65,7 @@ async function fixture(browser, options = {}) {
     if (method === 'eth_getLogs') return reply([]);
     if (method === 'eth_call') {
       const tx = params[0], selector = tx.data.slice(0,10);
-      if (selector === '0x481c6a75') return reply('0x' + addr('3').slice(2).padStart(64,'0'));
+      if (['0xb3f5aaab', '0x481c6a75'].includes(selector)) return reply('0x' + addr('3').slice(2).padStart(64,'0'));
       if (selector === '0x313ce567') return reply(word(18));
       if (selector === '0x95d89b41') return reply(text(tx.to.toLowerCase() === l2Token ? 'ROLL' : tx.to.toLowerCase() === dai.toLowerCase() ? 'DAI' : 'CHI'));
       if (selector === '0x06fdde03') return reply(text('Verified token'));
@@ -88,7 +88,7 @@ async function browse(f, filter) {
   await f.panel.getByText('Loading tokens…',{exact:true}).waitFor({state:'hidden'});
 }
 (async () => {
-  const browser = await chromium.launch({headless:true,args:['--no-sandbox']});
+  const browser = await chromium.launch({headless:true,chromiumSandbox: true});
   let f = await fixture(browser,{chain:'0x1'});
   await browse(f,'Known');
   assert.equal(await f.panel.getByRole('button',{name:/^Select /}).count(),8);

@@ -61,7 +61,12 @@ export function tokenTransfersByFrame(trace) {
     if (!group.trace.length || group.trace.length !== group.receipt.length) continue;
     for (const e of group.trace) {
       const from = '0x' + e.topics[1].slice(-40).toLowerCase(), to = '0x' + e.topics[2].slice(-40).toLowerCase();
-      const m = metadata.get(tokenKey(e, e.address)), one = field => m?.[field]?.size === 1 ? [...m[field]][0] : null;
+      const key = tokenKey(e, e.address), m = metadata.get(key), external = trace.tokenMetadata?.[key];
+      // A conflicting in-transaction read stays unknown, even if a later
+      // block-state read has a single value. Never overwrite trace evidence.
+      const one = field => m?.[field] ? (m[field].size === 1 ? [...m[field]][0] : null)
+        : field === 'decimals' ? (Number.isInteger(external?.decimals) && external.decimals >= 0 && external.decimals <= 255 ? external.decimals : null)
+        : (typeof external?.symbol === 'string' && external.symbol.length > 0 && external.symbol.length <= 80 ? external.symbol : null);
       const decimals = one('decimals');
       const note = { token: lower(e.address), from, to, amount: BigInt(e.data).toString(),
         symbol: one('symbol'), decimals: decimals == null ? null : Number(decimals),

@@ -26,13 +26,14 @@ export function makeRpc(config) {
     if (!body || !Object.hasOwn(body, 'result')) throw Object.assign(new Error(`${method}: missing JSON-RPC result`), { invalidResponse: true });
     return body.result;
   };
-  async function post(url, payload, method) {
+  async function post(url, payload, method, signal) {
     let response;
     try {
       response = await (config.fetch || fetch)(url, {
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify(payload),
-        signal: AbortSignal.timeout(config.timeoutMs ?? 20000),
+        signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(config.timeoutMs ?? 20000)])
+          : AbortSignal.timeout(config.timeoutMs ?? 20000),
       });
     } catch (e) { throw Object.assign(new Error(e.message, { cause: e }), { transport: true, code: e.code }); }
     if (!response.ok) {
@@ -78,6 +79,28 @@ export function makeRpc(config) {
     }
     return results;
   };
+  // Optional display reads have their own deadline and never fan out into
+  // individual retries when a provider rejects batches. An individual contract
+  // revert must not discard successful siblings; malformed batch IDs do.
+  rpc.optionalBatch = async (url, method, params, signal) => {
+    const empty = () => params.map(() => null);
+    if (!params.length || params.length > 100 || signal?.aborted || noBatch.has(url)) return empty();
+    const requests = params.map(p => ({ jsonrpc: '2.0', id: ++id, method, params: p }));
+    try {
+      const body = await post(url, requests, method, signal);
+      if (!Array.isArray(body)) { if (body?.error) result(body, method); return empty(); }
+      const expected = new Set(requests.map(r => r.id)), replies = new Map();
+      if (body.length !== requests.length) return empty();
+      for (const reply of body) {
+        if (reply?.jsonrpc !== '2.0' || !expected.has(reply.id) || replies.has(reply.id)) return empty();
+        replies.set(reply.id, reply);
+      }
+      return requests.map(r => { try { return result(replies.get(r.id), method); } catch { return null; } });
+    } catch (e) {
+      if (e.code === -32600) noBatch.add(url);
+      return empty();
+    }
+  };
   return rpc;
 }
 
@@ -99,6 +122,17 @@ export class ChainReader {
       try { return await this.rpc(this.traceUrl, method, params); } catch { throw e; }
     }
     return this.rpc(this.traceUrl, method, params);
+  }
+  async optionalBatch(method, params, signal) {
+    // The engine already checked this endpoint's chain ID. Prefer its archive
+    // state directly, without repeating each failed read on a second endpoint.
+    if (this.rpc.optionalBatch) return this.rpc.optionalBatch(this.traceUrl, method, params, signal);
+    // Custom transports can omit batching. Keep the same item budget, at most
+    // two in-flight calls per chain, and no archive retry or work after expiry.
+    return mapConcurrent(params, async p => {
+      if (signal?.aborted) return null;
+      try { return await this.rpc(this.traceUrl, method, p); } catch { return null; }
+    }, 2);
   }
   async block(n) {
     const tag = typeof n === 'string' && (n === 'latest' || n.length === 66) ? n : hex(n);

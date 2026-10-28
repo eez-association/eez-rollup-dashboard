@@ -1,3 +1,5 @@
+import pairedTestnet from './paired-testnet-network.json' with { type: 'json' };
+import { pairedPolicyAbi } from "./pairedPolicy.ts";
 import { paymentVersion, verifiesL1Initiation, verifiesReverseFunding } from "./savedPayments.ts";
 import { decodeFunctionResult, encodeFunctionData, isAddress, keccak256, parseAbi, toHex, zeroAddress } from "viem";
 import type { Abi, Address, Hex } from "viem";
@@ -27,7 +29,7 @@ function bound(c: TreasuryConfig, chain: "l1" | "l2", a: Address) {
  * Hashes are reviewed operator inputs; matching them is not a security audit. */
 export function parseMainnetBindings(c: TreasuryConfig) {
   const m = c.mainnet, p = c.payments;
-  check(c.l1.chainId === 1 && c.l2.chainId > 1 && c.l2.chainId !== 906969 && c.l2.chainId !== 10200,
+  check(c.l1.chainId === 1 && c.l2.chainId > 1 && c.l2.chainId !== 906969 && c.l2.chainId !== pairedTestnet.chains.l2.chainId && c.l2.chainId !== 10200,
     "Mainnet requires Ethereum and a separately configured Ethereum-anchored EEZ network");
   check(m && Number.isSafeInteger(m.rollupId) && m.rollupId > 0 && address(m.usdcImplementation), "Missing mainnet deployment bindings");
   check(c.safeImplementations && !c.action && p && !p.invoiceMerchant && !p.invoiceControl,
@@ -115,9 +117,9 @@ export async function validateMainnet(client: TreasuryClient) {
   const [symbol, decimals, paused, l1Rollup, l2Rollup, policyRollup, origin, authority, limitL1, limitL2] = await Promise.all([
     read("l1", p.tokenL1, usdcAbi, "symbol"), read("l1", p.tokenL1, usdcAbi, "decimals"), read("l1", p.tokenL1, usdcAbi, "paused"),
     read("l1", c.registry, networkAbi, "MAINNET_ROLLUP_ID"), read("l2", c.manager, networkAbi, "ROLLUP_ID"),
-    read("l2", p.policy, policyAbi, "rollupId"), read("l2", p.bridgeL2, networkAbi, "wrappedTokenInfo", [p.tokenL2]),
+    read("l2", p.policy, p.pair ? pairedPolicyAbi : policyAbi, p.pair ? "l2RollupId" : "rollupId"), read("l2", p.bridgeL2, networkAbi, "wrappedTokenInfo", [p.tokenL2]),
     read("l2", p.tokenL2, networkAbi, "BRIDGE"),
-    read("l1", p.moduleL1, networkAbi, "getTokenAllowance", [c.safeL1, p.bridgeExecutorL1!, p.tokenL1]),
+    read("l1", p.moduleL1, networkAbi, "getTokenAllowance", [c.safeL1, p.pair?.policyL1 ?? p.bridgeExecutorL1!, p.tokenL1]),
     read("l2", p.moduleL2, networkAbi, "getTokenAllowance", [c.safeL2, p.policy, p.tokenL2]),
   ]);
   for (const limit of [limitL1, limitL2] as bigint[][])

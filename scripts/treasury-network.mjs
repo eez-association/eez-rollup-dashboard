@@ -5,6 +5,7 @@ import { writeFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { decodeFunctionResult, encodeFunctionData, formatEther, getAddress, isAddress, keccak256, parseAbi, toHex } from 'viem';
 import { probeComposer } from '../src/lib/composerDiscovery.ts';
+import profile from '../src/lib/treasury/paired-testnet-network.json' with { type: 'json' };
 const { values } = parseArgs({ options: { dashboard: { type: 'string', default: 'http://127.0.0.1:8080' }, owner: { type: 'string' }, output: { type: 'string' } } });
 assert(values.owner && isAddress(values.owner) && BigInt(values.owner) > 1n, '--owner must be the initial owner public address');
 const owner = getAddress(values.owner), base = new URL(values.dashboard);
@@ -30,9 +31,12 @@ const abi = parseAbi(['function ROLLUP_ID() view returns (uint64)', 'function MA
 const report = { version: 1, checkedAt: new Date().toISOString(), environment: 'dashboard-testnet',
   initialOwners: [owner], initialThreshold: 1, addOwner: 'Use the connected wallet as B; current L1 owners approve the change',
   registry, manager, rollupId: config.rollupId, networks: {}, fees: {}, checks: [], blockers: [], deploymentVerified: false };
-const expected = { l1ChainId: toHex(10200), l2ChainId: toHex(906969), registryAddress: registry, l2Address: manager };
+assert.equal(registry.toLowerCase(), profile.registry.toLowerCase(), 'Dashboard registry differs from the reviewed testnet profile');
+assert.equal(manager.toLowerCase(), profile.manager.toLowerCase(), 'Dashboard manager differs from the reviewed testnet profile');
+assert.equal(BigInt(config.rollupId), BigInt(profile.rollupId), 'Dashboard rollup differs from the reviewed testnet profile');
+const expected = { l1ChainId: toHex(profile.chains.l1.chainId), l2ChainId: toHex(profile.chains.l2.chainId), registryAddress: registry, l2Address: manager };
 const implSlot = '0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc';
-for (const [chain, id, address] of [['l1', 10200, registry], ['l2', 906969, manager]]) {
+for (const [chain, id, address] of [['l1', profile.chains.l1.chainId, registry], ['l2', profile.chains.l2.chainId, manager]]) {
   const url = endpoint(config[`${chain}RpcUrl`]), front = endpoint(config[`${chain}FrontUrl`]);
   assert.equal(BigInt(await rpc(url, 'eth_chainId')), BigInt(id), 'Unexpected dashboard chain');
   const observed = await rpc(url, 'eth_getBlockByNumber', [chain === 'l1' ? 'finalized' : '0x0', false]);

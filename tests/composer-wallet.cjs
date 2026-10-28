@@ -1,9 +1,9 @@
 // Mocked EIP-6963 wallets and read RPCs. Never signs or broadcasts transactions.
-// EEZ_UI_URL=http://127.0.0.1:18779/dashboard NODE_PATH=/path/to/playwright/node_modules node tests/composer-wallet.cjs
+// Starts an isolated dashboard unless EEZ_UI_URL selects an existing test server.
 const assert = require('node:assert/strict');
 const { chromium } = require('playwright');
 const { encodeFunctionResult, parseAbi, keccak256, stringToHex } = require('viem');
-const origin = (process.env.EEZ_UI_URL || 'http://127.0.0.1:18779/dashboard').replace(/\/$/, '');
+let origin = process.env.EEZ_UI_URL?.replace(/\/$/, '');
 const discovery = '0x7Ae2c80116976915a0Ee9b7994e7Bb12026087f8';
 const account = '0x' + '22'.repeat(20);
 const registry = '0x' + '11'.repeat(20);
@@ -53,7 +53,17 @@ async function fixture(browser, options = {}) {
       async request(request) {
         window.walletCalls.push({ name, ...request });
         const { method, params } = request;
-        if (method === 'eth_accounts' || method === 'eth_requestAccounts') return [account];
+        if (method === 'wallet_addEthereumChain') {
+          if (options.savedSymbol && params[0].nativeCurrency.symbol !== options.savedSymbol) {
+            throw Object.assign(new Error('nativeCurrency.symbol does not match currency symbol for a network the user already has added with the same chainId.'), { code: -32602 });
+          }
+          if (options.addMode === 'reject') throw Object.assign(new Error('Rejected'), { code: 4001 });
+          if (options.addMode === 'held') await new Promise(resolve => { window.releaseNetworkAdd = resolve; });
+          if (options.addMode === 'update') window.walletModes[name] = 'detected';
+          return null;
+        }
+        if (method === 'wallet_switchEthereumChain') return null;
+        if (method === 'eth_accounts'  || method === 'eth_requestAccounts') return [account];
         if (method === 'eth_chainId') {
           if (window.walletModes[name] === 'chain-error') throw new Error('Cannot read wallet network');
           return window.walletChains[name];
@@ -81,11 +91,12 @@ async function fixture(browser, options = {}) {
     });
   }, { account, options, l1Chain });
   await page.route('**/*', async route => {
-    const request = route.request(), path = new URL(request.url()).pathname;
+    const request = route.request(), url = new URL(request.url()), path = url.pathname;
+    assert.ok([new URL(origin).origin, 'https://mainnet.example'].includes(url.origin), 'Wallet tests must not contact a real external endpoint');
     if (path.endsWith('/config.json')) return route.fulfill({ json: {
       networkName: options.mainnet ? 'EEZ-X Mainnet' : 'EEZ-X Devnet', l1RpcUrl: '/rpc/l1', l2RpcUrl: '/rpc/l2',
-      l1FrontUrl: options.mainnet ? 'https://mainnet.eez.dev/composer/l1' : '/composer/l1',
-      l2FrontUrl: options.mainnet ? 'https://mainnet.eez.dev/composer/l2' : '/composer/l2',
+      l1FrontUrl: options.mainnet ? 'https://mainnet.example/composer/l1' : '/composer/l1',
+      l2FrontUrl: options.mainnet ? 'https://mainnet.example/composer/l2' : '/composer/l2',
       l1ContractAddress: registry, l2ContractAddress: l2, rollupManagerAddress: manager,
     } });
     if (request.method() !== 'POST') return route.continue();
@@ -120,9 +131,18 @@ async function fixture(browser, options = {}) {
 }
 
 (async () => {
-  const browser = await chromium.launch({ headless: true, args: ['--no-sandbox'] });
+  let browser, server;
   let passed = 0;
   try {
+    if (!origin) {
+      const { createServer } = await import('vite');
+      const react = (await import('@vitejs/plugin-react')).default;
+      server = await createServer({ configFile: false, envFile: false, plugins: [react()],
+        server: { host: '127.0.0.1', port: 0 }, base: '/dashboard/' });
+      await server.listen();
+      origin = `http://127.0.0.1:${server.httpServer.address().port}/dashboard`;
+    }
+    browser = await chromium.launch({ headless: true, chromiumSandbox: true });
     const connected = await fixture(browser);
     assert.equal((await connected.calls()).length, 0, 'does not probe before connecting');
     await connected.connect();
@@ -159,6 +179,56 @@ async function fixture(browser, options = {}) {
     await connected.page.getByRole('button', { name: 'Connect Wallet', exact: true }).first().waitFor();
     assert.equal(await connected.page.getByText('Composer not detected', { exact: true }).count(), 0, 'disconnect clears status');
     await connected.close(); passed++;
+
+    for (const addMode of ['update', 'unchanged', 'reject', 'held']) {
+      const setup = await fixture(browser, { addMode });
+      await setup.page.getByRole('button', { name: 'Connect Wallet', exact: true }).first().click();
+      await setup.page.getByRole('button', { name: 'MetaMask', exact: true }).click();
+      await setup.page.getByText('Composer not detected', { exact: true }).waitFor();
+      await setup.page.getByRole('button', { name: 'Connect network', exact: true }).click();
+      if (addMode === 'held') {
+        await setup.page.getByRole('button', { name: 'Check your wallet…' }).waitFor();
+        await setup.openMenu();
+        assert.equal(await setup.menu.getByRole('button', { name: 'Check your wallet…' }).isDisabled(), true);
+        await setup.page.evaluate(() => { window.walletListeners.MetaMask.accountsChanged([]); window.releaseNetworkAdd(); });
+        await setup.page.getByRole('button', { name: 'Connect Wallet', exact: true }).first().waitFor();
+      } else if (addMode === 'update') {
+        await until(async () => await setup.page.getByText('Composer not detected', { exact: true }).count() === 0, 'successful setup rechecks Composer');
+        await setup.openMenu();
+        await setup.menu.getByText('Composer detected', { exact: true }).waitFor();
+      } else {
+        await setup.page.getByText(addMode === 'reject' ? 'Network request cancelled. You can try again.'
+          : 'Composer may be saved without being selected. If the warning remains, open the RPC setup instructions above, select the Composer URL as the network’s default RPC, save, then click Recheck.', { exact: true }).waitFor();
+        await setup.page.getByText('Composer not detected', { exact: true }).waitFor();
+      }
+      const requests = await setup.page.evaluate(() => window.walletCalls.filter(call => call.method.startsWith('wallet_')));
+      assert.equal(requests.length, ['reject', 'held'].includes(addMode) ? 1 : 2);
+      assert.equal(requests[0].name, 'MetaMask', 'network request goes to selected wallet');
+      assert.equal(requests[0].method, 'wallet_addEthereumChain');
+      assert.equal(requests[0].params[0].chainId, '0x27d8');
+      assert.deepEqual(requests[0].params[0].rpcUrls, [new URL('/composer/l1', origin).href]);
+      await setup.close(); passed++;
+    }
+
+    for (const savedSymbol of ['XDAI', 'xDAI', 'OTHER']) {
+      const setup = await fixture(browser, { addMode: 'update', savedSymbol });
+      await setup.connect();
+      await setup.page.evaluate(() => { window.walletModes.Rabby = 'not-detected'; window.dispatchEvent(new Event('focus')); });
+      await setup.page.getByText('Composer not detected', { exact: true }).waitFor();
+      await setup.page.getByRole('button', { name: 'Connect network', exact: true }).click();
+      if (savedSymbol === 'OTHER') {
+        await setup.page.getByText('Your saved network uses a different currency symbol. Edit its RPC URL in your wallet using the instructions above; keep its existing symbol.', { exact: true }).waitFor();
+      } else {
+        await until(async () => await setup.page.getByText('Composer not detected', { exact: true }).count() === 0, 'saved symbol accepted');
+        await setup.openMenu();
+        await setup.menu.getByText('Composer detected', { exact: true }).waitFor();
+      }
+      const adds = await setup.page.evaluate(() => window.walletCalls.filter(call => call.method === 'wallet_addEthereumChain'));
+      assert.deepEqual(adds.map(call => call.params[0].nativeCurrency.symbol), savedSymbol === 'XDAI' ? ['XDAI'] : ['XDAI', 'xDAI']);
+      assert.ok(adds.every(call => call.params[0].chainId === '0x27d8' && call.params[0].rpcUrls[0] === new URL('/composer/l1', origin).href));
+      if (savedSymbol === 'OTHER') assert.equal(await setup.page.evaluate(() => window.walletCalls.filter(call => call.method === 'wallet_switchEthereumChain').length), 0);
+      await setup.close(); passed++;
+    }
 
     const restored = await fixture(browser, { saved: true, chain: '0xdd6d9' });
     await restored.page.getByRole('button', { name: /Rabby ·/ }).waitFor();
@@ -311,9 +381,9 @@ async function fixture(browser, options = {}) {
     assert.match(mainnetSetup, /Ethereum.*chain ID 1/);
     assert.match(mainnetSetup, /select Integrated Network, then Ethereum/);
     assert.doesNotMatch(mainnetSetup, /Custom Network|Chiado/);
-    assert.equal(await notice.locator('code').innerText(), 'https://mainnet.eez.dev/composer/l1');
+    assert.equal(await notice.locator('code').innerText(), 'https://mainnet.example/composer/l1');
     await notice.getByRole('button', { name: 'Copy RPC URL' }).click();
-    assert.deepEqual(await mainnet.page.evaluate(() => window.copiedURLs), ['https://mainnet.eez.dev/composer/l1']);
+    assert.deepEqual(await mainnet.page.evaluate(() => window.copiedURLs), ['https://mainnet.example/composer/l1']);
     await mainnet.page.evaluate(() => { window.walletModes.Rabby = 'detected'; });
     await notice.getByRole('button', { name: 'Recheck wallet Composer connection' }).click();
     await until(async () => await notice.count() === 0, 'setup notice disappears after successful discovery');
@@ -329,7 +399,7 @@ async function fixture(browser, options = {}) {
     }, '0x' + (696990).toString(16));
     await mainnet.menu.getByText('Composer not detected', { exact: true }).waitFor();
     assert.match(await mainnet.menu.locator('ol').innerText(), /EEZ-X Mainnet.*chain ID 696990/);
-    assert.equal(await mainnet.menu.locator('code').innerText(), 'https://mainnet.eez.dev/composer/l2');
+    assert.equal(await mainnet.menu.locator('code').innerText(), 'https://mainnet.example/composer/l2');
     await mainnet.close(); passed++;
 
     for (const mainnetProfile of [false, true]) {
@@ -350,7 +420,7 @@ async function fixture(browser, options = {}) {
       assert.match(steps, /Select the saved Composer URL.*default RPC.*save/);
       assert.match(steps, /Recheck/);
       assert.doesNotMatch(steps, /Rabby|Integrated Network|Modify RPC URL/);
-      const front = mainnetProfile ? 'https://mainnet.eez.dev' : new URL(origin).origin;
+      const front = mainnetProfile ? 'https://mainnet.example' : new URL(origin).origin;
       assert.equal(await guidance.locator('code').innerText(), front + '/composer/l1');
       await guidance.getByRole('button', { name: 'Copy RPC URL' }).click();
       assert.equal((await mm.page.evaluate(() => window.copiedURLs)).at(-1), front + '/composer/l1');
@@ -378,5 +448,5 @@ async function fixture(browser, options = {}) {
       await mm.close(); passed++;
     }
     console.log(JSON.stringify({ passed, selectedWallet: true, bothDirections: true, staleResponsesIgnored: true, transactionsSent: 0 }));
-  } finally { await browser.close(); }
+  } finally { await browser?.close(); await server?.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

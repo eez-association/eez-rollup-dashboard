@@ -7,6 +7,8 @@ const absolute = (path: string) => new URL(path, ORIGIN).toString();
 export const config = {
   /** Optional treasury deployment, validated by the hidden example. */
   treasury: null as unknown,
+  /** Existing treasury asset for a fresh testnet setup; supplied at runtime. */
+  treasuryTokenAddress: "",
   /** Human-readable rollup name, supplied by runtime networkName. */
   rollupName: "EEZ L2",
   l1NetworkName: "L1 network",
