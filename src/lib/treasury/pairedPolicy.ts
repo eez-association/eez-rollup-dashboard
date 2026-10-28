@@ -9,7 +9,7 @@ export const pairedPolicyAbi = parseAbi([
   "function token() view returns(address)", "function allowanceModule() view returns(address)",
   "function manager() view returns(address)", "function l2RollupId() view returns(uint64)",
   "function peerSafe() view returns(address)", "function localAliasOnPeer() view returns(address)",
-  "function payFromPeer(address recipient,uint256 amount,bool onL1,uint256 epoch,uint256 fromL1)",
+  "function payFromPeer(address recipient,uint256 amount,bool onL1,uint256 epochOrDeadline,uint256 fromL1)",
   "function configuration() view returns((address safe,address canonicalToken,address bridge,address remoteBridge,uint64 localRollupId,uint64 l2RollupId,address peerPolicy,address peerProxy))",
 ]);
 const registryAbi = parseAbi([
@@ -50,7 +50,7 @@ export async function validatePairedPayments(client: TreasuryClient) {
       read("PAIR_VERSION"), read("active"), read("PERIOD"), read("GLOBAL_LIMIT"), read("token"),
       read("allowanceModule"), read("manager"), read("peerSafe"), read("localAliasOnPeer"),
     ]);
-    check(version === 1n && active === true && period === 600n && limit === 150_000_000n
+    check(version === BigInt(pair.version) && active === true && period === 600n && limit === 150_000_000n
       && same(asset as string, token) && same(allowance as string, module) && same(manager as string, onL1 ? c.registry : c.manager)
       && same(peerSafe as string, onL1 ? c.safeL2 : c.safeL1) && same(ownAlias as string, onL1 ? pair.peerProxyL2 : p.alias), "Paired policy activation or local bindings changed");
     const [enabled, decimals, grant] = await Promise.all([

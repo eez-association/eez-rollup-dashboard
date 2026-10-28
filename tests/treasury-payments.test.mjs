@@ -35,7 +35,7 @@ test('payment settlement needs the exact emitted recipient, amount, destination 
  assert.equal(settledPayment(c,p,[log(109_000_000n,100_000_000n,9_000_000n)]),undefined);
 });
 
-function idleClient({ reset = 1000n, period = 10n, l2Timestamp = 60_599n } = {}) {
+function idleClient({ reset = 1000n, period = 10n, l2Timestamp = 60_599n, sharedEpoch = 101n } = {}) {
  const abi = [...paymentAbi, ...allowanceAbi, ...tokenAbi];
  const config = { ...c, safeL1: address('8'), l1: { rpc: 'l1' }, l2: { rpc: 'l2' },
   payments: { ...c.payments, tokenL2: address('5'), moduleL1: address('6'), moduleL2: address('7'), alias: address('9') } };
@@ -46,7 +46,7 @@ function idleClient({ reset = 1000n, period = 10n, l2Timestamp = 60_599n } = {})
   let result;
   if (functionName === 'balanceOf') result = url === 'l1' ? 200_000_000n : 100_000_000n;
   else if (functionName === 'getTokenAllowance') result = url === 'l1' ? [100_000_000n, 0n, 10n, 1010n, 2n] : [100_000_000n, 50_000_000n, period, reset, 3n];
-  else { assert.equal(functionName, 'spent'); assert.equal(args[0], 101n); result = 0n; }
+  else { assert.equal(functionName, 'spent'); assert.equal(args[0], sharedEpoch); result = 0n; }
   return encodeFunctionResult({ abi, functionName, result });
  } };
 }
@@ -164,4 +164,39 @@ test('percentage intents are rejected even with a fixed amount or an old capabil
   assert.throws(()=>readIntent(config,JSON.stringify({...saved,payment})),/Invalid fixed payment/);
   assert.throws(()=>settledPayment(config,payment,[]),/Invalid fixed payment/);
  }
+});
+
+const expiryConfig={...c,safeL1:address('8'),l1:{chainId:10200,front:'l1-front'},payments:{...c.payments,bridgeKind:'standard',pair:{version:2,policyL1:address('9'),peerProxyL2:address('a')}}};
+test('optional expiry signs a deadline, not the preview period; zero remains valid after resets',()=>{
+ const payment={...p,deadline:'0'},tx=paymentTransaction(expiryConfig,payment,5n);
+ const decoded=decodeFunctionData({abi:paymentAbi,data:tx.message.data});assert.equal(decoded.args[3],0n);
+ assert.equal(safeTransactionHash(tx),safeTransactionHash(paymentTransaction(expiryConfig,{...payment,epoch:'999'},5n)));
+ assert.notEqual(safeTransactionHash(tx),safeTransactionHash(paymentTransaction(expiryConfig,{...payment,deadline:'999999'},5n)));
+ assert.deepEqual(fundingPreview({...s,epoch:999n},payment),{fromL1:100_000_000n,fromL2:10_000_000n});
+ assert.throws(()=>fundingPreview({...s,epoch:999n,spent:150_000_000n},payment),/Shared budget/);
+ assert.throws(()=>fundingPreview({...s,epoch:999n,balanceL1:0n},payment),/Insufficient/);
+ assert.throws(()=>paymentTransaction(expiryConfig,p,5n),/explicit deadline/);
+ assert.throws(()=>paymentTransaction(c,payment,5n),/period-bound/);
+});
+test('optional deadlines reject malformed values and respect their explicit expiration',()=>{
+ for(const deadline of ['-1','1.5','00','',String(1n<<256n),123])assert.throws(()=>checkedPayment({...p,deadline}),/deadline/);
+ assert.doesNotThrow(()=>fundingPreview({...s,observedTimestamp:1000n},{...p,deadline:'1000'}));
+ assert.throws(()=>fundingPreview({...s,observedTimestamp:1001n},{...p,deadline:'1000'}),/deadline expired/);
+ assert.doesNotThrow(()=>fundingPreview({...s,observedTimestamp:9999999999n},{...p,deadline:'0'}));
+});
+test('new settlement matches execution-period events while old approvals still bind their signed period',()=>{
+ const payment={...p,deadline:'0'},log={address:expiryConfig.payments.policy,
+  topics:encodeEventTopics({abi:paymentAbi,eventName:'Paid',args:{token:c.payments.tokenL1,recipient:p.recipient}}),
+  data:encodeAbiParameters([{type:'bool'},...Array(4).fill({type:'uint256'})],[true,110_000_000n,100_000_000n,10_000_000n,103n])};
+ assert.deepEqual(settledPayment(expiryConfig,payment,[log]),{fromL1:'100000000',fromL2:'10000000'});
+ assert.equal(settledPayment(c,p,[log]),undefined);
+ const tx=paymentTransaction(expiryConfig,payment,5n),intent={version:1,instance:c.instance,value:'0',payment,submissionChain:'l1',l2StartBlock:'0x1',nonce:'5',safeHash:safeTransactionHash(tx),data:'0x1234',sender:address('5'),sourceNonce:'0x1',startBlock:'0x1'};
+ assert.deepEqual(readIntent(expiryConfig,JSON.stringify(intent)),intent);
+ assert.throws(()=>readIntent(expiryConfig,JSON.stringify({...intent,payment:{...payment,deadline:'1000'}})));
+});
+test('v2 quotes each local allowance period independently and reads the shared budget on L2',async()=>{
+ const client=idleClient({l2Timestamp:60_599n,sharedEpoch:100n});client.config.payments.pair={version:2,policyL1:address('9'),peerProxyL2:address('a')};
+ const state=await paymentState(client);
+ assert.equal(state.epoch,100n);assert.equal(state.resetsAt,60600);
+ assert.equal(state.allowanceL1[3],1010n);assert.equal(state.allowanceL2[3],1000n);
 });

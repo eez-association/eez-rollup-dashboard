@@ -1,3 +1,4 @@
+import { paymentAuthorizationTime } from "./savedPayments.ts";
 import { pairedPolicyAbi } from "./pairedPolicy.ts";
 import { findIncomingCallEvidence } from "./mainnetSetupRelay.ts";
 import { recordedPaymentTransaction } from "./savedPayments.ts";
@@ -60,7 +61,7 @@ export async function l1PaymentOutcome(client: TreasuryClient, intent: Intent): 
     const contributions = settledPayment(c, p, receipt.logs);
     check(contributions, "Missing matching local policy payment event");
     const peerData = encodeFunctionData({ abi: pairedPolicyAbi, functionName: "payFromPeer", args: [
-      p.recipient, BigInt(p.amount), p.destination === "l1", BigInt(p.epoch), BigInt(p.fromL1),
+      p.recipient, BigInt(p.amount), p.destination === "l1", paymentAuthorizationTime(c.payments!, p), BigInt(p.fromL1),
     ] });
     const incoming = await findIncomingCallEvidence({
       rpc<T>(chain: "l1" | "l2", method: string, params: unknown[], front = false): Promise<T> {

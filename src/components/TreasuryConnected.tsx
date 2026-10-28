@@ -128,7 +128,7 @@ function PairedTreasuryConnected({ deployment, wallet, payments = false, network
   }, [clearReview]);
   const acceptPayments = useCallback((next: PaymentState) => {
     setBalances(next);
-    if (!refs.current.intent && refs.current.review?.payment && refs.current.review.payment.kind !== "transfer" && BigInt(refs.current.review.payment.epoch) !== next.epoch) {
+    if (!refs.current.intent && refs.current.review?.payment && refs.current.review.payment.kind !== "transfer" && refs.current.review.payment.deadline === undefined && BigInt(refs.current.review.payment.epoch) !== next.epoch) {
       clearReview(); setNotice("The budget period changed. Review again; previous approvals were cleared.");
     }
   }, [clearReview]);
@@ -254,7 +254,7 @@ function PairedTreasuryConnected({ deployment, wallet, payments = false, network
         ? { ...identity, kind: "transfer", source: "l1", destination: "l2", recipient: deployment.safeL2, amount: String(parseTransferAmount(value)), rollupId: await transferRollup(client) }
         : kind === "invoice"
         ? { ...identity, kind: "invoice", invoiceId: invoiceId!, destination: "l1", amount: String(parseUSDC(value)) }
-        : { ...identity, amount: String(parseUSDC(value)), fromL1: String(contribution(amounts, parseUSDC(value))) });
+        : { ...identity, ...(deployment.payments?.pair?.version === 2 ? { deadline: "0" } : {}), amount: String(parseUSDC(value)), fromL1: String(contribution(amounts, parseUSDC(value))) });
       let contributions;
       try { contributions = fundingPreview(amounts, payment); }
       catch (failure) {
@@ -438,6 +438,7 @@ function PairedTreasuryConnected({ deployment, wallet, payments = false, network
         {!terminal(outcome) && <div className={styles.approvalStep}>
           <h4>{payments ? kind === "transfer" ? "Transfer approvals" : "Payment approvals" : "Action approvals"}</h4>
           <strong className={styles.quorum} data-testid="quorum">{intent ? "Owner approvals collected" : `${approvals.length} of ${snapshot?.threshold ?? "—"} approvals`}</strong>
+          {review?.payment?.deadline === "0" && <p className={styles.hint}>No time expiry. Balances and spending limits are checked when this payment executes.</p>}
           {review && <p>Approve this {payments ? kind === "transfer" ? "transfer" : "payment" : "action"} with the shared owners.</p>}
           {!wallet.address ? <div className={styles.owners}>{wallet.walletOptions.map(option => <button className="btn btn-outline" key={option.id} onClick={() => void wallet.connect(option.id)}>Connect {option.name}</button>)}
             {!wallet.walletOptions.length && <p>Connect a browser wallet to sign.</p>}</div> : <>

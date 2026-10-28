@@ -52,6 +52,9 @@ export function pairedSetupAvailable(artifacts: DeploymentArtifacts) {
   return !!artifacts.build && !!policy && policy.bytecode.length > 2 && policy.runtime.length > 2
     && policy.abi.some(item => item.type === "function" && item.name === "PAIR_VERSION");
 }
+export function pairedReleaseVersion(artifacts: DeploymentArtifacts): 1 | 2 {
+  return artifacts.contracts.PairedTreasuryPolicy?.abi.some(item => item.type === "function" && item.name === "paySplit" && item.inputs[3]?.name === "deadline") ? 2 : 1;
+}
 type Output = { key: string; address: Address; artifact?: string; hash?: Hex };
 type Review = { step: number; chain: Chain; nonce: string; owners: Address[]; threshold: number; fingerprint: string; hash: Hex; approvals: Approval[]; moduleEnabled?: boolean };
 type Pending = DeploymentPending & { outputs: Output[]; actionsHash?: Hex; executor?: Address; sequence?: string; closed?: boolean; safe?: Address; safeChain?: Chain; l2StartBlock?: Hex };
@@ -483,13 +486,13 @@ export class MainnetSetup {
   async manifest(s: MainnetSetupState) {
     check(s.completed.length === 6 && !s.pending, "Complete setup before opening the treasury"); await this.unchanged(s);
     const a = s.addresses, code = [...s.code];
-    let pair: { version: 1; policyL1: Address; peerProxyL2: Address } | undefined;
+    let pair: { version: 1 | 2; policyL1: Address; peerProxyL2: Address } | undefined;
     if (s.version === 3) {
       const peerProxyL2 = await this.io.read<Address>("l2", a.policy!, "PairedTreasuryPolicy", "peer");
       const bytes = await this.io.rpc<Hex>("l2", "eth_getCode", [peerProxyL2, "latest"]);
       check(bytes !== "0x", "Peer connection is not deployed");
       code.push({ chain: "l2", address: peerProxyL2, hash: keccak256(bytes) });
-      pair = { version: 1, policyL1: a.policyL1!, peerProxyL2 };
+      pair = { version: pairedReleaseVersion(this.artifacts), policyL1: a.policyL1!, peerProxyL2 };
     }
     for (const b of Object.values(this.network.contracts)) code.push({ chain: b.chain as Chain, address: getAddress(b.address), hash: b.hash as Hex });
     for (const p of this.network.protocol) for (const [address, hash] of [[p.proxy, p.proxyHash], [p.implementation, p.implementationHash]]) code.push({ chain: p.chain as Chain, address: getAddress(address!), hash: hash as Hex });

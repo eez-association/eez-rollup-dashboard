@@ -4,7 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { decodeAbiParameters, decodeFunctionData, encodeAbiParameters, encodeEventTopics, getAddress, keccak256, parseAbi, toHex, zeroHash } from 'viem';
-import { MainnetSetup, mainnetSetupStepsFor, pairedSetupAvailable, readMainnetSetup } from '../src/lib/treasury/mainnetSetup.ts';
+import { MainnetSetup, mainnetSetupStepsFor, pairedSetupAvailable, pairedReleaseVersion, readMainnetSetup } from '../src/lib/treasury/mainnetSetup.ts';
 import { paymentAbi, paymentTransaction, settledPayment } from '../src/lib/treasury/payments.ts';
 import { safeTransactionHash } from '../src/lib/treasury/safeTransactions.ts';
 import { findIncomingCallEvidence } from '../src/lib/treasury/mainnetSetupRelay.ts';
@@ -220,4 +220,10 @@ test('matching setup keeps all six steps within creation limits and moves L1 pol
  assert.equal(state.addresses.safeL1,state.addresses.safeL2);
  assert.match(mainnetSetupStepsFor(state)[3].details[0],/Deploy the Ethereum policy/);
  assert.throws(()=>readMainnetSetup(JSON.stringify({...state,completed:[],addresses:{},matching:{...state.matching,version:2}})),/Invalid matching Safe plan/);
+});
+
+test('new releases select optional expiry while retained paired releases keep epoch signing',()=>{
+ assert.equal(pairedReleaseVersion(artifacts),2);
+ const previous=read('src/lib/treasury/builds/1d5f54a1c619b6efc34101e494bbad0d11f3a77ae647d02863af8089e8fe84fb.json');
+ assert.equal(pairedReleaseVersion(previous),1);
 });

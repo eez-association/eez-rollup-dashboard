@@ -105,7 +105,7 @@ export function parseTreasuryConfig(value: unknown): TreasuryConfig {
       requireThat(verifiesL1Initiation(p) && verifiesReverseFunding(p) && p.safeL2Alias && isAddress(p.safeL2Alias)
         && c.code.some(b => b.chain === "l1" && same(b.address, p.safeL2Alias!)), "Missing standard bridge relay identity");
       if (p.pair) {
-        requireThat(p.pair.version === 1 && p.version === 2 && isAddress(p.pair.policyL1) && BigInt(p.pair.policyL1) > 1n
+        requireThat([1, 2].includes(p.pair.version) && p.version === 2 && isAddress(p.pair.policyL1) && BigInt(p.pair.policyL1) > 1n
           && isAddress(p.pair.peerProxyL2) && BigInt(p.pair.peerProxyL2) > 1n && !p.bridgeExecutorL1 && !p.predecessor && !p.aliasReaderL1 && !p.invoiceMerchant
           && c.code.some(b => b.chain === "l1" && same(b.address, p.pair!.policyL1))
           && c.code.some(b => b.chain === "l2" && same(b.address, p.pair!.peerProxyL2)), "Invalid paired policy identity");

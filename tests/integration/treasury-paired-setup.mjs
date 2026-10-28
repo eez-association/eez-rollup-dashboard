@@ -157,7 +157,7 @@ try {
     TreasuryClient.prototype.validate = function() { return validatePairedPayments(this); };
     const manifest = await engine.manifest(state);
     assert.equal(manifest.environment,'dashboard-testnet'); assert.equal(manifest.payments.pair.policyL1,a.policyL1);
-    assert.equal(manifest.payments.bridgeExecutorL1,undefined); assert(manifest.safeAppUrl.includes('safe=chiado:'));
+    assert.equal(manifest.payments.pair.version,2);assert.equal(manifest.payments.bridgeExecutorL1,undefined); assert(manifest.safeAppUrl.includes('safe=chiado:'));
     evidence.manifest = manifest;
   } finally { TreasuryClient.prototype.validate = originalValidate; }
   await call('l1',tokenL1,'TestUSDC','claim',[a.safeL1]); await call('l1',tokenL1,'TestUSDC','claimOnL2',[a.safeL2]);
@@ -167,7 +167,7 @@ try {
     await rpc('anvil_setChainId',[ids[source]]);
     const epoch = BigInt((await rpc('eth_getBlockByNumber',['latest',false])).timestamp)/600n;
     const tx = buildSafeTransaction({chainId:BigInt(ids[source]),safe,to:policy,nonce:await engine.io.read(source,safe,'Safe','nonce'),
-      data:encodeFunctionData({abi:artifacts.PairedTreasuryPolicy.abi,functionName:'paySplit',args:[recipient,20_000_000n,destination==='l1',epoch,10_000_000n]})});
+      data:encodeFunctionData({abi:artifacts.PairedTreasuryPolicy.abi,functionName:'paySplit',args:[recipient,20_000_000n,destination==='l1',0n,10_000_000n]})});
     const signingClient = new TreasuryClient(evidence.manifest);
     signingClient.rpc = async () => assert.fail('Payment signing must not repeat RPC reads');
     const snapshot = {source,owners:owners.map(o=>o.address),threshold:owners.length,nonce:tx.message.nonce};
@@ -177,6 +177,7 @@ try {
       assert.equal(method,'eth_signTypedData_v4');return owner.signTypedData(JSON.parse(params[1]));
     }},tx,snapshot,owner.address)));
     const sig = source==='l1' ? await packEOAApprovals(tx,owners.map(o=>o.address),owners.length,approvals) : await packOwnerApprovals(tx,a.adapter,owners.map(o=>o.address),owners.length,approvals);
+    if(source==='l1'&&destination==='l1'){await rpc('evm_setNextBlockTimestamp',[Number((epoch+1n)*600n)]);evidence.signedBeforeReset=String(epoch);}
     const receipt = await send(source,safe,encodeSafeExecution(tx,sig)); evidence.payments.push({source,destination,hash:receipt.transactionHash});
   }
   assert.equal(await engine.io.read('l1',tokenL1,'TestUSDC','balanceOf',[recipient]),40_000_000n);

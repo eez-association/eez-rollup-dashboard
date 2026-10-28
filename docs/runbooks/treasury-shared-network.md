@@ -43,6 +43,25 @@ Infrastructure deployment is separate from each treasury setup and from
 real-wallet/Safe-app acceptance. The linked audit records the state observed at
 the time; the dashboard verifies the selected treasury before opening it.
 
+## Optional payment expiry (paired policy version 2)
+
+New setups use `PAIR_VERSION = 2`. The fourth `paySplit` argument is an optional
+Unix-second deadline, and the dashboard demo explicitly signs **0 (no expiry)**.
+Crossing a ten-minute budget reset no longer invalidates these approvals. A
+nonzero deadline remains supported and is checked on both chains. Safe nonce,
+owner signatures, balances and spending limits are still enforced.
+
+Each Safe's 100-token allowance is checked in its own execution-time period.
+The shared 150-token budget is counted once in L2's execution-time period;
+`Paid` reports that L2 period even when initiated on L1. UI capacity reads use
+observed local periods, and version-2 reconciliation matches the signed deadline
+in the exact peer call rather than requiring the preview period in the event.
+
+A new immutable release contains this behavior. Already deployed version-1
+policies are unchanged and keep epoch-bound signing/reconciliation. Fresh
+setups use the new release; no automatic on-chain upgrade or revocation of old
+allowances is performed. Do not treat a changed frontend as a policy migration.
+
 ## Create both Safes from the dashboard
 
 Alternatively choose **Create new Safes**. This uses the same six-step

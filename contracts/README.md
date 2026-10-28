@@ -31,12 +31,21 @@ identities must still be verified during deployment.
 The Safe owners call their local policy:
 
 ```solidity
-paySplit(recipient, amount, onL1, expectedEpoch, fromL1)
+paySplit(recipient, amount, onL1, deadline, fromL1)
 ```
 
 `amount` and `fromL1` are exact six-decimal units. The L2 contribution is
 `amount - fromL1`. `onL1` selects the recipient chain. The Safe's signatures bind
 these fields, the local policy target, the Safe's own chain and its nonce.
+`deadline` is a Unix timestamp in seconds; **0 means no expiry** and is the
+current dashboard demo default. A nonzero deadline is valid through that
+second and rejects afterward. Both policies enforce it. A budget reset alone
+never invalidates a version-2 approval; the Safe nonce still prevents replay.
+
+`PAIR_VERSION` is 2. Version-1 deployed policies used the same argument types
+but interpreted the fourth argument as a signed epoch. The dashboard must use
+the validated pair version to encode and reconcile payments; old approvals
+must never be reinterpreted as deadlines. Activation rejects mixed versions.
 
 The implementation is deliberately local-first:
 
@@ -81,8 +90,11 @@ reread bridge configuration or fetch the other policy's full configuration.
 The shared limit remains 150 tokens per ten-minute epoch. Only the L2 policy
 writes the shared counter. Every payment visits it exactly once, including an
 L1-only payment with zero L2 contribution. `spent(epoch)` on either policy reports
-that same counter. A stale epoch or insufficient local capacity rejects the exact
-signed split; contributions are never silently rebalanced.
+that same counter. Each local allowance uses that chain's execution-time period;
+L2 alone chooses the shared budget period from its execution timestamp. The
+peer returns its period so L1-initiated `Paid` events also report the actual L2
+budget epoch. An expired nonzero deadline or insufficient current capacity
+rejects the exact signed split; contributions are never silently rebalanced.
 
 For L1 initiation, a shared-budget or peer-transfer failure can occur after the
 local transfer. Failure must propagate through the atomic EEZ execution and the

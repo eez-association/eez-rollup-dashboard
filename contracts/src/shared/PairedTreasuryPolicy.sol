@@ -17,7 +17,7 @@ contract PairedTreasuryPolicy {
 
     uint256 public constant PERIOD = 600;
     uint256 public constant GLOBAL_LIMIT = 150_000_000;
-    uint256 public constant PAIR_VERSION = 1;
+    uint256 public constant PAIR_VERSION = 2;
 
     address public immutable safe;
     IAllowanceModule public immutable allowanceModule;
@@ -53,7 +53,7 @@ contract PairedTreasuryPolicy {
     error InvalidConfiguration();
     error InvalidAmount();
     error InvalidRecipient();
-    error StaleEpoch();
+    error PaymentExpired();
     error GlobalLimit();
     error Capacity();
     error UnalignedAllowance();
@@ -152,6 +152,7 @@ contract PairedTreasuryPolicy {
         if (active || peerPolicy == address(0) || _counterpart(bridge) != remoteBridge) {
             revert InvalidConfiguration();
         }
+        if (peer.PAIR_VERSION() != PAIR_VERSION) revert InvalidConfiguration();
         Configuration memory other = peer.configuration();
         if (
             other.peerPolicy != address(this) || other.canonicalToken != canonicalToken || other.bridge != remoteBridge
@@ -172,20 +173,21 @@ contract PairedTreasuryPolicy {
         return remote == address(0) ? address(localBridge) : remote;
     }
 
-    /// @notice Owners sign the exact total, destination, epoch and L1 contribution.
+    /// @notice Owners sign the total, destination, L1 contribution and optional expiry.
+    /// @dev deadline == 0 never expires. Spending is charged to execution-time periods.
     function paySplit(
         address recipient,
         uint256 amount,
         bool onL1,
-        uint256 epoch,
+        uint256 deadline,
         uint256 fromL1
     )
         external
         onlySafe
         nonReentrant
     {
-        _checkPayment(recipient, amount, epoch, fromL1);
-        _countOnL2(amount, epoch);
+        _checkPayment(recipient, amount, deadline, fromL1);
+        uint256 epoch = _countOnL2(amount);
 
         // 1. Transfer our tokens first.
         uint256 ours = localRollupId == 0 ? fromL1 : amount - fromL1;
@@ -193,8 +195,10 @@ contract PairedTreasuryPolicy {
 
         // 2. Ask the other policy to transfer theirs. Always call, even for a
         // zero contribution: an L1-only payment must still be counted on L2.
-        peer.payFromPeer(recipient, amount, onL1, epoch, fromL1);
-        emit Paid(canonicalToken, recipient, onL1, amount, fromL1, amount - fromL1, epoch);
+        uint256 peerEpoch = peer.payFromPeer(recipient, amount, onL1, deadline, fromL1);
+        emit Paid(
+            canonicalToken, recipient, onL1, amount, fromL1, amount - fromL1, localRollupId == 0 ? peerEpoch : epoch
+        );
     }
 
     /// @notice Finish a payment started by the other policy. Never calls it back to pay again.
@@ -202,15 +206,16 @@ contract PairedTreasuryPolicy {
         address recipient,
         uint256 amount,
         bool onL1,
-        uint256 epoch,
+        uint256 deadline,
         uint256 fromL1
     )
         external
         onlyPeer
         nonReentrant
+        returns (uint256 epoch)
     {
-        _checkPayment(recipient, amount, epoch, fromL1);
-        _countOnL2(amount, epoch);
+        _checkPayment(recipient, amount, deadline, fromL1);
+        epoch = _countOnL2(amount);
         uint256 ours = localRollupId == 0 ? fromL1 : amount - fromL1;
         _transferTokens(recipient, ours, onL1 ? 0 : l2RollupId, epoch);
     }
@@ -250,9 +255,9 @@ contract PairedTreasuryPolicy {
         if (amount > remaining || amount > token.balanceOf(safe)) revert Capacity();
     }
 
-    function _checkPayment(address recipient, uint256 amount, uint256 epoch, uint256 fromL1) private view {
+    function _checkPayment(address recipient, uint256 amount, uint256 deadline, uint256 fromL1) private view {
         if (amount == 0 || amount > GLOBAL_LIMIT || fromL1 > amount) revert InvalidAmount();
-        if (epoch != block.timestamp / PERIOD) revert StaleEpoch();
+        if (deadline != 0 && block.timestamp > deadline) revert PaymentExpired();
         // Peer and bridge bindings were validated at activation. Payments trust
         // that the normal bridge's administrator keeps that pair unchanged.
         if (!active) revert InvalidConfiguration();
@@ -266,8 +271,9 @@ contract PairedTreasuryPolicy {
     // Exactly one of the two policies is on L2, so every payment counts once.
     // If its budget check fails after an L1 transfer, the failure propagates and
     // the entire EEZ payment must revert, including the earlier contribution.
-    function _countOnL2(uint256 amount, uint256 epoch) private {
-        if (localRollupId == 0) return;
+    function _countOnL2(uint256 amount) private returns (uint256 epoch) {
+        epoch = block.timestamp / PERIOD;
+        if (localRollupId == 0) return epoch;
         if (globalSpent[epoch] + amount > GLOBAL_LIMIT) revert GlobalLimit();
         globalSpent[epoch] += amount;
     }
