@@ -17,16 +17,17 @@ const origin = `http://127.0.0.1:${server.httpServer.address().port}`;
 const browser = await chromium.launch({ headless: true, chromiumSandbox: true });
 let activePage;
 try {
-  for (const testnet of [true, false]) {
+  for (const kind of ['testnet', 'mainnet', 'rollupx']) {
+    const testnet = kind === 'testnet';
     const network = testnet ? { ...mainnet, testnet: true, registry: profile.registry, manager: profile.manager, rollupId: profile.rollupId,
-      chains: Object.fromEntries(['l1', 'l2'].map(chain => [chain, { chainId: profile.chains[chain].chainId, ...profile.chains[chain].checkpoint }])) } : mainnet;
+      chains: Object.fromEntries(['l1', 'l2'].map(chain => [chain, { chainId: profile.chains[chain].chainId, ...profile.chains[chain].checkpoint }])) } : kind === 'rollupx' ? read('src/lib/treasury/rollupx-mainnet-network.json') : mainnet;
     const state = { version: 3, creation: 'create-both', build: read('src/lib/treasury/current-build.json').build, identity: setupIdentity(network), salt: hash,
       deployer: account, addresses: { safeL1: toHex(10n, { size: 20 }) }, code: [], completed: [{ chain: 'l1', hash, blockHash: hash, number: '0x1' }] };
     const key = `eez:treasury:paired-setup:${setupIdentity(network)}`;
     const runtime = { networkName: 'EEZ-X', l1RpcUrl: '/rpc/l1', l2RpcUrl: '/rpc/l2', l1FrontUrl: '/composer/l1', l2FrontUrl: '/composer/l2',
       l1ContractAddress: network.registry, l2ContractAddress: network.manager, rollupId: String(network.rollupId),
-      bridgeL1Address: testnet ? profile.bridges.l1.address : mainnet.contracts.bridgeL1.address,
-      bridgeL2Address: testnet ? profile.bridges.l2.address : mainnet.contracts.bridgeL2.address,
+      bridgeL1Address: testnet ? profile.bridges.l1.address : network.contracts.bridgeL1.address,
+      bridgeL2Address: testnet ? profile.bridges.l2.address : network.contracts.bridgeL2.address,
       treasuryTokenAddress: toHex(30n, { size: 20 }), l1FeesEnabled: true, l2FeesEnabled: true };
     const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
     const page = await context.newPage(), errors = [];
@@ -116,7 +117,7 @@ try {
     assert.equal(await page.evaluate(() => window.gasBridgeTest.walletOps.filter(op => op.method === 'eth_sendTransaction').length), 1);
     assert.deepEqual(errors, []);
     await context.close();
-    console.log(`PASS ${symbol}: correct route and recipient, no automatic wallet prompts, saved setup preserved, pending bridge protected`);
+    console.log(`PASS ${kind} ${symbol}: correct route and recipient, no automatic wallet prompts, saved setup preserved, pending bridge protected`);
   }
 } catch (error) {
   if (activePage && !activePage.isClosed()) console.error(await activePage.locator('body').innerText());

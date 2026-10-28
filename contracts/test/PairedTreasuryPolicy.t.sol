@@ -413,6 +413,33 @@ contract PairedTreasuryPolicyTest is OwnerFixture {
         vm.clearMockedCalls();
     }
 
+    function testCurrentBridgeGetterWorksWithoutLegacyManager() public {
+        vm.mockCall(address(bridge1), abi.encodeWithSignature("EEZContract()"), abi.encode(address(l1)));
+        vm.mockCallRevert(address(bridge1), abi.encodeCall(IStandardBridge.manager, ()), "legacy getter removed");
+        PairedTreasuryPolicy current =
+            new PairedTreasuryPolicy(address(safeL1), module1, usdc, IStandardBridge(address(bridge1)), ROLLUP_ID);
+        assertEq(address(current.manager()), address(l1));
+    }
+
+    function testMalformedCurrentBridgeGetterFallsBackToLegacy() public {
+        vm.mockCall(address(bridge1), abi.encodeWithSignature("EEZContract()"), hex"01");
+        PairedTreasuryPolicy legacy =
+            new PairedTreasuryPolicy(address(safeL1), module1, usdc, IStandardBridge(address(bridge1)), ROLLUP_ID);
+        assertEq(address(legacy.manager()), address(l1));
+    }
+
+    function testZeroCurrentBridgeGetterCannotUseLegacyIdentity() public {
+        vm.mockCall(address(bridge1), abi.encodeWithSignature("EEZContract()"), abi.encode(address(0)));
+        vm.expectRevert(PairedTreasuryPolicy.InvalidConfiguration.selector);
+        new PairedTreasuryPolicy(address(safeL1), module1, usdc, IStandardBridge(address(bridge1)), ROLLUP_ID);
+    }
+
+    function testWrongCurrentBridgeIdentityCannotUseLegacyIdentity() public {
+        vm.mockCall(address(bridge2), abi.encodeWithSignature("EEZContract()"), abi.encode(address(l1)));
+        vm.expectRevert();
+        new PairedTreasuryPolicy(address(safeL2), module2, wrapped, IStandardBridge(address(bridge2)), ROLLUP_ID);
+    }
+
     function testMissingEEZGetterDoesNotFallBackToL1() public {
         vm.mockCallRevert(address(l2), abi.encodeCall(IEEZProxyRegistry.ROLLUP_ID, ()), "missing getter");
         vm.expectRevert();

@@ -50,6 +50,7 @@ jobs:
         run: |
           node tests/integration/treasury-source-verification.mjs
           node tests/integration/treasury-paired-setup.mjs
+          node tests/integration/treasury-paired-setup.mjs --current-bridge
       - name: Browser regressions
         env:
           CHROME_DEVEL_SANDBOX: /usr/local/sbin/eez-chromium-sandbox
@@ -65,6 +66,7 @@ jobs:
           node tests/treasury-mainnet-setup-browser.mjs
           node tests/treasury-setup-ux-browser.mjs
           node tests/treasury-gas-bridge-browser.mjs
+          node tests/treasury-rollupx-browser.mjs
           node tests/treasury-paired-asset-browser.mjs
           node tests/treasury-payment-history-browser.mjs
           node tests/treasury-history-loading-browser.mjs

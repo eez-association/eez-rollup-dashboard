@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { decodeEventLog, encodeFunctionData, decodeFunctionResult, parseAbi, isAddress, keccak256 } from 'viem';
 import { matchesRuntime } from '../../src/lib/treasury/runtimeCode.ts';
+import { readBridgeManager } from '../../src/lib/bridgeManager.ts';
 import { verificationEndpoint } from './network.mjs';
 import { Etherscan } from './etherscan.mjs';
 const hash = x => createHash('sha256').update(JSON.stringify(x)).digest('hex');
@@ -133,7 +134,10 @@ export class VerificationWorker {
         add('0x' + slot.slice(-40));
       }
       if (name === 'Bridge' && Number.isSafeInteger(network.peerRollupId) && network.peerRollupId >= 0) {
-        const [manager, counterpart] = await Promise.all([read(address, 'manager'), read(address, 'canonicalBridgeAddress')]);
+        const [manager, counterpart] = await Promise.all([
+          readBridgeManager(data => this.rpc(network, 'eth_call', [{ to: address, data }, block.number])),
+          read(address, 'canonicalBridgeAddress'),
+        ]);
         add(manager);
         if (BigInt(manager) > 0n) add(await read(manager, 'computeCrossChainProxyAddress', [BigInt(counterpart) === 0n ? address : counterpart, BigInt(network.peerRollupId)]));
       }

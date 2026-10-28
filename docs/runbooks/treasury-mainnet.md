@@ -27,6 +27,33 @@ are needed to discover these public bindings. See the
 The simplified contract build targets fresh treasury setups. It does not migrate
 existing policy contracts or preserve earlier constructor layouts.
 
+### RollupX deployment (chain 696991)
+
+`rollupx-mainnet-network.json` adds the deployment served by
+`https://rollupx.eez.dev/dashboard/`: Ethereum chain 1, RollupX chain 696991,
+rollup ID 2 and bridge `0x95273bf880ae09fdeb8c71d5aa37a0ba70835b55` on both
+chains. The previous chain-696990 profile and its saved setup identities remain
+unchanged. Both bridge proxies must retain the pinned EIP-1967 implementation
+and exact proxy/implementation code hashes. New policies prefer `EEZContract()`
+and fall back to `manager()` for older bridges.
+
+At the October 28 inspection, the new bridge had no wrapped Ethereum USDC.
+The expected wrapped address and runtime hash were reproduced locally from the
+verified `WrappedToken` constructor, CREATE2 salt, Ethereum USDC metadata and
+chain ID 696991. This prediction is not a deployed-token claim. Setup stays
+blocked until the real wrapped contract, origin, decimals-dependent bytecode
+and bridge mint authority match. An operator must provision USDC through the
+normal bridge before selecting **Check again**. The dashboard does not submit
+that transaction automatically.
+
+Bridge and wrapped-token sources match
+[core protocol PR #54](https://github.com/eez-association/eez-core-protocol/pull/54)
+at `60d60296616a20dbf7dcd72cf95c36da4feecaf9`; supplemental compiler inputs are
+retained for verification. Deploy the dashboard and verification-service images
+together so the service has the new policy release and dependency inputs.
+L2 source jobs use the live RPC chain ID and the configured `/explorer/api`;
+an explorer 404 remains pending and must not be presented as verified.
+
 New setups also reuse a verified owner adapter when another mirror follows the
 same original Safe on the same EEZ manager. Otherwise the normal batch creates
 it. No wallet address or new environment setting is needed. The selected adapter

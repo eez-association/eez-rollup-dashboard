@@ -3,10 +3,12 @@
 // Composer, canonical cross-chain settlement, or native rollback behavior.
 import assert from 'node:assert/strict';
 import { argv } from 'node:process';
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
+import { homedir } from 'node:os';
+import { resolve } from 'node:path';
 import { createServer } from 'node:net';
 import { once } from 'node:events';
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, openSync, closeSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, openSync, closeSync, existsSync } from 'node:fs';
 import { encodeDeployData, encodeFunctionData, decodeEventLog, keccak256, toHex, zeroAddress } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { MainnetSetup, readMainnetSetup } from '../../src/lib/treasury/mainnetSetup.ts';
@@ -17,6 +19,17 @@ const read = path => JSON.parse(readFileSync(path));
 const release = read(`src/lib/treasury/builds/${read('src/lib/treasury/current-build.json').build}.json`), artifacts = release.contracts;
 const [A, B] = [0xa11cen, 0xb0bn].map(n => privateKeyToAccount(toHex(n, { size: 32 })));
 const fresh = argv.includes('--create-both'), owners = fresh ? [A] : [A,B];
+const currentBridge = argv.includes('--current-bridge'), routeRollup = currentBridge ? 2n : 1n;
+function compileDependency(path) {
+  const source=read(path), version=source.compiler.split('+')[0];
+  const solc=['.local/share/svm','.svm'].map(root=>resolve(homedir(),root,version,`solc-${version}`)).find(existsSync);
+  assert(solc, 'The retained compiler must already be installed');
+  const output=JSON.parse(execFileSync(solc,['--standard-json'],{input:JSON.stringify(source.input),encoding:'utf8',maxBuffer:64*1024*1024}));
+  assert(!(output.errors??[]).some(error=>error.severity==='error'));
+  const [file,name]=source.target.split(':'),contract=output.contracts[file][name];
+  assert.equal('0x'+contract.evm.deployedBytecode.object,source.runtime);
+  return {abi:contract.abi,bytecode:{object:'0x'+contract.evm.bytecode.object}};
+}
 const pairedNetwork = read('src/lib/treasury/paired-testnet-network.json');
 const ids = { l1: pairedNetwork.chains.l1.chainId, l2: pairedNetwork.chains.l2.chainId }, wait = ms => new Promise(r => setTimeout(r, ms));
 mkdirSync('.runtime/paired-setup', { recursive: true }); const directory = mkdtempSync('.runtime/paired-setup/anvil-');
@@ -41,12 +54,26 @@ try {
   for (let i = 0; i < 100; i++) { try { await rpc('eth_chainId'); break; } catch { await wait(50); } }
   await rpc('anvil_setBalance', [A.address, toHex(100n * 10n ** 18n)]); await rpc('anvil_impersonateAccount', [A.address]);
   const fixture = read('contracts/out/OwnerFixture.sol/ReadThroughManager.json');
-  const registry = await deploy('l1', 'ReadThroughManager', [0n], fixture), manager = await deploy('l2', 'ReadThroughManager', [1n], fixture);
+  const registry = await deploy('l1', 'ReadThroughManager', [0n], fixture), manager = await deploy('l2', 'ReadThroughManager', [routeRollup], fixture);
   for (const [chain, local, peer] of [['l1',registry,manager],['l2',manager,registry]]) await send(chain, local, encodeFunctionData({ abi: fixture.abi, functionName: 'setPeer', args: [peer] }));
-  const bridgeL1 = await deploy('l1', 'Bridge'), bridgeL2 = await deploy('l2', 'Bridge');
-  await call('l1', bridgeL1, 'Bridge', 'initialize', [registry,0n,A.address]); await call('l2', bridgeL2, 'Bridge', 'initialize', [manager,1n,A.address]);
-  await call('l1', bridgeL1, 'Bridge', 'setCanonicalBridgeAddress', [bridgeL2]); await call('l2', bridgeL2, 'Bridge', 'setCanonicalBridgeAddress', [bridgeL1]);
-  const tokenL1 = await deploy('l1', 'TestUSDC', [bridgeL1,1n]); await call('l1', tokenL1, 'TestUSDC', 'claimOnL2', [A.address]);
+  let bridgeL1,bridgeL2,bridgeImplementations;
+  if(currentBridge) {
+    const bridge=compileDependency('verification/supplemental/725808667000ef9e74ad8cc8e0ce5031c133f88320805bc51899785f99e0dbc7.json');
+    const proxy=compileDependency('verification/supplemental/499bdeb7d7e43e46166a34cf3667bde30e6af9f2af15e36565a13564179d59fa.json');
+    const implementation=await deploy('l1','CurrentBridge',[],bridge);
+    const init=encodeFunctionData({abi:bridge.abi,functionName:'initialize',args:[A.address]});
+    bridgeL1=await deploy('l1','CurrentBridgeProxy',[implementation,A.address,init],proxy);
+    bridgeL2=await deploy('l2','CurrentBridgeProxy',[implementation,A.address,init],proxy);
+    for(const [chain,local,eez,peer,id] of [['l1',bridgeL1,registry,bridgeL2,0n],['l2',bridgeL2,manager,bridgeL1,routeRollup]])
+      await send(chain,local,encodeFunctionData({abi:bridge.abi,functionName:'initializeBridge',args:[eez,peer,id]}));
+    const hash=keccak256(await rpc('eth_getCode',[implementation,'latest']));
+    bridgeImplementations={l1:{kind:'eip1967',address:implementation,hash},l2:{kind:'eip1967',address:implementation,hash}};
+  } else {
+    bridgeL1=await deploy('l1','Bridge');bridgeL2=await deploy('l2','Bridge');
+    await call('l1', bridgeL1, 'Bridge', 'initialize', [registry,0n,A.address]); await call('l2', bridgeL2, 'Bridge', 'initialize', [manager,routeRollup,A.address]);
+    await call('l1', bridgeL1, 'Bridge', 'setCanonicalBridgeAddress', [bridgeL2]); await call('l2', bridgeL2, 'Bridge', 'setCanonicalBridgeAddress', [bridgeL1]);
+  }
+  const tokenL1 = await deploy('l1', 'TestUSDC', [bridgeL1,routeRollup]); await call('l1', tokenL1, 'TestUSDC', 'claimOnL2', [A.address]);
   const singleton = await deploy('l1', 'Safe'), factory = await deploy('l1', 'SafeProxyFactory');
   const initialize = encodeFunctionData({ abi: artifacts.Safe.abi, functionName: 'setup', args: [[A.address,B.address],2n,zeroAddress,'0x',zeroAddress,zeroAddress,0n,zeroAddress] });
   const created = await call('l1', factory, 'SafeProxyFactory', 'createProxyWithNonce', [singleton,initialize,1n]);
@@ -62,7 +89,7 @@ try {
     }
   }
   const network = structuredClone(read('src/lib/treasury/mainnet-network.json'));
-  Object.assign(network, { testnet: true, registry, manager });
+  Object.assign(network, { testnet: true, registry, manager, rollupId:Number(routeRollup), ...(bridgeImplementations?{bridgeImplementations}:{}) });
   for (const chain of ['l1','l2']) Object.assign(network.chains[chain], { chainId: ids[chain], number: '0x0', hash: (await rpc('eth_getBlockByNumber',['0x0',false])).hash });
   network.contracts.bridgeL1.address = bridgeL1; network.contracts.bridgeL2.address = bridgeL2; network.contracts.usdcProxy.address = tokenL1;
   const target = { l1: { rpc:url,front:url,explorer:'https://example.com' }, l2: { rpc:url,front:url,explorer:'https://example.com' }, fees: {l1:'100000000000000000',l2:'100000000000000000'} };

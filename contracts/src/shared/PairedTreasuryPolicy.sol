@@ -97,7 +97,7 @@ contract PairedTreasuryPolicy {
                 || IERC20Metadata(address(token_)).decimals() != 6
         ) revert InvalidConfiguration();
         uint64 local = bridge_.rollupId();
-        address registry = bridge_.manager();
+        address registry = _bridgeManager(bridge_);
         address remote = _counterpart(bridge_);
         if ((local != 0 && local != l2RollupId_) || registry.code.length == 0) {
             revert InvalidConfiguration();
@@ -164,6 +164,16 @@ contract PairedTreasuryPolicy {
         active = true;
         if (startedHere) peer.activate();
         emit Activated();
+    }
+
+    /// @dev Current bridges expose EEZContract; older deployments expose manager.
+    /// A valid zero or wrong identity must fail the constructor's binding checks.
+    function _bridgeManager(IStandardBridge localBridge) private view returns (address) {
+        (bool ok, bytes memory result) = address(localBridge).staticcall(abi.encodeWithSignature("EEZContract()"));
+        if (ok && result.length == 32 && abi.decode(result, (uint256)) <= type(uint160).max) {
+            return abi.decode(result, (address));
+        }
+        return localBridge.manager();
     }
 
     /// @dev Match the normal Bridge: an unset override means the same address on the peer chain.
