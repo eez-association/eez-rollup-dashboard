@@ -91,7 +91,7 @@ try {
   await page.getByRole('button',{name:'Use an existing Safe',exact:true}).click(); await page.getByLabel('Chiado Safe address', { exact: true }).fill(a(10));
   await page.getByRole('button', { name: 'Start setup', exact: true }).click();
   await page.getByRole('alert').getByText('Fixture stopped before deployment', { exact: true }).waitFor(); assert.equal(sends.length, 2);
-  await mount('unconfigured'); await page.getByText('Configure the treasury token before setting up your Safes.', { exact: true }).waitFor();
+  await mount('unconfigured'); await page.getByRole('status').filter({ hasText: 'Test USDC is not configured for this deployment.' }).waitFor();
   await page.evaluate(async () => (await import('/tests/fixtures/treasury-paired-asset.tsx')).mountLegacy());
   await page.getByRole('alert').getByText('This dashboard supports only paired policies and normal bridges. Configure a new paired treasury.', { exact: true }).waitFor();
   await page.evaluate(() => localStorage.clear());
