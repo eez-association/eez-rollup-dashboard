@@ -302,6 +302,6 @@ export async function decodeCrossChainTrace(inputConfig, txHash) {
     originalTraces: transactions.map(r => ({ chain: r.chain, transactionHash: r.hash, trace: r.traceResult.trace })),
     settlements, transactionLinks, ...graph, unresolved, diagnostics,
   };
-  await enrichTokenMetadata(trace, readers);
+  await enrichTokenMetadata(trace, readers, typeof config.metadataBudget === 'function' ? config.metadataBudget() : undefined);
   return trace;
 }

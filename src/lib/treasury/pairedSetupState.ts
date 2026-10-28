@@ -1,4 +1,4 @@
-import { loadMainnetManifest, mainnetSetupSteps, readMainnetSetup, setupIdentity } from './mainnetSetup.ts';
+import { loadMainnetManifest, mainnetSetupStepsFor, readMainnetSetup, setupIdentity } from './mainnetSetup.ts';
 import type { SetupNetwork } from './mainnetSetup.ts';
 import { readSafeFaucetClaim } from './safeFaucet.ts';
 import type { SetupTransaction } from './setupTransactions.ts';
@@ -34,7 +34,7 @@ export function restartPairedSetup(storage: Reader & Pick<Storage, 'setItem'>, n
 export function pairedSetupTransactions(storage: Reader, network: SetupNetwork): SetupTransaction[] {
   const state = readMainnetSetup(storage.getItem(pairedSetupKey(network)), network);
   if (!state) return [];
-  const label = (index: number) => mainnetSetupSteps[index]!.label.split('Ethereum').join(network.testnet ? 'Chiado' : 'Ethereum');
+  const label = (index: number) => mainnetSetupStepsFor(state)[index]!.label.split('Ethereum').join(network.testnet ? 'Chiado' : 'Ethereum');
   const records: SetupTransaction[] = state.completed.map((tx, index) => ({ id: `${state.salt}:${index}`, label: label(index), chain: tx.chain,
     hash: tx.hash, completed: true, inclusion: { blockNumber: tx.number, blockHash: tx.blockHash } }));
   if (state.pending) records.push({ id: `${state.salt}:${state.pending.id}`, label: label(state.completed.length), chain: state.pending.chain, hash: state.pending.hash, completed: false });

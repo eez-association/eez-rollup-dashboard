@@ -12,7 +12,7 @@ await page.route('**/*',route=>{const u=new URL(route.request().url());assert.eq
 const mount=async options=>{await page.goto(origin+'/setup');await page.evaluate(async f=>{localStorage.clear();await(await import('/tests/fixtures/treasury-mainnet-setup.tsx')).mountUX(f);},{...fixture,...options});};
 try{
  await mount({disconnected:true,holdConfigure:true});await page.getByRole('button',{name:'Connect MetaMask',exact:true}).click();
- await page.getByLabel('Ethereum Safe address',{exact:true}).fill(a(10));await page.getByRole('button',{name:'Start setup',exact:true}).click();
+ await page.getByRole('button',{name:'Use an existing Safe',exact:true}).click(); await page.getByLabel('Ethereum Safe address',{exact:true}).fill(a(10));await page.getByRole('button',{name:'Start setup',exact:true}).click();
  await page.getByRole('status').getByText('Checking network bindings and Safe ownership…',{exact:true}).waitFor();
  await page.getByText('1s elapsed.',{exact:true}).waitFor();
  await page.evaluate(()=>window.setupUX.releaseConfigure());

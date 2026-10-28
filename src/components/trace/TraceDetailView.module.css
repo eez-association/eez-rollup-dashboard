@@ -27,8 +27,6 @@
 .pulse { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); animation: tracePulse 1.6s ease-in-out infinite; }
 @keyframes tracePulse { 50% { opacity: .3; } }
 @media (prefers-reduced-motion: reduce) { .pulse { animation: none; } }
-.summary { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; margin: 28px 0 20px; }
-.summary > div:first-child { min-width: 0; }
 .transactions, .settlements { border: 1px solid var(--border); border-radius: 12px; padding: 20px; margin: 16px 0; }
 .transactionList { max-height: 300px; overflow: auto; margin: 12px 0; }
 .transaction { display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; gap: 12px; align-items: center; border: 1px solid var(--border); border-radius: var(--radius-xs); margin: 6px 0; padding: 12px; background: var(--bg-raised); }

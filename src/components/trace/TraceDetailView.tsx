@@ -3,7 +3,7 @@ import { useDecodedTrace } from "../../hooks/useDecodedTrace";
 import { config } from "../../config";
 import { ExplorerLink } from "../ExplorerLink";
 import { TraceDiagram, textValue } from "./TraceDiagram";
-import { TokenDetails, TokenTransferSummary } from "./TokenTransfers";
+import { TokenDetails } from "./TokenTransfers";
 import type { TraceChain, TraceGas, TraceModel, TraceNode, TraceResult, TraceSource } from "../../../trace-decoder/service/types";
 import styles from "./TraceDetailView.module.css";
 import visualizerStyles from "../visualizer/ExecutionDebugger.module.css";
@@ -44,6 +44,37 @@ function CallInspector({ node, model, tokens }: { node: TraceNode | undefined; m
     </>}
     <details><summary>Calldata and raw return</summary><h3>Input</h3><pre>{node.input}</pre><h3>Output</h3><pre>{node.output ?? node.ret.raw ?? "Not observed"}</pre></details>
   </aside>;
+}
+function ContractList({ model }: { model: TraceModel }) {
+  const contracts = new Map<string, { chain: TraceChain; address: string; name: string; roles: Set<string> }>();
+  const add = (chain: TraceChain, address: string | null, name: string, role: string) => {
+    if (!address || !/^0x[\da-f]{40}$/i.test(address) || BigInt(address) <= 255n) return;
+    const key = `${chain}:${address.toLowerCase()}`, existing = contracts.get(key);
+    if (existing) {
+      existing.roles.add(role);
+      if (existing.name === "Unknown contract" && name) existing.name = name;
+    } else contracts.set(key, { chain, address, name: name || "Unknown contract", roles: new Set([role]) });
+  };
+  for (const node of model.nodes) {
+    if (node.kind === "ghost") continue;
+    add(node.chain, node.address, node.contract, node.impl ? "Proxy" : "Call target");
+    if (node.impl) add(node.chain, node.impl.address, node.impl.contract, "Implementation");
+  }
+  if (!contracts.size) return null;
+  return <section className={styles.transactions} aria-label="Contracts touched">
+    <h2>Contracts touched <span className={styles.muted}>({contracts.size})</span></h2>
+    <p className={styles.muted}>Observed call targets and proxy implementations across the decoded transactions, including calls hidden by filters.</p>
+    <div className={styles.tableScroll}><table className={styles.sequence}>
+      <thead><tr><th>Chain</th><th>Contract</th><th>Address</th><th>Role</th></tr></thead>
+      <tbody>{[...contracts.values()].sort((a, b) => a.chain.localeCompare(b.chain) || a.name.localeCompare(b.name)).map(contract =>
+        <tr key={`${contract.chain}:${contract.address.toLowerCase()}`}>
+          <td><span className={styles.chain} data-chain={contract.chain}>{contract.chain}</span></td>
+          <td>{contract.name}</td>
+          <td><ExplorerLink value={contract.address} label={contract.address} chain={contract.chain === "L1" ? "l1" : "l2"} /></td>
+          <td>{[...contract.roles].join(" · ")}</td>
+        </tr>)}</tbody>
+    </table></div>
+  </section>;
 }
 const gasUnits = (value: string | null) => value === null ? "Unavailable" : BigInt(value).toLocaleString("en-US");
 const chains: TraceChain[] = ["L1", "L2"];
@@ -154,36 +185,19 @@ export function TraceDetailView({ hash, source, ready, onBack }: {
     {trace.phase === "cancelled" && <p className={styles.muted} role="status">Decoding cancelled. <button className="btn btn-sm btn-outline" onClick={trace.refresh}>Retry</button></p>}
     {!hash && <p className={styles.empty}>Enter an L1 or L2 transaction hash to see its execution.</p>}
     {model && trace.result && <>
-      <section className={styles.summary} aria-label="Trace summary">
-        <div><h2>{model.label}</h2><p className={styles.muted}>Observed {new Date(trace.result.observedAt).toLocaleString()} · {model.stats.frames} frames · {model.mode === "physical" ? `${model.stats.preparedResponses || 0} L2 prepared responses` : `${model.stats.matched}/${model.stats.crossings} crossings matched`}{model.stats.preparedResults ? ` · ${model.stats.preparedResults} prepared results (no L2 delivery expected)` : ""}</p></div>
-        <div className={styles.actions}><button className="btn btn-sm btn-outline" onClick={trace.refresh}>Refresh</button>
-          <button className="btn btn-sm btn-outline" onClick={() => trace.result && download(trace.result)}>Download JSON</button></div>
-      </section>
-      {tokens && <TokenTransferSummary model={model} />}
       {trace.result.partial && <div className={styles.warning} role="status"><strong>Some evidence is missing</strong>
         <p>The diagram shows the available data. Missing traces or settlement data do not establish success or failure.</p>
         <ul>{model.unresolved.slice(0, 8).map((item, index) => <li key={index}>{item.message}</li>)}</ul>
         {model.unresolved.length > 8 && <p>{model.unresolved.length - 8} more diagnostics are included in the JSON download.</p>}
       </div>}
-      <section className={styles.transactions} aria-label="Related transactions">
-        <h2>Transactions</h2><p className={styles.muted}>Roles describe each transaction's part in execution. Transactions sharing a batch are not necessarily part of this call.</p>
-        <div className={styles.transactionList}>{model.transactions.map(tx => <div key={tx.chain + tx.hash} className={styles.transaction} data-selected={transaction === tx.chain + ":" + tx.hash}>
-          <span className={styles.chain} data-chain={tx.chain}>{tx.chain}</span>
-          <button className={styles.textButton} onClick={() => { setTransaction(tx.chain + ":" + tx.hash); setSelected(null); }}><strong>{tx.label}</strong><span>{tx.requested ? "Requested · " : ""}{tx.status}{!tx.traced ? " · trace unavailable" : ""}</span></button>
-          <ExplorerLink value={tx.hash} type="tx" chain={tx.chain === "L1" ? "l1" : "l2"} />
-        </div>)}</div>
-      </section>
-      {model.settlements.length > 0 && <section className={styles.settlements} aria-label="Observed settlement">
-        <h2>L1 posting observed</h2><p className={styles.muted}>This is a snapshot of the verified posting. Open Blocks & settlement for current safety and finality.</p>
-        {model.settlements.map(item => <div key={item.id}><ExplorerLink value={item.l1Tx} type="tx" chain="l1" />
-          <span>L2 blocks {item.firstL2Block}–{item.lastL2Block}</span></div>)}
-      </section>}
       <section ref={viewer} className={styles.viewer} aria-label="Trace viewer">
       <div className={styles.viewerToolbar}>
         <nav className={styles.tabs} aria-label="Trace views">{(["map", "flow", "sequence", "raw"] as const).map(item =>
           <button key={item} className={"btn btn-sm " + (view === item ? "btn-solid" : "btn-outline")} aria-pressed={view === item} onClick={() => setView(item)}>
             {item === "map" ? "Call map" : item === "flow" ? "Lanes" : item === "sequence" ? "Sequence" : "Decoded data"}</button>)}</nav>
         <div className={styles.actions}>
+          <button className="btn btn-sm btn-outline" onClick={trace.refresh}>Refresh</button>
+          <button className="btn btn-sm btn-outline" onClick={() => trace.result && download(trace.result)}>Download JSON</button>
           {view !== "raw" && <button className="btn btn-sm btn-outline" aria-expanded={showDetails}
             onClick={() => setShowDetails(value => !value)}>{showDetails ? "Hide call details" : "Show call details"}</button>}
           <button ref={fullscreenButton} className="btn btn-sm btn-outline" aria-pressed={fullscreen}
@@ -209,6 +223,20 @@ export function TraceDetailView({ hash, source, ready, onBack }: {
         : <div className={styles.workspace} data-details={showDetails}><TraceDiagram key={model.mode || "combined"} model={model} view={view} transaction={transaction} selected={selected} onSelect={setSelected} tokens={tokens} onTokens={setTokens} />
           {showDetails && <CallInspector node={selected === null ? undefined : model.nodes[selected]} model={model} tokens={tokens} />}</div>}
       </section>
+      <section className={styles.transactions} aria-label="Related transactions">
+        <h2>Transactions</h2><p className={styles.muted}>Roles describe each transaction's part in execution. Transactions sharing a batch are not necessarily part of this call.</p>
+        <div className={styles.transactionList}>{model.transactions.map(tx => <div key={tx.chain + tx.hash} className={styles.transaction} data-selected={transaction === tx.chain + ":" + tx.hash}>
+          <span className={styles.chain} data-chain={tx.chain}>{tx.chain}</span>
+          <button className={styles.textButton} onClick={() => { setTransaction(tx.chain + ":" + tx.hash); setSelected(null); }}><strong>{tx.label}</strong><span>{tx.requested ? "Requested · " : ""}{tx.status}{!tx.traced ? " · trace unavailable" : ""}</span></button>
+          <ExplorerLink value={tx.hash} type="tx" chain={tx.chain === "L1" ? "l1" : "l2"} />
+        </div>)}</div>
+      </section>
+      {model.settlements.length > 0 && <section className={styles.settlements} aria-label="Observed settlement">
+        <h2>L1 posting observed</h2><p className={styles.muted}>This is a snapshot of the verified posting. Open Blocks & settlement for current safety and finality.</p>
+        {model.settlements.map(item => <div key={item.id}><ExplorerLink value={item.l1Tx} type="tx" chain="l1" />
+          <span>L2 blocks {item.firstL2Block}–{item.lastL2Block}</span></div>)}
+      </section>}
+      <ContractList model={linkedModel?.recordedView ?? linkedModel ?? model} />
       {gas && <GasSummary gas={gas} />}
     </>}
   </main>;

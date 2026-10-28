@@ -19,6 +19,7 @@ export function TreasuryMainnetSetup({ wallet, target, onComplete, network = def
   const l1Name = network.testnet ? "Chiado" : "Ethereum";
   const [state, setState] = useState<MainnetSetupState | null>(null), [engine, setEngine] = useState<MainnetSetup | null>(null);
   const [safeL1, setSafeL1] = useState(""), [safeL2, setSafeL2] = useState(""), [existingMirror, setExistingMirror] = useState(false);
+  const [createBoth, setCreateBoth] = useState(true);
   const steps = mainnetSetupStepsFor(state).map(step => ({ ...step, label: step.label.split("Ethereum").join(l1Name), details: step.details.map(text => text.split("Ethereum").join(l1Name)) }));
   const pairedReady = !!engine && pairedSetupAvailable(engine.artifacts);
   const [busy, setBusy] = useState(false), [error, setError] = useState("");
@@ -128,12 +129,12 @@ export function TreasuryMainnetSetup({ wallet, target, onComplete, network = def
   const symbol = network.testnet ? "test xDAI" : "ETH";
   const assetName = network.testnet ? "Test USDC" : "USDC";
   const descriptions = [
-    `Prepare the local policy for your existing ${l1Name} Safe. Spending is authorized by the Safe’s owners later.`,
-    `Connect the EEZ-X mirror directly to your ${l1Name} Safe’s live owners and approval threshold.`,
+    state?.matching ? `Create your ${l1Name} Safe at the address reserved for both chains, with your wallet as sole owner (1 of 1).` : state?.creation === "create-both" ? `Create your ${l1Name} Safe with your selected wallet as its only owner (threshold 1), then prepare its local policy.` : `Prepare the local policy for your existing ${l1Name} Safe. Spending is authorized by the Safe’s owners later.`,
+    state?.creation === "create-both" ? `Create the EEZ-X Safe with the same wallet owner. Its first Safe transaction will hand ownership to L1Owners during final setup.` : `Connect the EEZ-X mirror directly to your ${l1Name} Safe’s live owners and approval threshold.`,
     "Create the matching local policy on EEZ-X. The shared budget is counted once on this chain, whichever Safe starts a payment.",
-    `Prepare the ${l1Name} addresses used to reach the mirror Safe, its owner verifier and its policy.`,
+    state?.matching ? `Deploy the ${l1Name} policy and allowance module, and connect the EEZ-X Safe, owner verifier and policy.` : `Prepare the ${l1Name} addresses used to reach the mirror Safe, its owner verifier and its policy.`,
     `Your ${l1Name} Safe’s owners authorize its local policy and spending allowance in one Safe batch.`,
-    `Authorize the EEZ-X Safe’s local allowance and activate both policies after their peer connections have been checked.`,
+    state?.creation === "create-both" ? `Replace the EEZ-X wallet owner with L1Owners, authorize the local allowance and activate both policies in one Safe transaction. The ${l1Name} Safe remains controlled by your wallet.` : `Authorize the EEZ-X Safe’s local allowance and activate both policies after their peer connections have been checked.`,
   ];
   const switchTo = async (chain: "l1" | "l2", assertActive: () => void) => {
     assertActive();
@@ -170,11 +171,20 @@ export function TreasuryMainnetSetup({ wallet, target, onComplete, network = def
   return <section className={styles.treasury} aria-label={`${l1Name} treasury setup`}>
     <div className={styles.heading}><div><p className="eez-eyebrow">[ {l1Name.toUpperCase()} + EEZ-X ]</p>
       <h2 ref={heading} tabIndex={-1}>{state?.completed.length === steps.length ? "Verify your treasury" : "Set up your shared treasury"}</h2>
-      <p>Connect your existing {l1Name} Safe and deploy or connect its mirror on EEZ-X.</p>
+      <p>Create two new Safes, or connect your existing {l1Name} Safe and its EEZ-X mirror.</p>
     </div><span className={styles.badge}>{network.testnet ? "Shared testnet" : "Ethereum + EEZ-X"}</span></div>
     {!state ? <section className={styles.card}><h3>Choose your Safes</h3>
       <p className={styles.safeExplanation}>EEZ-X verifies each transaction against your {l1Name} Safe’s current owners and approval threshold. Manage owners on {l1Name}, and <strong>both Safes stay in sync automatically.</strong></p>
-      <div className={styles.safeChoices}>
+      <div className={styles.setupOptions} role="group" aria-label="Safe setup options">
+        <button type="button" className={`btn ${createBoth ? "btn-solid" : "btn-outline"}`} aria-pressed={createBoth} disabled={busy} onClick={() => setCreateBoth(true)}>Create new Safes</button>
+        <button type="button" className={`btn ${!createBoth ? "btn-solid" : "btn-outline"}`} aria-pressed={!createBoth} disabled={busy} onClick={() => setCreateBoth(false)}>Use an existing Safe</button>
+      </div>
+      {createBoth ? <div className={styles.stepContext} aria-label="New Safe ownership">
+        <p>Both Safes start with your connected wallet as their only owner (1 of 1).</p>
+        {wallet.address && <p>Owner: <code>{wallet.address}</code></p>}
+        <p>The first EEZ-X Safe transaction replaces that wallet owner with <strong>L1Owners</strong>, together with its spending setup. Afterward, manage both Safes’ owners from {l1Name}.</p>
+        <p className={styles.hint}>Both Safes will have the same address, with independent balances and transactions on each chain. You can resume setup after closing the dashboard.</p>
+      </div> : <div className={styles.safeChoices}>
         <div className={styles.fields}><label className={styles.chainLabel} data-chain="l1" htmlFor="mainnet-safe">{l1Name} Safe address</label>
           <input id="mainnet-safe" aria-describedby="mainnet-safe-hint" value={safeL1} onChange={e => setSafeL1(e.target.value)} placeholder="0x…" disabled={busy}/>
           <p id="mainnet-safe-hint" className={styles.hint}>Keeps its current owners and approval threshold.</p></div>
@@ -183,14 +193,14 @@ export function TreasuryMainnetSetup({ wallet, target, onComplete, network = def
           {existingMirror && <><label htmlFor="mainnet-mirror">Mirror Safe address</label><input id="mainnet-mirror" aria-describedby="mainnet-mirror-hint" value={safeL2} onChange={e => setSafeL2(e.target.value)} placeholder="0x…" disabled={busy}/></>}
           <p id="mainnet-mirror-hint" className={styles.hint}>{existingMirror ? `Choose a mirror already connected to this ${l1Name} Safe.` : `The new mirror uses your ${l1Name} Safe’s live owners through its owner adapter.`}</p>
         </div>
-      </div>
-      {wallet.address ? <button className={`btn btn-solid btn-lg ${styles.startSetup}`} disabled={!pairedReady || busy || !isAddress(safeL1.trim()) || existingMirror && !isAddress(safeL2.trim())} onClick={() => void run(async (saved, assertActive) => {
+      </div>}
+      {wallet.address ? <button className={`btn btn-solid btn-lg ${styles.startSetup}`} disabled={!pairedReady || busy || !createBoth && (!isAddress(safeL1.trim()) || existingMirror && !isAddress(safeL2.trim()))} onClick={() => void run(async (saved, assertActive) => {
         if (saved) throw new Error("A treasury setup is already in progress");
         if (!pairedReady) throw new Error("Treasury setup is awaiting an updated contract release");
         const selected = selectedWallet.current;
         if (!selected.address) throw new Error("Connect your deployment wallet");
-        const next = await engine!.configure(getAddress(selected.address), getAddress(safeL1.trim()), existingMirror ? getAddress(safeL2.trim()) : undefined,
-          message => { assertActive(); setStatus(message); });
+        const next = await engine!.configure(getAddress(selected.address), createBoth ? undefined : getAddress(safeL1.trim()), !createBoth && existingMirror ? getAddress(safeL2.trim()) : undefined,
+          message => { assertActive(); setStatus(message); }, { matching: createBoth });
         assertActive();
         if (selectedWallet.current.provider !== selected.provider || !same(selectedWallet.current.address, selected.address)) throw new Error("Wallet changed during setup. Review your selection again.");
         persist(next); setStatus("Setup reviewed. Approve each named transaction when ready.");
@@ -202,7 +212,8 @@ export function TreasuryMainnetSetup({ wallet, target, onComplete, network = def
       <div className={styles.heading}><h3>{step.label}</h3><span className={styles.chainLabel} data-chain={step.chain}>{step.chain === "l1" ? l1Name : "EEZ-X"}</span></div>
       <div className={styles.stepContext} role="region" aria-label="About this step">
         <p>{descriptions[state.completed.length]}</p>
-        <p>{l1Name} Safe: <code>{state.addresses.safeL1}</code></p>
+        {state.matching && <p>Safe address on both chains: <code>{state.matching.safe}</code></p>}
+        {state.addresses.safeL1 ? <p>{l1Name} Safe: <code>{state.addresses.safeL1}</code></p> : <p>Initial owner: <code>{state.deployer}</code> (1 of 1)</p>}
         {state.addresses.safeL2 && <p>EEZ-X Safe: <code>{state.addresses.safeL2}</code></p>}
         {state.completed.length >= 2 && <><dl className={styles.limitSummary}>
           <div><dt>Each Safe’s limit</dt><dd>100 {assetName}</dd></div><div><dt>Shared budget</dt><dd>150 {assetName}</dd></div>

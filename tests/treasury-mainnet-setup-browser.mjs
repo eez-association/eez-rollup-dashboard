@@ -12,6 +12,9 @@ try{
  await page.getByRole('heading',{name:'Choose your Safes',exact:true}).waitFor();
  assert.equal(await page.getByText('both Safes stay in sync automatically.',{exact:true}).count(),1);
  assert.equal(await page.getByRole('button',{name:'Get Test USDC',exact:true}).count(),0);
+ assert.equal(await page.getByRole('button',{name:'Create new Safes',exact:true}).getAttribute('aria-pressed'),'true');
+ assert.equal(await page.getByRole('button',{name:'Use an existing Safe',exact:true}).getAttribute('aria-pressed'),'false');
+ await page.getByRole('button',{name:'Use an existing Safe',exact:true}).click();
  await page.getByLabel('Ethereum Safe address',{exact:true}).fill('0x0000000000000000000000000000000000000064');
  await page.getByLabel('EEZ-X Safe',{exact:true}).selectOption('existing');
  await page.getByLabel('Mirror Safe address',{exact:true}).fill('0x0000000000000000000000000000000000000065');
@@ -20,5 +23,20 @@ try{
  const selected=await page.evaluate(()=>window.selection);assert.equal(selected.safeL1.toLowerCase(),'0x0000000000000000000000000000000000000064');assert.equal(selected.safeL2.toLowerCase(),'0x0000000000000000000000000000000000000065');assert.notEqual(selected.deployer.toLowerCase(),selected.safeL1.toLowerCase());
  assert.deepEqual(await page.evaluate(keys=>keys.map(k=>localStorage.getItem(k)),[sharedDeploymentKey,sharedManifestKey]),['retained Chiado state','retained Chiado state']);
  mkdirSync('.runtime/treasury-mainnet-bridge-20261022',{recursive:true});await page.screenshot({path:'.runtime/treasury-mainnet-bridge-20261022/mainnet-safe-chooser.png',fullPage:true});
+ await page.getByRole('button',{name:'Create new Safes',exact:true}).click();
+ assert.equal(await page.getByLabel('Ethereum Safe address',{exact:true}).count(),0);
+ await page.getByLabel('New Safe ownership',{exact:true}).waitFor();
+ await page.getByRole('button',{name:'Start setup',exact:true}).click();
+ await page.waitForFunction(()=>window.selection?.safeL1===undefined);
+ assert.equal((await page.evaluate(()=>window.selection)).safeL2,undefined);
+ assert.equal((await page.evaluate(()=>window.selection)).options.matching,true);
+ await page.getByText('Both Safes will have the same address, with independent balances and transactions on each chain. You can resume setup after closing the dashboard.',{exact:true}).waitFor();
+ await page.screenshot({path:'.runtime/treasury-mainnet-bridge-20261022/create-both-chooser.png',fullPage:true});
+ await page.getByRole('button',{name:'Use an existing Safe',exact:true}).click();
+ assert.equal(await page.getByLabel('Ethereum Safe address',{exact:true}).inputValue(),'0x0000000000000000000000000000000000000064');
+ await page.setViewportSize({width:390,height:844});
+ const buttons=page.getByRole('group',{name:'Safe setup options'}),first=await buttons.getByRole('button',{name:'Create new Safes',exact:true}).boundingBox(),second=await buttons.getByRole('button',{name:'Use an existing Safe',exact:true}).boundingBox();
+ assert(first.height>=44&&second.height>=44);assert(second.x>=first.x+first.width+10);assert(Math.abs(first.width-second.width)<2);
+ assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
  assert.deepEqual(errors,[]);console.log('Mainnet chooser: selected Ethereum/mirror addresses, connected deployment wallet, no faucet, Chiado journals preserved.');
 }finally{await page.unrouteAll({behavior:'wait'});await browser.close();await server.close();}

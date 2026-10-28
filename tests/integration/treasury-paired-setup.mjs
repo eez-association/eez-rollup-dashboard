@@ -9,13 +9,14 @@ import { once } from 'node:events';
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, openSync, closeSync } from 'node:fs';
 import { encodeDeployData, encodeFunctionData, decodeEventLog, keccak256, toHex, zeroAddress } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
-import { MainnetSetup } from '../../src/lib/treasury/mainnetSetup.ts';
+import { MainnetSetup, readMainnetSetup } from '../../src/lib/treasury/mainnetSetup.ts';
 import { TreasuryClient } from '../../src/lib/treasury/client.ts';
 import { validatePairedPayments } from '../../src/lib/treasury/pairedPolicy.ts';
 import { buildSafeTransaction, encodeSafeExecution, packEOAApprovals, packOwnerApprovals } from '../../src/lib/treasury/safeTransactions.ts';
 const read = path => JSON.parse(readFileSync(path));
 const release = read(`src/lib/treasury/builds/${read('src/lib/treasury/current-build.json').build}.json`), artifacts = release.contracts;
 const [A, B] = [0xa11cen, 0xb0bn].map(n => privateKeyToAccount(toHex(n, { size: 32 })));
+const fresh = argv.includes('--create-both'), owners = fresh ? [A] : [A,B];
 const pairedNetwork = read('src/lib/treasury/paired-testnet-network.json');
 const ids = { l1: pairedNetwork.chains.l1.chainId, l2: pairedNetwork.chains.l2.chainId }, wait = ms => new Promise(r => setTimeout(r, ms));
 mkdirSync('.runtime/paired-setup', { recursive: true }); const directory = mkdtempSync('.runtime/paired-setup/anvil-');
@@ -50,6 +51,16 @@ try {
   const initialize = encodeFunctionData({ abi: artifacts.Safe.abi, functionName: 'setup', args: [[A.address,B.address],2n,zeroAddress,'0x',zeroAddress,zeroAddress,0n,zeroAddress] });
   const created = await call('l1', factory, 'SafeProxyFactory', 'createProxyWithNonce', [singleton,initialize,1n]);
   const safeL1 = created.logs.flatMap(log => { try { const e = decodeEventLog({ abi: artifacts.SafeProxyFactory.abi, ...log }); return e.eventName === 'ProxyCreation' ? [e.args.proxy] : []; } catch { return []; } })[0]; assert(safeL1);
+  if (fresh) {
+    // Standard Safe infrastructure already present on a supported L1.
+    const officialSafe = read('tests/fixtures/safe-130-runtime.json').contracts.Safe130L2;
+    assert.equal(keccak256(officialSafe.runtime), officialSafe.codeHash);
+    await rpc('anvil_setCode',[officialSafe.address,officialSafe.runtime]);
+    for (const helper of Object.values(read('tests/fixtures/official-safe-runtime.json').contracts)) {
+      assert.equal(keccak256(helper.runtime),helper.codeHash);
+      await rpc('anvil_setCode',[helper.address,helper.runtime]);
+    }
+  }
   const network = structuredClone(read('src/lib/treasury/mainnet-network.json'));
   Object.assign(network, { testnet: true, registry, manager });
   for (const chain of ['l1','l2']) Object.assign(network.chains[chain], { chainId: ids[chain], number: '0x0', hash: (await rpc('eth_getBlockByNumber',['0x0',false])).hash });
@@ -80,24 +91,62 @@ try {
     const { deploymentBrowser } = await import('./treasury-deployment-browser.mjs');
     state = await deploymentBrowser({network,target,engine,A,B,safeL1,rpc,send,evidence,directory,ids});
   } else {
-  state = await engine.configure(A.address, safeL1);
+  state = await engine.configure(A.address, fresh ? undefined : safeL1);
+  assert.equal(state.creation, fresh ? "create-both" : undefined);
   assert.equal(state.version,3); assert.equal(state.addresses.bridgeExecutorL1,undefined);
   for (let i = 0; i < 4; i++) {
     const chain = i === 1 || i === 2 ? 'l2' : 'l1', nonce = await rpc('eth_getTransactionCount',[A.address,'pending']);
     const batch = await engine.batch(state, nonce), receipt = await send(chain,batch.to,batch.data);
     const pending = { ...batch,id:String(i),chain,sender:A.address,nonce,hash:receipt.transactionHash };
     state = await engine.reconcile({ ...state,pending }); assert.equal(state.completed.length,i+1);
+    state = readMainnetSetup(JSON.stringify(state),network);
     for (const out of batch.outputs) assert(!out.artifact || artifacts[out.artifact], `Unreleased deployment ${out.artifact}`);
+  }
+  if (fresh) for (const chain of ['l1','l2']) {
+    const safe = state.addresses[chain === 'l1' ? 'safeL1' : 'safeL2'];
+    assert.deepEqual(await engine.io.read(chain,safe,'Safe','getOwners'),[A.address]);
+    assert.equal(await engine.io.read(chain,safe,'Safe','getThreshold'),1n);
+    assert.equal(await engine.io.read(chain,safe,'Safe','nonce'),0n);
+  }
+  if (fresh) {
+    // Before L1 setup connects its policy, activation must fail atomically:
+    // the attempted owner replacement cannot leave a half-configured Safe.
+    await rpc('anvil_setChainId',[ids.l2]);
+    const early={...state,completed:[...state.completed,{}]},review=await engine.review(early),tx=engine.tx(early,review);
+    const signature=await packEOAApprovals(tx,[A.address],1,[{owner:A.address,signature:await A.signTypedData(tx)}]);
+    const hash=await rpc('eth_sendTransaction',[{from:A.address,to:state.addresses.safeL2,data:encodeSafeExecution(tx,signature),gas:'0x1c9c380'}]);
+    let receipt; for(let i=0;i<100&&!receipt;i++){receipt=await rpc('eth_getTransactionReceipt',[hash]);if(!receipt)await wait(20);}
+    assert(receipt);assert.equal(receipt.status,'0x0');
+    assert.deepEqual(await engine.io.read('l2',state.addresses.safeL2,'Safe','getOwners'),[A.address]);
+    assert.equal(await engine.io.read('l2',state.addresses.safeL2,'Safe','nonce'),0n);
   }
   for (const chain of ['l1','l2']) {
     await rpc('anvil_setChainId',[ids[chain]]);
+    if (fresh && chain === 'l2') {
+      const snapshot=await rpc('evm_snapshot');
+      const noop=buildSafeTransaction({chainId:BigInt(ids.l2),safe:state.addresses.safeL2,to:A.address,nonce:0n,data:'0x'});
+      const approval={owner:A.address,signature:await A.signTypedData(noop)};
+      await send('l2',state.addresses.safeL2,encodeSafeExecution(noop,await packEOAApprovals(noop,[A.address],1,[approval])));
+      await assert.rejects(engine.review(state),/nonce 0 before handover/);
+      await rpc('evm_revert',[snapshot]);
+    }
     const review = await engine.review(state), tx = engine.tx(state,review);
     assert.equal(review.chain,chain); assert.equal(tx.domain.verifyingContract.toLowerCase(),state.addresses[chain === 'l1' ? 'safeL1' : 'safeL2'].toLowerCase());
-    const approvals = await Promise.all([A,B].map(async owner => ({ owner:owner.address,signature:await owner.signTypedData(tx) })));
-    const signatures = chain === 'l1' ? await packEOAApprovals(tx,review.owners,2,approvals) : await packOwnerApprovals(tx,state.addresses.adapter,review.owners,2,approvals);
+    const approvals = await Promise.all(owners.map(async owner => ({ owner:owner.address,signature:await owner.signTypedData(tx) })));
+    const signatures = chain === 'l1' || fresh ? await packEOAApprovals(tx,review.owners,owners.length,approvals) : await packOwnerApprovals(tx,state.addresses.adapter,review.owners,owners.length,approvals);
     const receipt = await send(chain,tx.domain.verifyingContract,encodeSafeExecution(tx,signatures));
     state = { ...state, completed:[...state.completed,{chain,hash:receipt.transactionHash,number:receipt.blockNumber,blockHash:receipt.blockHash}] };
   }
+  }
+  if (fresh) {
+    assert.deepEqual(await engine.io.read('l2',state.addresses.safeL2,'Safe','getOwners'),[state.addresses.adapter]);
+    assert.equal(await engine.io.read('l2',state.addresses.safeL2,'Safe','getThreshold'),1n);
+    assert.equal(await engine.io.read('l2',state.addresses.safeL2,'Safe','nonce'),1n);
+    assert.deepEqual(await engine.io.read('l1',state.addresses.safeL1,'Safe','getOwners'),[A.address]);
+    const oldOwnerTx=buildSafeTransaction({chainId:BigInt(ids.l2),safe:state.addresses.safeL2,to:A.address,nonce:1n,data:'0x'});
+    const oldSignature=await packEOAApprovals(oldOwnerTx,[A.address],1,[{owner:A.address,signature:await A.signTypedData(oldOwnerTx)}]);
+    await assert.rejects(rpc('eth_call',[{from:A.address,to:state.addresses.safeL2,data:encodeSafeExecution(oldOwnerTx,oldSignature)},'latest']));
+
   }
   const a = state.addresses, tokenL2 = network.contracts.wrappedUSDC.address;
   for (const [chain,policy] of [['l1',a.policyL1],['l2',a.policy]]) assert.equal(await engine.io.read(chain,policy,'PairedTreasuryPolicy','active'),true);
@@ -121,13 +170,13 @@ try {
       data:encodeFunctionData({abi:artifacts.PairedTreasuryPolicy.abi,functionName:'paySplit',args:[recipient,20_000_000n,destination==='l1',epoch,10_000_000n]})});
     const signingClient = new TreasuryClient(evidence.manifest);
     signingClient.rpc = async () => assert.fail('Payment signing must not repeat RPC reads');
-    const snapshot = {source,owners:[A.address,B.address],threshold:2,nonce:tx.message.nonce};
-    const approvals = await Promise.all([A,B].map(owner => signingClient.approve({request:async({method,params})=>{
+    const snapshot = {source,owners:owners.map(o=>o.address),threshold:owners.length,nonce:tx.message.nonce};
+    const approvals = await Promise.all(owners.map(owner => signingClient.approve({request:async({method,params})=>{
       if(method==='eth_accounts')return [owner.address];
       if(method==='eth_chainId')return toHex(ids[source]);
       assert.equal(method,'eth_signTypedData_v4');return owner.signTypedData(JSON.parse(params[1]));
     }},tx,snapshot,owner.address)));
-    const sig = source==='l1' ? await packEOAApprovals(tx,[A.address,B.address],2,approvals) : await packOwnerApprovals(tx,a.adapter,[A.address,B.address],2,approvals);
+    const sig = source==='l1' ? await packEOAApprovals(tx,owners.map(o=>o.address),owners.length,approvals) : await packOwnerApprovals(tx,a.adapter,owners.map(o=>o.address),owners.length,approvals);
     const receipt = await send(source,safe,encodeSafeExecution(tx,sig)); evidence.payments.push({source,destination,hash:receipt.transactionHash});
   }
   assert.equal(await engine.io.read('l1',tokenL1,'TestUSDC','balanceOf',[recipient]),40_000_000n);

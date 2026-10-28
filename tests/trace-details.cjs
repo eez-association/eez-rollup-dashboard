@@ -16,6 +16,7 @@ const model = {
     contract: "Counter", address, from: address, fn: "increment()", signature: "increment()",
     args: [{ name: "amount", type: "uint256", value: "7" }], ret: { status: "ok", items: [{ name: "count", type: "uint256", value: "8" }] },
     value: "0", isStatic: false, failed: false, reverted: false, gasUsed: "21000", tx: hash, block: 42,
+    impl: { address: "0x" + "44".repeat(20), contract: "Counter implementation", frameId: "implementation" },
     path: "0", input: "0x12345678", output: "0x", children: [], tokenTransfers: [
       { kind: "transfer", token: "0x" + "22".repeat(20), from: address, to: "0x" + "33".repeat(20),
         amount: "1234567", symbol: "TESTUSDC", decimals: 6, eventId: "transfer-1", evidence: "receipt-and-trace" },
@@ -55,7 +56,7 @@ model.recordedView = { ...model, mode: "physical", recordedView: null,
     const errors = [];
     page.on("pageerror", error => errors.push(error.message));
     let creates = 0;
-    await page.route("**/config.json", route => route.fulfill({ json: { networkName: "EEZ test", l1RpcUrl: "/rpc/l1", l2RpcUrl: "/rpc/l2" } }));
+    await page.route("**/config.json", route => route.fulfill({ json: { networkName: "EEZ test", l1ExplorerUrl: "https://l1.example", l2ExplorerUrl: "https://l2.example", l1RpcUrl: "/rpc/l1", l2RpcUrl: "/rpc/l2" } }));
     await page.route("**/rpc/*", route => {
       const request = route.request().postDataJSON();
       const result = request.method === "eth_chainId" ? route.request().url().endsWith("/l1") ? "0x27d8" : "0xc8" : "0x0";
@@ -72,20 +73,25 @@ model.recordedView = { ...model, mode: "physical", recordedView: null,
       return route.fulfill({ json: { apiVersion: 1, id: jobId, state: "complete", progress: "Trace decoded", error: null, errorCode: null } });
     });
     await page.goto(url + "#/visualizer?mode=trace&chain=l2&tx=" + hash);
-    await page.getByRole("heading", { name: "Counter.increment()" }).waitFor();
+    await page.getByRole("region", { name: "Trace viewer", exact: true }).waitFor();
     assert.equal(await page.getByRole("checkbox", { name: /Token transfers/ }).isChecked(), true);
     assert.equal(await page.getByText("experimental", { exact: true }).count(), 0);
     const requestsBeforeTokens = creates;
     await page.getByRole("checkbox", { name: /Token transfers/ }).check();
-    const tokenSummary = page.getByRole("region", { name: "Token transfer summary" });
-    await tokenSummary.waitFor();
-    assert.equal(await tokenSummary.locator("li").count(), 2, "distinct receipt events retain multiplicity");
-    assert.match(await tokenSummary.innerText(), /TESTUSDC · Sent/);
-    assert.match(await tokenSummary.innerText(), /From Counter/);
-    assert.match(await tokenSummary.innerText(), /To 0x3333…3333/);
-    assert.match(await tokenSummary.innerText(), /1\.234567 TESTUSDC/);
-    assert.match(await tokenSummary.innerText(), /1234567 raw units/);
-    assert.equal(await tokenSummary.getByText("Counter", { exact: true }).first().getAttribute("title"), address);
+    assert.equal(await page.getByRole("region", { name: "Token transfer summary" }).count(), 0);
+    assert.equal(await page.getByRole("region", { name: "Trace summary" }).count(), 0);
+    const contracts = page.getByRole("region", { name: "Contracts touched" });
+    await contracts.waitFor();
+    assert.equal(await contracts.locator("tbody tr").count(), 4, "same addresses on different chains and implementations remain distinct");
+    assert.equal(await contracts.getByRole("link", { name: address + " ↗", exact: true }).count(), 2);
+    assert.match(await contracts.locator("a").first().getAttribute("href"), /\/address\/0x/);
+    assert.ok(await page.evaluate(() => {
+      const viewer = document.querySelector('[aria-label="Trace viewer"]');
+      const transactions = document.querySelector('[aria-label="Related transactions"]');
+      const contracts = document.querySelector('[aria-label="Contracts touched"]');
+      return !!(viewer.compareDocumentPosition(transactions) & Node.DOCUMENT_POSITION_FOLLOWING)
+        && !!(transactions.compareDocumentPosition(contracts) & Node.DOCUMENT_POSITION_FOLLOWING);
+    }), "trace comes before transactions and the contract inventory");
     const tokenCard = page.getByRole("region", { name: "Call map canvas" });
     const note = tokenCard.getByLabel("TESTUSDC sent", { exact: true }).first();
     await note.getByText("From", { exact: true }).waitFor();
@@ -98,8 +104,8 @@ model.recordedView = { ...model, mode: "physical", recordedView: null,
     await note.screenshot({ path: `${directory}/transfer-card.png` });
     await page.screenshot({ path: `${directory}/token-summary.png`, fullPage: true });
     await page.getByRole("checkbox", { name: /Token transfers/ }).uncheck();
-    assert.equal(await tokenSummary.count(), 0);
-    assert.equal(creates, requestsBeforeTokens, "the summary does not refetch the trace");
+    assert.equal(await tokenCard.getByLabel("TESTUSDC sent", { exact: true }).count(), 0);
+    assert.equal(creates, requestsBeforeTokens, "toggling transfers does not refetch the trace");
     const originalTransfers = model.nodes[0].tokenTransfers;
     for (const kind of ["mint", "burn"]) {
       model.nodes[0].tokenTransfers = [{ ...originalTransfers[0], kind,
@@ -155,7 +161,7 @@ model.recordedView = { ...model, mode: "physical", recordedView: null,
     await page.getByRole("columnheader", { name: "Return / status" }).waitFor();
     await page.getByRole("button", { name: "Recorded traces", exact: true }).click();
     await page.getByText("Recorded call order within each transaction.", { exact: false }).waitFor();
-    const recordedRows = page.locator("tbody tr");
+    const recordedRows = page.getByRole("region", { name: "Trace viewer", exact: true }).locator("tbody tr");
     await recordedRows.nth(1).waitFor();
     assert.deepEqual(await recordedRows.locator("td:first-child").allTextContents(), ["1", "1"]);
     await page.getByText("Call association notes (1)", { exact: true }).click();
@@ -166,7 +172,7 @@ model.recordedView = { ...model, mode: "physical", recordedView: null,
     await page.getByRole("button", { name: "Linked flow", exact: true }).click();
     await page.getByText("Logical call order across both chains.", { exact: false }).waitFor();
     await page.getByRole("button", { name: "Refresh", exact: true }).click();
-    await page.getByRole("heading", { name: "Counter.increment()" }).waitFor();
+    await page.getByRole("region", { name: "Trace viewer", exact: true }).waitFor();
     assert.ok(creates >= 2);
     await page.setViewportSize({ width: 390, height: 844 });
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth));

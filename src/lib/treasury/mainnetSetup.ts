@@ -1,4 +1,6 @@
 import { discoverSafeInfrastructure } from "./safeInfrastructure.ts";
+import { matchingDeployer, matchingDeployerHash, matchingSafePlan } from "./matchingSafes.ts";
+import type { MatchingSafePlan } from "./matchingSafes.ts";
 import { appendSourceRequest } from "./sourceVerification.ts";
 import type { SourceRequest } from "./sourceVerification.ts";
 import { concatHex, decodeEventLog, encodeAbiParameters, encodeDeployData, encodeFunctionData, getAddress, getContractAddress, isAddress, keccak256, parseAbi, parseAbiParameters, toHex, zeroAddress, zeroHash } from "viem";
@@ -36,8 +38,13 @@ export const mainnetSetupSteps = [
   { label: "Approve Ethereum setup", chain: "l1", details: ["Connect the EEZ-X peer policy", "Enable the allowance module if needed", "Grant the Ethereum policy 100 USDC per ten minutes"] },
   { label: "Approve EEZ-X setup", chain: "l1", details: ["Connect the Ethereum peer policy", "Grant the EEZ-X policy 100 USDC per ten minutes", "Validate and activate both policies in this batch"] },
 ] as const;
-export function mainnetSetupStepsFor(state?: { version: number } | null) {
+export function mainnetSetupStepsFor(state?: { version: number; creation?: "create-both"; matching?: MatchingSafePlan } | null) {
   if (state && state.version !== 3) throw new Error("Legacy treasury setup is retired. Start a new paired setup.");
+  if (state?.creation === "create-both") return mainnetSetupSteps.map((step, index) => index === 0
+    ? { ...step, label: "Create your Ethereum Safe", details: ["Create a Safe owned by your connected wallet (1 of 1)", state.matching ? "Prepare identical Safe infrastructure on both chains" : "Reuse verified Safe deployment contracts", state.matching ? "Use the reserved matching Safe address" : "Deploy the local treasury policy"] }
+    : index === 1 ? { ...step, label: "Create your EEZ-X Safe", details: ["Create a Safe with the same wallet owner (1 of 1)", "Prepare the L1Owners adapter", "Ownership handover happens in its first Safe transaction"] }
+    : index === 3 && state.matching ? { ...step, label: "Prepare Ethereum execution", details: ["Deploy the Ethereum policy and allowance module", ...step.details] }
+    : index === 5 ? { ...step, details: ["Replace the wallet owner with L1Owners", ...step.details] } : step);
   return mainnetSetupSteps;
 }
 export function pairedSetupAvailable(artifacts: DeploymentArtifacts) {
@@ -48,7 +55,7 @@ export function pairedSetupAvailable(artifacts: DeploymentArtifacts) {
 type Output = { key: string; address: Address; artifact?: string; hash?: Hex };
 type Review = { step: number; chain: Chain; nonce: string; owners: Address[]; threshold: number; fingerprint: string; hash: Hex; approvals: Approval[]; moduleEnabled?: boolean };
 type Pending = DeploymentPending & { outputs: Output[]; actionsHash?: Hex; executor?: Address; sequence?: string; closed?: boolean; safe?: Address; safeChain?: Chain; l2StartBlock?: Hex };
-export type MainnetSetupState = { build?: string; sourceRequests?: SourceRequest[]; version: 3; identity: Hex; salt: Hex; deployer: Address; addresses: Record<string, Address>; code: TreasuryConfig["code"];
+export type MainnetSetupState = { build?: string; sourceRequests?: SourceRequest[]; version: 3; creation?: "create-both"; matching?: MatchingSafePlan; identity: Hex; salt: Hex; deployer: Address; addresses: Record<string, Address>; code: TreasuryConfig["code"];
   completed: { hash: Hex; chain: Chain; number: Hex; blockHash: Hex }[]; pending?: Pending; review?: Review };
 export type MainnetTarget = DeploymentTarget & { l1: DeploymentTarget["l1"] & { explorer: string }; l2: DeploymentTarget["l2"] & { explorer: string } };
 export function isMainnetSetupTarget(l1: string, l2: string, registry: string, manager: string, bridgeL1: string, bridgeL2: string) {
@@ -59,7 +66,8 @@ export function isMainnetSetupTarget(l1: string, l2: string, registry: string, m
 export function readMainnetSetup(raw: string | null, selected: SetupNetwork = network): MainnetSetupState | null {
   if (!raw) return null;
   const s = JSON.parse(raw) as MainnetSetupState;
-  check(s.version === 3 && (s.build === undefined || /^[a-f\d]{64}$/.test(s.build)) && s.identity === setupIdentity(selected) && digest(s.salt) && isAddress(s.deployer) && s.addresses && isAddress(s.addresses.safeL1!)
+  check(s.version === 3 && (s.creation === undefined || s.creation === "create-both") && (s.build === undefined || /^[a-f\d]{64}$/.test(s.build)) && s.identity === setupIdentity(selected) && digest(s.salt) && isAddress(s.deployer) && s.addresses
+    && (isAddress(s.addresses.safeL1!) || s.creation === "create-both" && s.completed?.length === 0 && s.addresses.safeL1 === undefined)
     && Object.values(s.addresses).every(a => isAddress(a)) && Array.isArray(s.completed) && s.completed.length <= mainnetSetupSteps.length
     && s.completed.every(x => digest(x.hash) && digest(x.blockHash) && /^0x[\da-f]+$/i.test(x.number) && ["l1", "l2"].includes(x.chain))
     && typeof s.build === "string"
@@ -72,6 +80,8 @@ export function readMainnetSetup(raw: string | null, selected: SetupNetwork = ne
   if (s.review) check(s.review.step === s.completed.length && s.review.owners.every(a => isAddress(a)) && digest(s.review.hash)
     && s.review.threshold > 0 && s.review.threshold <= s.review.owners.length && Array.isArray(s.review.approvals)
     && (s.review.moduleEnabled === undefined || typeof s.review.moduleEnabled === "boolean"), "Invalid setup approvals");
+  if (s.matching) check(s.creation === "create-both" && s.matching.version === 1 && [s.matching.safe, s.matching.singleton, s.matching.factory].every(address => isAddress(address))
+    && [s.addresses.safeL1, s.addresses.safeL2].every(address => !address || same(address, s.matching!.safe)), "Invalid matching Safe plan; preserve this setup for recovery");
   return s;
 }
 export function loadMainnetManifest(storage: Pick<Storage, "getItem">, selected: SetupNetwork = network) {
@@ -137,16 +147,25 @@ export class MainnetSetup {
       check(same(bridge, this.network.contracts.bridgeL1.address) && rollup === BigInt(this.network.rollupId), "TestUSDC bridge binding changed");
     }
   }
-  async configure(deployer: Address, safeL1: Address, safeL2?: Address, progress: (message: string) => void = () => {}): Promise<MainnetSetupState> {
+  async configure(deployer: Address, safeL1?: Address, safeL2?: Address, progress: (message: string) => void = () => {}, options: { matching?: boolean } = {}): Promise<MainnetSetupState> {
     check(pairedSetupAvailable(this.artifacts), "A current paired-policy release is required");
-    check(isAddress(deployer) && BigInt(deployer) > 1n && isAddress(safeL1), "Enter an existing Ethereum Safe address and connect a wallet");
+    check(isAddress(deployer) && BigInt(deployer) > 1n && (!safeL1 || isAddress(safeL1)) && (safeL1 || !safeL2), "Choose an existing Ethereum Safe or create both Safes with your connected wallet");
     progress("Checking network bindings and Safe ownership…");
-    const [, l1, l2] = await Promise.all([this.validate(), inspectSafe(this.io, "l1", safeL1),
+    const [, l1, l2] = await Promise.all([this.validate(), safeL1 ? inspectSafe(this.io, "l1", safeL1) : undefined,
       safeL2 ? inspectSafe(this.io, "l2", safeL2) : undefined]);
-    const addresses: Record<string, Address> = { safeL1: l1.address, singletonL1: l1.singleton };
-    const code: TreasuryConfig["code"] = [{ chain: "l1", address: l1.address, hash: l1.proxyHash }, { chain: "l1", address: l1.singleton, hash: l1.singletonHash }];
+    const addresses: Record<string, Address> = l1 ? { safeL1: l1.address, singletonL1: l1.singleton } : {};
+    const code: TreasuryConfig["code"] = l1 ? [{ chain: "l1", address: l1.address, hash: l1.proxyHash }, { chain: "l1", address: l1.singleton, hash: l1.singletonHash }] : [];
+    const salt = toHex(crypto.getRandomValues(new Uint8Array(32)));
+    check(!options.matching || !safeL1 && !safeL2, "Matching addresses require two new Safes");
+    const matching = options.matching ? matchingSafePlan(getAddress(deployer), salt, this.artifacts) : undefined;
+    if (matching) await Promise.all((["l1", "l2"] as const).map(async chain => {
+      const bytes = await this.io.rpc<Hex>(chain, "eth_getCode", [matchingDeployer, "latest"]);
+      check(keccak256(bytes) === matchingDeployerHash, "Matching Safe creation requires the verified deterministic deployer on both chains");
+      code.push({ chain, address: matchingDeployer, hash: matchingDeployerHash });
+      check(await this.io.rpc<Hex>(chain, "eth_getCode", [matching.safe, "latest"]) === "0x", "The planned Safe address is already occupied; start a new setup");
+    }));
     if (l2) {
-      check(l2.adapter && same(l2.adapter.safeL1, safeL1) && same(l2.adapter.manager, this.network.manager), "Choose a mirror already connected to this Ethereum Safe");
+      check(safeL1 && l2.adapter && same(l2.adapter.safeL1, safeL1) && same(l2.adapter.manager, this.network.manager), "Choose a mirror already connected to this Ethereum Safe");
       Object.assign(addresses, { safeL2: l2.address, singletonL2: l2.singleton, adapter: l2.adapter.address });
       code.push(...await Promise.all([l2.address, l2.singleton, l2.adapter.address].map(async address =>
         ({ chain: "l2" as const, address, hash: keccak256(await this.io.rpc<Hex>("l2", "eth_getCode", [address, "latest"])) }))));
@@ -156,12 +175,12 @@ export class MainnetSetup {
     // preserve the reviewed candidate order and stop at the first exact match.
     const roles = (["l1", "l2"] as const).flatMap(chain =>
       ["singleton", "factory", "multiSend"].map(kind => ({ chain, kind, key: `${kind}${chain === "l1" ? "L1" : "L2"}` })))
-      .filter(({ chain, kind, key }) => !addresses[key] && (chain !== "l1" || kind === "multiSend"));
+      .filter(({ chain, kind, key }) => !addresses[key] && (!matching || kind === "multiSend") && (!safeL1 || chain !== "l1" || kind === "multiSend"));
     const [infrastructure, officialBindings] = await Promise.all([
       discoverSafeInfrastructure(this.io, this.network.chains.l2.chainId, this.network.chains.l2.number as Hex,
-        { manager: getAddress(this.network.manager), safeL1: addresses.safeL1! }),
+        safeL1 ? { manager: getAddress(this.network.manager), safeL1: addresses.safeL1! } : undefined),
       Promise.all(roles.map(async ({ chain, kind, key }) => {
-        for (const item of official.deployments.filter(item => item.kind === kind)) {
+        for (const item of [...official.deployments, ...(!safeL1 && chain === "l1" ? official.additionalL1Singletons : [])].filter(item => item.kind === kind)) {
           const bytes = await this.io.rpc<Hex>(chain, "eth_getCode", [item.address, "latest"]);
           if (keccak256(bytes) === item.codeHash) return { key, chain, address: getAddress(item.address), hash: item.codeHash as Hex };
         }
@@ -170,6 +189,8 @@ export class MainnetSetup {
     for (const binding of officialBindings) if (binding) {
       const { key, ...entry } = binding; addresses[key] = entry.address; code.push(entry);
     }
+    if (!safeL1 && !matching) check(addresses.singletonL1 && addresses.factoryL1,
+      "Creating both Safes requires the verified Safe singleton and factory on L1. This network does not have the supported deployment contracts.");
     // Ethereum reuses its pinned shared module. Testnet deploys the current module
     // or discovers current Safe infrastructure on its own network.
     if (!this.network.testnet) {
@@ -185,10 +206,10 @@ export class MainnetSetup {
       const again = await this.io.rpc<{ hash: Hex }>("l1", "eth_getBlockByNumber", [block.number, false]);
       check(again?.hash === block.hash, "Shared Ethereum contracts changed during inspection; try again");
     }
-    for (const [key, binding] of Object.entries(infrastructure)) if (!addresses[key]) {
+    for (const [key, binding] of Object.entries(infrastructure)) if (!addresses[key] && (!matching || !["singletonL2", "factoryL2"].includes(key))) {
       addresses[key] = binding.address; code.push({ chain: "l2", ...binding });
     }
-    return { ...(this.artifacts.build ? { build: this.artifacts.build } : {}), version: 3, identity: setupIdentity(this.network), salt: toHex(crypto.getRandomValues(new Uint8Array(32))), deployer: getAddress(deployer), addresses, code, completed: [] };
+    return { ...(this.artifacts.build ? { build: this.artifacts.build } : {}), ...(!safeL1 ? { creation: "create-both" as const } : {}), ...(matching ? { matching } : {}), version: 3, identity: setupIdentity(this.network), salt, deployer: getAddress(deployer), addresses, code, completed: [] };
   }
   async unchanged(s: MainnetSetupState) {
     check(s.version === 3 && s.build === this.artifacts.build && pairedSetupAvailable(this.artifacts), "Legacy treasury setup is retired; start a new paired setup");
@@ -198,9 +219,9 @@ export class MainnetSetup {
       this.validate(),
       readInBatches(s.code, async b => { check(keccak256(await this.io.rpc<Hex>(b.chain, "eth_getCode", [b.address, "latest"])) === b.hash, "A selected treasury contract changed"); }),
       readInBatches(s.completed, async r => { check((await this.io.rpc<{ hash: Hex }>(r.chain, "eth_getBlockByNumber", [r.number, false]))?.hash === r.blockHash, "A setup confirmation was reorganized; preserve this setup for reconciliation"); }),
-      inspectSafe(this.io, "l1", s.addresses.safeL1!),
+      s.creation === "create-both" && !s.completed.length && !s.addresses.safeL1 ? undefined : inspectSafe(this.io, "l1", s.addresses.safeL1!),
     ]);
-    check(same(safe.singleton, s.addresses.singletonL1!), "The Ethereum Safe implementation changed");
+    if (safe) check(same(safe.singleton, s.addresses.singletonL1!), "The Ethereum Safe implementation changed");
     return safe;
   }
   async wallet(provider: EthereumProvider, chain: Chain, expected?: Address, verifyComposer = true) {
@@ -226,6 +247,8 @@ export class MainnetSetup {
       calls.unshift(call(delegate, "PairedTreasuryPolicy", "connectPeer", [chain === "l1" ? a.policy! : a.policyL1!]));
       if (chain === "l2") calls.push(call(delegate, "PairedTreasuryPolicy", "activate", []));
     }
+    if (chain === "l2" && s.creation === "create-both")
+      calls.unshift(call(safe, "Safe", "swapOwner", [getAddress(toHex(1n, { size: 20 })), s.deployer, a.adapter!]));
     return buildSafeTransaction({ chainId: BigInt(this.network.chains[chain].chainId), safe, to: a[`multiSend${suffix}`]!, operation: 1, nonce: BigInt(review.nonce),
       data: encodeFunctionData({ abi: this.io.abi("MultiSendCallOnly"), functionName: "multiSend", args: [packSafeCalls(calls)] }) });
   }
@@ -238,10 +261,14 @@ export class MainnetSetup {
       chain === "l2" ? inspectSafe(this.io, "l2", s.addresses.safeL2!) : undefined]);
     const local = mirror ?? owners;
     check(same(owners.singleton, s.addresses.singletonL1!), "The Ethereum Safe implementation changed");
-    if (chain === "l2") check(local.adapter && same(local.adapter.address, s.addresses.adapter!) && same(local.adapter.safeL1, owners.address), "The mirror’s owner connection changed");
+    const handover = chain === "l2" && s.creation === "create-both";
+    if (handover) check(local.owners.length === 1 && same(local.owners[0]!, s.deployer) && local.threshold === 1 && BigInt(local.nonce) === 0n
+      && same(local.singleton, s.addresses.singletonL2!), "The new EEZ-X Safe must still have its original wallet owner, threshold 1 and nonce 0 before handover");
+    else if (chain === "l2") check(local.adapter && same(local.adapter.address, s.addresses.adapter!) && same(local.adapter.safeL1, owners.address), "The mirror’s owner connection changed");
     onProgress("Preparing the exact Safe approval…");
-    const r: Review = { step: s.completed.length, chain, nonce: local.nonce, owners: owners.owners, threshold: owners.threshold,
-      fingerprint: ownerFingerprint(owners.owners, owners.threshold), hash: zeroHash, approvals: [],
+    const authority = handover ? local : owners;
+    const r: Review = { step: s.completed.length, chain, nonce: local.nonce, owners: authority.owners, threshold: authority.threshold,
+      fingerprint: ownerFingerprint(authority.owners, authority.threshold), hash: zeroHash, approvals: [],
       moduleEnabled: await this.io.read<boolean>(chain, local.address, "Safe", "isModuleEnabled", [s.addresses[chain === "l1" ? "moduleL1" : "moduleL2"]!], local.block) };
     r.hash = safeTransactionHash(this.tx(s, r)); return r;
   }
@@ -280,6 +307,8 @@ export class MainnetSetup {
       && r.step === s.completed.length && r.chain === (s.completed.length === 4 ? "l1" : "l2")
       && r.fingerprint === ownerFingerprint(r.owners, r.threshold)
       && r.hash === safeTransactionHash(this.tx(s, r)), "Review this Safe step before signing or submitting");
+    if (s.creation === "create-both" && r.chain === "l2") check(r.nonce === "0" && r.threshold === 1 && r.owners.length === 1 && same(r.owners[0]!, s.deployer),
+      "The first EEZ-X Safe transaction must be approved by its original wallet owner");
     return r;
   }
   async approve(s: MainnetSetupState, provider: EthereumProvider, onProgress: (message: string) => void = () => {}) {
@@ -305,7 +334,7 @@ export class MainnetSetup {
     if (step >= 4) {
       onProgress("Checking collected signatures…");
       const r = this.savedReview(s), tx = this.tx(s, r);
-      const signature = r.chain === "l1" ? await packEOAApprovals(tx, r.owners, r.threshold, r.approvals)
+      const signature = r.chain === "l1" || s.creation === "create-both" ? await packEOAApprovals(tx, r.owners, r.threshold, r.approvals)
         : await packOwnerApprovals(tx, s.addresses.adapter!, r.owners, r.threshold, r.approvals);
       pending = { ...pending, safe: tx.domain.verifyingContract, safeChain: r.chain, safeHash: r.hash,
         to: r.chain === "l1" ? s.addresses.safeL1! : s.addresses.safeL2Alias!, data: encodeSafeExecution(tx, signature) };
@@ -335,6 +364,11 @@ export class MainnetSetup {
   }
   private async batch(s: MainnetSetupState, nonce: Hex) {
     check(s.version === 3 && pairedSetupAvailable(this.artifacts), "Restore this paired setup’s original contract release");
+    if (s.matching) {
+      const expected = matchingSafePlan(s.deployer, s.salt, this.artifacts);
+      check(s.creation === "create-both" && s.matching.version === 1 && same(s.matching.safe, expected.safe)
+        && same(s.matching.singleton, expected.singleton) && same(s.matching.factory, expected.factory), "The matching Safe plan changed; preserve this setup for recovery");
+    }
     const step = s.completed.length, chain = mainnetSetupSteps[step]!.chain, a = { ...s.addresses };
     const create = step < 2, key = chain === "l1" ? "bootstrapL1" : "bootstrapL2";
     const executor = create ? getContractAddress({ from: s.deployer, nonce: BigInt(nonce) }) : a[key]!;
@@ -352,27 +386,44 @@ export class MainnetSetup {
     };
     const call = (target: Address, name: string, method: string, args: unknown[]) => actions.push({ create: false, target,
       data: encodeFunctionData({ abi: this.io.abi(name), functionName: method, args }), returnHash: zeroHash });
-    if (step === 0) {
+    const createSafe = async (suffix: "L1" | "L2", owner: Address) => {
+      if (a[`safe${suffix}`]) return;
+      if (s.matching) {
+        check(keccak256(await this.io.rpc<Hex>(chain, "eth_getCode", [matchingDeployer, "latest"])) === matchingDeployerHash, "The deterministic deployer changed");
+        for (const [role, name] of [["singleton", "Safe"], ["factory", "SafeProxyFactory"]] as const) {
+          const address = s.matching[role], artifact = this.artifacts.contracts[name]!;
+          const bytes = await this.io.rpc<Hex>(chain, "eth_getCode", [address, "latest"]);
+          check(bytes === "0x" || bytes === artifact.runtime, "The reserved Safe infrastructure address contains different code");
+          if (bytes === "0x") actions.push({ create: false, target: matchingDeployer, data: concatHex([zeroHash, artifact.bytecode]), returnHash: keccak256(address) });
+          a[`${role}${suffix}`] = address; outputs.push({ key: `${role}${suffix}`, address, artifact: name });
+        }
+      } else { deploy(`singleton${suffix}`, "Safe"); deploy(`factory${suffix}`, "SafeProxyFactory"); }
+      const singleton = a[`singleton${suffix}`]!, factory = a[`factory${suffix}`]!;
+      const initializer = encodeFunctionData({ abi: this.io.abi("Safe"), functionName: "setup", args: [[owner], 1n, zeroAddress, "0x", zeroAddress, zeroAddress, 0n, zeroAddress] });
+      const code = outputs.some(o => o.key === `factory${suffix}`) ? this.artifacts.contracts.SafeProxyFactory!.proxyCreationCode! : await this.io.read<Hex>(chain, factory, "SafeProxyFactory", "proxyCreationCode");
+      const bytecode = concatHex([code, encodeAbiParameters(parseAbiParameters("address"), [singleton])]);
+      const safe = getContractAddress({ opcode: "CREATE2", from: factory, salt: keccak256(concatHex([keccak256(initializer), s.salt])), bytecode });
+      if (s.matching) check(same(safe, s.matching.safe) && await this.io.rpc<Hex>(chain, "eth_getCode", [safe, "latest"]) === "0x", "The matching Safe address changed or is already occupied");
+      call(factory, "SafeProxyFactory", "createProxyWithNonce", [singleton, initializer, BigInt(s.salt)]);
+      a[`safe${suffix}`] = safe; outputs.push({ key: `safe${suffix}`, address: safe, artifact: "SafeProxy" });
+    };
+    const l1Policy = () => {
       deploy("moduleL1", "AllowanceModule"); deploy("multiSendL1", "MultiSendCallOnly");
-      deploy("policyL1", "PairedTreasuryPolicy",
-        [a.safeL1, a.moduleL1, this.network.contracts.usdcProxy.address, this.network.contracts.bridgeL1.address, BigInt(this.network.rollupId)]);
+      deploy("policyL1", "PairedTreasuryPolicy", [a.safeL1, a.moduleL1, this.network.contracts.usdcProxy.address, this.network.contracts.bridgeL1.address, BigInt(this.network.rollupId)]);
+    };
+    if (step === 0) {
+      if (s.creation === "create-both") await createSafe("L1", s.deployer);
+      if (!s.matching) l1Policy();
     } else if (step === 1) {
       call(getAddress(this.network.manager), "Registry", "getOrCreateCrossChainProxy", [a.safeL1, 0n]);
       deploy("adapter", "L1Owners", [this.network.manager, a.safeL1]); deploy("multiSendL2", "MultiSendCallOnly");
-      if (!a.safeL2) {
-        deploy("singletonL2", "Safe"); deploy("factoryL2", "SafeProxyFactory");
-        const initializer = encodeFunctionData({ abi: this.io.abi("Safe"), functionName: "setup", args: [[a.adapter], 1n, zeroAddress, "0x", zeroAddress, zeroAddress, 0n, zeroAddress] });
-        const code = outputs.some(o => o.key === "factoryL2") ? this.artifacts.contracts.SafeProxyFactory!.proxyCreationCode! : await this.io.read<Hex>(chain, a.factoryL2!, "SafeProxyFactory", "proxyCreationCode");
-        const bytecode = concatHex([code, encodeAbiParameters(parseAbiParameters("address"), [a.singletonL2!])]);
-        const safe = getContractAddress({ opcode: "CREATE2", from: a.factoryL2!, salt: keccak256(concatHex([keccak256(initializer), s.salt])), bytecode });
-        call(a.factoryL2!, "SafeProxyFactory", "createProxyWithNonce", [a.singletonL2, initializer, BigInt(s.salt)]);
-        a.safeL2 = safe; outputs.push({ key: "safeL2", address: safe, artifact: "SafeProxy" });
-      }
+      await createSafe("L2", s.creation === "create-both" ? s.deployer : a.adapter!);
     } else if (step === 2) {
       deploy("moduleL2", "AllowanceModule");
       deploy("policy", "PairedTreasuryPolicy", [a.safeL2, a.moduleL2,
         this.network.contracts.wrappedUSDC.address, this.network.contracts.bridgeL2.address, BigInt(this.network.rollupId)]);
     } else {
+      if (s.matching) l1Policy();
       for (const [key, original] of [["adapterAlias", a.adapter!], ["safeL2Alias", a.safeL2!], ["alias", a.policy!]]) {
         const address = await this.io.read<Address>("l1", getAddress(this.network.registry), "Registry", "computeCrossChainProxyAddress", [original, BigInt(this.network.rollupId)]);
         call(getAddress(this.network.registry), "Registry", "getOrCreateCrossChainProxy", [original, BigInt(this.network.rollupId)]); outputs.push({ key: key!, address });
@@ -415,6 +466,11 @@ export class MainnetSetup {
         if (!incoming) return { ...s, pending: p }; logs = incoming;
       }
       check(logs.some(l => same(l.address, p.safe!) && decodeSafeExecution(l)?.eventName === "ExecutionSuccess" && decodeSafeExecution(l)?.args.txHash === p.safeHash), "Missing successful Safe setup execution");
+      if (p.safeChain === "l2" && s.creation === "create-both") {
+        const mirror = await inspectSafe(this.io, "l2", s.addresses.safeL2!);
+        check(mirror.adapter && same(mirror.adapter.address, s.addresses.adapter!) && same(mirror.adapter.safeL1, s.addresses.safeL1!)
+          && same(mirror.adapter.manager, this.network.manager), "The EEZ-X ownership handover was not confirmed");
+      }
     }
     const addresses = { ...s.addresses }, code = [...s.code];
     for (const o of p.outputs) {

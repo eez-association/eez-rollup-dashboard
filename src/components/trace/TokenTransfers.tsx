@@ -27,37 +27,6 @@ function partyName(model: TraceModel, chain: TraceChain, address: string): strin
 export const tokenNotesHeight = (transfers: TraceTokenTransfer[]) => transfers.slice(0, 2)
   .reduce((height, transfer) => height + (transfer.kind === "transfer" ? 100 : 80), 0) + (transfers.length > 2 ? 20 : 0);
 
-export function TokenTransferSummary({ model }: { model: TraceModel }) {
-  const seen = new Set<string>();
-  const transfers = model.nodes.flatMap(node => {
-    if (node.kind === "ghost" || node.failed || node.reverted || node.inFlow === false) return [];
-    return (node.tokenTransfers ?? []).filter(transfer => {
-      const key = `${node.chain}:${node.tx}:${transfer.eventId}`;
-      if (seen.has(key)) return false;
-      seen.add(key); return true;
-    }).map(transfer => ({ chain: node.chain, tx: node.tx, transfer }));
-  });
-  if (!transfers.length) return null;
-  const party = (chain: TraceChain, address: string) => <span title={address}>
-    {partyName(model, chain, address) || short(address)}
-  </span>;
-  return <section className={styles.summary} aria-label="Token transfer summary">
-    <h2>Token transfers</h2>
-    <ul className={styles.summaryList}>{transfers.map(({ chain, tx, transfer }) => {
-      const token = transfer.symbol || partyName(model, chain, transfer.token) || short(transfer.token);
-      return <li key={`${chain}:${tx}:${transfer.eventId}`} className={styles.summaryRow} data-kind={transfer.kind}>
-        <strong title={transfer.token}>{token} · {action[transfer.kind]} <small>{chain}</small></strong>
-        <span className={styles.summaryRoute}>
-          {transfer.kind !== "mint" && <><small>From</small> {party(chain, transfer.from)}</>}
-          {transfer.kind === "transfer" && <span aria-hidden="true"> → </span>}
-          {transfer.kind !== "burn" && <><small>To</small> {party(chain, transfer.to)}</>}</span>
-        <span className={styles.summaryAmount}><small>Amount</small> {tokenAmount(transfer)}{transfer.decimals != null ? ` ${token}` : ""}</span>
-      </li>;
-    })}</ul>
-    <p className={styles.caveat}>Receipt-confirmed transfers in this flow, not net balance changes.</p>
-  </section>;
-}
-
 export function TokenNotes({ model, chain, transfers, compact = false }: {
   model: TraceModel; chain: TraceChain; transfers: TraceTokenTransfer[]; compact?: boolean;
 }) {

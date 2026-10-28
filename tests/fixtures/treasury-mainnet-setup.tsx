@@ -16,7 +16,7 @@ export function mount() {
     l1Explorer:'https://etherscan.io',l2Explorer:'https://explorer.example',l1FeesEnabled:true,l2FeesEnabled:true,treasury:null});
   // Form-only fixture: selection is recorded before the real planner would make
   // its on-chain checks. It does not manufacture a deployment or open a wallet.
-  MainnetSetup.prototype.configure=async function(deployer,safeL1,safeL2){w.selection={deployer,safeL1,safeL2};throw Error('Fixture stopped before network validation');};
+  MainnetSetup.prototype.configure=async function(deployer,safeL1,safeL2,_progress,options){w.selection={deployer,safeL1,safeL2,options};throw Error('Fixture stopped before network validation');};
   const wallet={address:'0x00000000000000000000000000000000000000C8',chainId:'0x1',provider:{request:async()=>{throw Error('Unexpected wallet prompt');}},walletOptions:[],connect:async()=>{},switchToL1:async()=>true,switchToL2:async()=>true};
   createRoot(document.getElementById('root')!).render(<main style={{maxWidth:1200,margin:'32px auto',padding:20}}><TreasuryDemo ready wallet={wallet as any}/></main>);
 }

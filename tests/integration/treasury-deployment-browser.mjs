@@ -85,7 +85,7 @@ export async function deploymentBrowser(f) {
       return route.continue();
     });
     const mount=async()=>{await page.goto(`${origin}/deployment`);await page.evaluate(async fixture=>(await import('/tests/fixtures/treasury-deployment-browser.tsx')).mount(fixture),{network,target,owners:{A:A.address,B:B.address}});};
-    await mount(); await page.getByLabel('Chiado Safe address',{exact:true}).fill(safeL1);
+    await mount(); await page.getByRole('button',{name:'Use an existing Safe',exact:true}).click(); await page.getByLabel('Chiado Safe address',{exact:true}).fill(safeL1);
     const flowStarted = performance.now();
     await page.getByRole('button',{name:'Start setup',exact:true}).click();
     for(let step=0;step<6;step++) {

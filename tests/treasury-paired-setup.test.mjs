@@ -158,3 +158,66 @@ test('peer-call evidence uses the selected network and rejects ambiguous or miss
   assert.equal(await evidence({ safeHeight: '0x2f' }), null, 'never accept events above the safe head');
   await assert.rejects(evidence({ start: 'latest' }), /Invalid incoming-call recovery block/);
 });
+
+test('create-both journals resume before L1 exists and require it after the first confirmation', () => {
+  const {state} = fixture(); state.creation = 'create-both'; delete state.addresses.safeL1;
+  assert.equal(readMainnetSetup(JSON.stringify(state)).creation,'create-both');
+  assert.throws(()=>readMainnetSetup(JSON.stringify({...state,creation:'other'})),/Invalid Ethereum setup/);
+  assert.throws(()=>readMainnetSetup(JSON.stringify({...state,creation:undefined})),/Invalid Ethereum setup/);
+  const completed=[{hash:zeroHash,blockHash:zeroHash,number:'0x1',chain:'l1'}];
+  assert.throws(()=>readMainnetSetup(JSON.stringify({...state,completed})),/Invalid Ethereum setup/);
+  assert.match(mainnetSetupStepsFor(state)[0].label,/Create/);
+  assert.match(mainnetSetupStepsFor(state)[5].details[0],/Replace the wallet owner/);
+});
+test('both fresh Safe initializers explicitly use the selected wallet, never the bootstrap caller', async () => {
+  const {engine,state}=fixture();state.creation='create-both';state.deployer=a(55);
+  delete state.addresses.safeL1;delete state.addresses.safeL2;
+  state.addresses.singletonL1=a(56);state.addresses.factoryL1=a(57);
+  const read=engine.io.read;engine.io.read=async(...args)=>args[3]==='proxyCreationCode'?artifacts.contracts.SafeProxyFactory.proxyCreationCode:read(...args);
+  for(const chain of ['l1','l2']){
+    state.completed=chain==='l1'?[]:[{}];
+    const batch=await engine.batch(state,'0x10');
+    const args=decodeAbiParameters(artifacts.contracts.TreasuryBootstrap.abi.find(x=>x.type==='constructor').inputs,`0x${batch.data.slice(artifacts.contracts.TreasuryBootstrap.bytecode.length)}`);
+    const actions=args.at(-1),creation=actions.filter(x=>!x.create).map(x=>{try{return decodeFunctionData({abi:artifacts.contracts.SafeProxyFactory.abi,data:x.data});}catch{return null;}}).find(x=>x?.functionName==='createProxyWithNonce');
+    assert(creation);
+    const init=decodeFunctionData({abi:artifacts.contracts.Safe.abi,data:creation.args[1]});
+    assert.deepEqual(init.args[0],[state.deployer]);assert.equal(init.args[1],1n);
+    assert.notEqual(init.args[0][0],batch.executor);
+    if(chain==='l1')state.addresses.safeL1=batch.outputs.find(x=>x.key==='safeL1').address;
+  }
+});
+test('fresh L2 first approval batches owner handover before peer connection and activation', () => {
+  const {engine,state}=fixture();state.creation='create-both';state.addresses.adapter=a(50);state.deployer=a(51);
+  const r={chain:'l2',nonce:'0',moduleEnabled:false};
+  const calls=innerCalls(engine,engine.tx(state,r));
+  assert.deepEqual(calls.map(x=>x.functionName),['swapOwner','connectPeer','enableModule','addDelegate','setAllowance','activate']);
+  assert.equal(calls[0].to,state.addresses.safeL2);
+  assert.deepEqual(calls[0].args,[a(1),state.deployer,state.addresses.adapter]);
+  assert(!innerCalls(engine,engine.tx(state,{...r,chain:'l1'})).some(c=>c.functionName==='swapOwner'));
+  assert.notEqual(safeTransactionHash(engine.tx(state,r)),safeTransactionHash(engine.tx({...state,creation:undefined},r)));
+});
+
+const {matchingSafePlan,matchingDeployer,matchingDeployerRuntime}=await import('../src/lib/treasury/matchingSafes.ts');
+test('matching Safe plan is independent of wallet transaction nonces and binds owner/salt/release',()=>{
+ const one=matchingSafePlan(a(60),zeroHash,artifacts),two=matchingSafePlan(a(60),zeroHash,artifacts);
+ assert.deepEqual(one,two);
+ assert.notEqual(one.safe,matchingSafePlan(a(61),zeroHash,artifacts).safe);
+ assert.notEqual(one.safe,matchingSafePlan(a(60),toHex(1n,{size:32}),artifacts).safe);
+ assert.notEqual(one.safe,matchingSafePlan(a(60),zeroHash,{...artifacts,contracts:{...artifacts.contracts,Safe:{...artifacts.contracts.Safe,bytecode:'0x6000'}}}).safe);
+});
+test('matching setup keeps all six steps within creation limits and moves L1 policy into step four',async()=>{
+ const {engine,state}=fixture();state.creation='create-both';state.deployer=a(60);state.addresses={};state.matching=matchingSafePlan(state.deployer,state.salt,artifacts);
+ engine.io.rpc=async(_chain,method,params)=>method==='eth_getCode'?(params[0].toLowerCase()===matchingDeployer.toLowerCase()?matchingDeployerRuntime:'0x'):'0x1';
+ engine.io.read=async(_chain,_address,_artifact,method,args)=>method==='computeCrossChainProxyAddress'?args[0]:({sequence:1n,owner:state.deployer,closed:false})[method];
+ for(let step=0;step<4;step++){
+  state.completed=Array.from({length:step},()=>({}));const batch=await engine.batch(state,toHex(step+20));
+  if(step<2)assert((batch.data.length-2)/2<=49152);
+  if(step===0){assert(!batch.outputs.some(o=>o.key==='policyL1'||o.key==='moduleL1'));assert.equal(batch.outputs.find(o=>o.key==='safeL1').address,state.matching.safe);}
+  if(step===1)assert.equal(batch.outputs.find(o=>o.key==='safeL2').address,state.matching.safe);
+  if(step===3){assert(batch.outputs.some(o=>o.key==='policyL1'));assert(batch.outputs.some(o=>o.key==='moduleL1'));}
+  Object.assign(state.addresses,Object.fromEntries(batch.outputs.map(o=>[o.key,o.address])));
+ }
+ assert.equal(state.addresses.safeL1,state.addresses.safeL2);
+ assert.match(mainnetSetupStepsFor(state)[3].details[0],/Deploy the Ethereum policy/);
+ assert.throws(()=>readMainnetSetup(JSON.stringify({...state,completed:[],addresses:{},matching:{...state.matching,version:2}})),/Invalid matching Safe plan/);
+});

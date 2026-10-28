@@ -4,14 +4,14 @@
 for production use, including the Ethereum mainnet integration.** Source
 verification and passing tests do not constitute a security audit.
 
-Target the existing Chiado **10200** and EEZ-X **906969**, rollup **1**. All code,
+Target the existing Chiado **10200** and EEZ-X **699069**, rollup **1**. All code,
 checks and deployment records belong in this repository. The running protocol,
 operator wallets and chain data are not redeployed for this demo.
 
 Choose the deployment wallet using the dashboard's normal wallet selector.
-New setup requires an **existing Chiado Safe address** with a verified Safe /
-SafeL2 1.3.0, 1.4.1 or 1.5.0 implementation, including **1.3.0+L2**. Its owners and
-threshold are retained. Existing EEZ-X mirrors support 1.3.0 and 1.4.1. On EEZ-X,
+Choose **Use an existing Safe** to retain a verified Safe /
+SafeL2 1.3.0, 1.4.1 or 1.5.0 implementation, including **1.3.0+L2**, with its
+current owners and threshold. Existing EEZ-X mirrors support 1.3.0 and 1.4.1. On EEZ-X,
 deploy a mirror Safe using the L1 owner adapter or reuse an existing compatible
 Safe. Add owners later by entering their addresses in **Shared owners**; the
 current Chiado quorum approves each change. Keep **100 per Safe / 150 global** per ten minutes, with no Guard.
@@ -20,6 +20,19 @@ bridge pair. Setup only connects the Safes and configures spending; it does not
 require a token balance, request token approvals or transfer tokens. Fund either
 Safe separately with the matching canonical or wrapped asset when ready to pay.
 There is no funding or faucet screen in treasury setup.
+Completed testnet setups retain a network-selection hint scoped to the configured
+endpoints, bridges, token and protocol profile. On reload it may restore the saved
+Safe addresses immediately; it never caches balances, owners, nonces or approvals.
+Fresh owner/balance reads run together before the full treasury validation, while
+the network-ready gate remains closed. Wallet actions also await a fresh network
+selection check, then the usual journal lock and action-specific validation.
+Malformed, changed, incomplete or restarted setups do not use the hint.
+The ready badge and payment controls wait for both network-selection and treasury
+validation. A queued action rechecks its validation context and the complete saved
+manifest under the journal lock, even when the Safe instance ID is unchanged.
+Independent owner/balance failures preserve successful display reads but keep
+actions blocked. The reload browser regression covers these cases, changed live
+network identity, leaving the screen during validation and journal preservation.
 Validation and the local UI rollout are recorded in the
 [setup-without-funding audit](../audits/2026-10-21-treasury-no-funding/README.md).
 
@@ -29,6 +42,92 @@ Its addresses, transaction receipts and current checks are recorded in the
 Infrastructure deployment is separate from each treasury setup and from
 real-wallet/Safe-app acceptance. The linked audit records the state observed at
 the time; the dashboard verifies the selected treasury before opening it.
+
+## Create both Safes from the dashboard
+
+Alternatively choose **Create new Safes**. This uses the same six-step
+paired setup and current release; no new Solidity contract is introduced:
+
+1. On L1, deploy or reuse identical Safe infrastructure through the verified
+   deterministic deployer, then create the Safe with the selected wallet as sole
+   owner, threshold 1, at the address reserved for both chains.
+2. On L2, prepare `L1Owners` and create another Safe with that same wallet owner
+   and threshold 1. It is not yet governed by the adapter.
+3. Deploy the L2 allowance module and paired policy.
+4. Deploy the L1 allowance module and policy, and provision the L1 aliases for
+   the L2 Safe, adapter and policy. Keeping these deployments here avoids the
+   contract-creation size limit in step 1.
+5. The L1 Safe approves its peer connection and local allowance.
+6. The wallet signs the L2 Safe's first transaction (nonce 0). Its call-only batch
+   first calls `swapOwner(sentinel, wallet, L1Owners)`, then configures the peer and
+   allowance and activates both policies. The signature is an ordinary EOA Safe
+   signature on L2; the outer submission still uses the L1 Composer route.
+
+New setups require the same code-hash-verified deterministic deployer
+(`0x4e59b44847b379578588920ca78fbf26c0b4956c`) on both networks. It uses CREATE2
+to deploy the released Safe singleton and SafeProxyFactory with identical initcode
+and salt, giving those helpers matching addresses too. Safe creation then uses
+the same explicit wallet initializer and persisted random salt on both chains.
+The owner is never the bootstrap executor or `msg.sender`. Occupied Safe addresses,
+mismatching infrastructure code and changed plans fail closed. No new Solidity
+code or rewritten release bundle is needed. The deployer interface follows the
+[deterministic deployment proxy](https://github.com/Arachnid/deterministic-deployment-proxy).
+Before handover, the L2 Safe must still have its initial wallet owner, threshold 1
+and nonce 0. Afterward its only owner is `L1Owners`, and payments use the normal
+adapter signature path. A failed setup batch rolls back the ownership replacement
+within the Safe transaction. Source publication and setup recovery cover both
+new Safes, including reloads before the first L1 address is available.
+
+New **Create new Safes** setups guarantee the same planned address on both
+chains. They are independent instances with separate balances, nonces and signing
+domains. Older saved create-both plans retain their original, possibly different
+addresses; an already deployed Safe cannot be moved to a different address.
+No funding or token claims are part of this path. The original existing-Safe path
+still creates its mirror directly with the adapter owner.
+
+Local validation: `node tests/integration/treasury-matching-safes.mjs` verifies
+matching addresses and independent state on two isolated EVMs, L2 owner handover,
+plan integrity, collision rejection and deployer checks.
+`node tests/integration/treasury-paired-setup.mjs --create-both` separately exercises
+the earlier saved-plan shape and executes released contracts, handover, setup-failure rollback, reload recovery and
+all four payment routes on an isolated EVM. This does not validate native EEZ relay
+or cross-chain rollback. A read-only plan check also confirms supported factory
+availability on the configured live testnet. The first matching-address batch
+also passes a live gas estimate without broadcasting a deployment. These checks
+do not establish a complete native cross-chain run of the new matching path.
+
+### Next iteration: combine deployment steps (deferred)
+
+Status: design proposal only. Keep the current six-step flow for user testing;
+do not enable this path or change its deployment/signing behavior yet.
+
+First evaluate merging steps 2 and 3 into one L2 deployment batch. If safe within
+the creation-size and gas limits for the selected infrastructure, this reduces
+setup to five steps without predicting contracts across transactions.
+
+Then evaluate merging L1 steps 1 and 4 by predicting the L2 Safe, owner adapter
+and policy addresses before any deployment. The proposed four-step flow is:
+
+1. Prepare/create the L1 Safe and policy, and provision the L2 connections.
+2. Deploy the L2 Safe, adapter, allowance module and policy together.
+3. Approve L1 peer connection and allowance through the L1 Safe.
+4. Approve L2 setup, including the first-transaction ownership handover for fresh
+   Safes, and activate both policies.
+
+Address predictions are exact only for fixed deployment inputs. The current
+bootstrap uses CREATE (wallet address and wallet nonce); its deployed helpers
+use CREATE (bootstrap address and creation nonce). SafeProxyFactory uses CREATE2
+with its actual creation code, singleton, initializer and salt. Changing wallet
+nonces, infrastructure reuse, owners or action order can invalidate the plan.
+
+Before implementing, freeze and persist both chains' full deployment plans;
+verify factory code and CREATE2 derivation; test whether the protocol permits
+provisioning proxies before their remote contracts exist; check collisions,
+batch size/gas limits, nonce drift, reorgs and recovery after only one chain
+completes. Evaluate a verified CREATE2 factory for helpers to remove dependence
+on wallet nonces. This would be a separately reviewed deployment design, not a
+change to existing immutable releases. Matching addresses for new Safes are
+implemented independently of this deferred step-combining proposal.
 
 The simplified contract build targets fresh treasury setups. It does not migrate
 existing policy contracts or preserve earlier constructor layouts.
@@ -501,7 +600,8 @@ transactions when necessary. More than two occupied addresses stops preparation.
 No transaction count is hardcoded for a particular wallet.
 
 Older saved setups that create an L1 Safe may include a separate implementation
-transaction. New setup requires an existing L1 Safe. Existing EEZ-X Safes that
+transaction. The existing-Safe path retains its supplied L1 Safe; the current
+**Create new Safes** path is described above. Existing EEZ-X Safes that
 need owner adoption add one current-quorum Safe transaction and its signatures.
 The exact remaining plan is shown after review; no wallet batch extension or
 account delegation is required. Creation batches check the 49,152-byte EVM input

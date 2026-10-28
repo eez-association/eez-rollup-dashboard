@@ -27,11 +27,18 @@ and do not by themselves make the API result partial. Both models use curated
 public diagnostic messages; raw provider errors remain server-side.
 
 Missing token decimals and symbols are read from the token on its own chain at
-the receipt's block, with the block hash checked afterward. These optional reads
-are reused per token/chain/block within a decode, bounded to 32 token/block
-combinations and two concurrent lookup groups. They never use latest state as a
+the receipt's block, with one shared block-hash check afterward. These optional
+reads use JSON-RPC batches on the already validated archive endpoint (or the
+normal read endpoint when no separate archive is configured). Up to eight
+token/chain/block combinations are enriched per decode: at most 24 RPC methods,
+sent in at most two HTTP batches per chain. Batch rejection does not trigger
+individual retries. Unsupported providers and tokens beyond the budget retain
+raw amounts; their transfer events are still displayed.
+
+Metadata gets at most 1.5 seconds, stays within the worker's remaining request
+budget, and reserves its final 250 ms. Fetches are cancelled when that budget expires;
+late custom-transport results are ignored. Lookups never use latest state as a
 fallback or replace conflicting metadata observed inside the transaction.
-Unavailable historical metadata leaves amounts explicitly in raw units.
 
 ## Dashboard API
 

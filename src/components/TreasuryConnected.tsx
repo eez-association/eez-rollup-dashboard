@@ -53,7 +53,7 @@ function SafeIdentity({ address, name, explorer, safeAppUrl }: { address: Addres
   </div>;
 }
 
-function PairedTreasuryConnected({ deployment, wallet, payments = false, guardAction }: { deployment: TreasuryConfig; wallet: TreasuryWallet; payments?: boolean; guardAction?: TreasuryActionGuard }) {
+function PairedTreasuryConnected({ deployment, wallet, payments = false, networkReady = true, guardAction }: { deployment: TreasuryConfig; wallet: TreasuryWallet; payments?: boolean; networkReady?: boolean; guardAction?: TreasuryActionGuard }) {
   const [client] = useState(() => new TreasuryClient(deployment));
   const generation = useRef(0);
   useEffect(() => { generation.current++; return () => { generation.current++; }; }, [client]);
@@ -70,6 +70,7 @@ function PairedTreasuryConnected({ deployment, wallet, payments = false, guardAc
   const { remember, observe, cancel, reject } = history;
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [healthy, setHealthy] = useState(false);
+  const ready = healthy && networkReady;
   const [ownerRead, setOwnerRead] = useState<"loading" | "current" | "unavailable">("loading");
   const [ownerRevision, setOwnerRevision] = useState(0);
   // A reloaded submission remains locked; display its signed fields while the
@@ -164,18 +165,28 @@ function PairedTreasuryConnected({ deployment, wallet, payments = false, guardAc
       if (refs.current.busy) { if (active) timer = setTimeout(poll, 5000); return; }
       let ownersRead = false;
       try {
-        if (Date.now() - backgroundValidationAt.current >= 30_000) {
+        const initial = backgroundValidationAt.current === 0;
+        if (!initial && Date.now() - backgroundValidationAt.current >= 30_000) {
           await client.validate(); backgroundValidationAt.current = Date.now();
         }
-        const next = await client.snapshot(payments ? source : "l2");
+        // Read display data first on reload. These are fresh chain observations,
+        // not cached balances or permission to act: healthy stays false until
+        // the full binding validation completes. Both display reads can overlap.
+        const [ownersResult, amountsResult] = await Promise.allSettled([client.snapshot(payments ? source : "l2"), payments ? paymentState(client) : null]);
         if (!active) return;
-        acceptSnapshot(next);
-        ownersRead = true;
-        const amounts = payments ? await paymentState(client) : null;
+        if (ownersResult.status === "fulfilled") { acceptSnapshot(ownersResult.value); ownersRead = true; }
+        if (amountsResult.status === "fulfilled" && amountsResult.value) acceptPayments(amountsResult.value);
+        if (ownersResult.status === "rejected") throw ownersResult.reason;
+        if (amountsResult.status === "rejected") throw amountsResult.reason;
+        if (initial) {
+          setHealthy(false);
+          await client.validate();
+          if (!active) return;
+          backgroundValidationAt.current = Date.now();
+        }
         const current = refs.current.intent;
         const result = current ? await client.outcome(current) : null;
         if (!active) return;
-        if (amounts) acceptPayments(amounts);
         setHealthy(true); failures = 0;
         setError(previous => (previous.startsWith("Connection check failed:") || previous.startsWith("Network busy:") || (terminal(result) && previous.startsWith("Submission response uncertain:"))) ? "" : previous);
         if (current === refs.current.intent) {
@@ -349,7 +360,7 @@ function PairedTreasuryConnected({ deployment, wallet, payments = false, guardAc
     <div className={styles.heading}>
       <div><p className="eez-eyebrow">[ {l1Name} + EEZ-X · {payments ? "TREASURY PAYMENTS" : "OWNER VERIFICATION"} ]</p><h2>{payments ? "One treasury, two Safes" : "One owner set, two Safes"}</h2>
         <p>{payments && (deployment.payments && verifiesL1Initiation(deployment.payments)) ? "Start from either Safe and pay on either chain, using one owner set and one shared budget." : `Approve on EEZ-X. The Safe verifies your authority against the current ${l1Name} owners.`}</p></div>
-      <div className={styles.owners}><span className={styles.badge} data-positive={healthy}>{healthy ? "Network ready" : "Checking network"}</span>
+      <div className={styles.owners}><span className={styles.badge} data-positive={ready}>{ready ? "Network ready" : "Checking network"}</span>
         <span className={styles.badge}>{deployment.environment === "isolated-devnet" ? "Isolated devnet" : deployment.environment === "ethereum-mainnet" ? "Ethereum + EEZ-X" : "Chiado + EEZ-X testnet"}</span></div>
     </div>
     <div className={payments ? styles.balanceSummary : styles.overview}>
@@ -366,7 +377,7 @@ function PairedTreasuryConnected({ deployment, wallet, payments = false, guardAc
           <h3 className={styles.chainLabel} data-chain={chain}>{name} Safe</h3>
           <SafeIdentity address={chain === "l1" ? deployment.safeL1 : deployment.safeL2} name={name} explorer={explorer} safeAppUrl={chain === "l1" ? deployment.safeAppUrl : undefined} />
           {payments && <><div className={styles.safeBalanceRow}><strong className={styles.amount}>{balances ? formatUSDC(chain === "l1" ? balances.balanceL1 : balances.balanceL2) : "—"} <span>USDC</span></strong>
-            <TreasurySafeFaucet faucet={faucet} chain={chain} l1Name={l1Name} disabled={!!busy || !!review || !wallet.address} /></div>
+            <TreasurySafeFaucet faucet={faucet} chain={chain} l1Name={l1Name} disabled={!networkReady || !!busy || !!review || !wallet.address} /></div>
             {allowance ? <><p>{formatUSDC(remaining(allowance))} available under this Safe’s limit</p>
               <p className={styles.hint}><span data-testid={`${chain}-spent`}>{formatUSDC(allowance[1]!)}</span> / {formatUSDC(allowance[0]!)} spent this period</p></> : <p className={styles.hint}>Reading this Safe’s balance…</p>}</>}
         </section>;
@@ -421,7 +432,7 @@ function PairedTreasuryConnected({ deployment, wallet, payments = false, guardAc
           <details className={styles.disclosure}><summary>Transaction details</summary><p>{review.payment?.source === "l1" ? l1Name : "EEZ-X"} Safe nonce {review.transaction.message.nonce.toString()} · chain {review.transaction.domain.chainId.toString()}</p><p>Target: <code>{review.transaction.message.to}</code></p>
             <p>Safe transaction hash: <code data-testid="safe-hash">{safeTransactionHash(review.transaction)}</code></p><p>{review.payment?.kind === "transfer" ? "Verified call-only batch" : "Call"} · native value 0 · Safe gas refund 0</p></details>
         </div>}
-        {!review && (!intent || terminal(outcome)) && <button className="btn btn-solid" disabled={locked || !healthy} onClick={() => void run("Reading owners and Safe nonce…", reviewing)}>{payments ? kind === "transfer" ? "Review transfer" : "Review payment" : "Review action"}</button>}
+        {!review && (!intent || terminal(outcome)) && <button className="btn btn-solid" disabled={locked || !ready} onClick={() => void run("Reading owners and Safe nonce…", reviewing)}>{payments ? kind === "transfer" ? "Review transfer" : "Review payment" : "Review action"}</button>}
         {review && !intent && <button className="btn btn-outline" disabled={!!busy} onClick={() => { clearReview(); setNotice("Action unlocked. Review again to collect fresh approvals."); }}>{payments ? kind === "transfer" ? "Edit transfer" : "Edit payment" : "Edit action"}</button>}
 
         {!terminal(outcome) && <div className={styles.approvalStep}>
@@ -431,14 +442,14 @@ function PairedTreasuryConnected({ deployment, wallet, payments = false, guardAc
           {!wallet.address ? <div className={styles.owners}>{wallet.walletOptions.map(option => <button className="btn btn-outline" key={option.id} onClick={() => void wallet.connect(option.id)}>Connect {option.name}</button>)}
             {!wallet.walletOptions.length && <p>Connect a browser wallet to sign.</p>}</div> : <>
             {review && !currentOwner && <p className={styles.notice}>Select one of this Safe’s owners in your wallet to approve.</p>}
-            <button className={`btn ${review && approvals.length < review.snapshot.threshold ? "btn-solid" : "btn-outline"}`} disabled={locked || !healthy || !review || !currentOwner || alreadySigned || approvals.length >= (snapshot?.threshold ?? Infinity)}
+            <button className={`btn ${review && approvals.length < review.snapshot.threshold ? "btn-solid" : "btn-outline"}`} disabled={locked || !ready || !review || !currentOwner || alreadySigned || approvals.length >= (snapshot?.threshold ?? Infinity)}
               onClick={() => void run("Waiting for owner signature…", signing)}>{alreadySigned ? "Owner approved" : "Sign approval"}</button>
             {review && alreadySigned && approvals.length < review.snapshot.threshold && <p className={styles.hint}>Switch accounts in your wallet to collect another owner’s approval.</p>}
           </>}
           {review && !intent && !correctChain && wallet.address && (approvals.length >= review.snapshot.threshold || currentOwner && !alreadySigned)
             && <p className={styles.hint}>Your wallet will ask to switch to {nextChain === "l1" ? l1Name : "EEZ-X"} before {approvals.length >= review.snapshot.threshold ? "submission" : "signing"}.</p>}
           {review && deployment.payments?.bridgeKind === "standard" && source === "l2" && <p className={styles.hint}>Approve for your EEZ-X Safe, then submit on {l1Name}. EEZ verifies the current shared owners and completes the payment across both chains.</p>}
-          {review && !intent && <button className={`btn ${approvals.length >= review.snapshot.threshold ? "btn-solid" : "btn-outline"}`} disabled={locked || !healthy || !wallet.address || approvals.length < review.snapshot.threshold}
+          {review && !intent && <button className={`btn ${approvals.length >= review.snapshot.threshold ? "btn-solid" : "btn-outline"}`} disabled={locked || !ready || !wallet.address || approvals.length < review.snapshot.threshold}
             onClick={() => void run("Waiting for wallet submission…", submitting)}>Submit Safe transaction</button>}
         </div>}
       </section>
