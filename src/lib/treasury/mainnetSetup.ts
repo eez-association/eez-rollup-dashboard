@@ -15,6 +15,7 @@ import { decodeSafeExecution } from "./safeEvents.ts";
 import { EIP1967_IMPLEMENTATION_SLOT, USDC_IMPLEMENTATION_SLOT } from "./mainnet.ts";
 import { quoteCrossChainFees } from "../fees/payment.mjs";
 import { probeComposer } from "../composerDiscovery.ts";
+import { readBridgeManager } from "../bridgeManager.ts";
 import official from "./official-safe-deployments.json" with { type: "json" };
 import network from "./mainnet-network.json" with { type: "json" };
 import sharedContracts from "./mainnet-shared-contracts.json" with { type: "json" };
@@ -123,14 +124,16 @@ export class MainnetSetup {
     await readInBatches(Object.values(this.network.contracts), async binding => {
       check(keccak256(await this.io.rpc<Hex>(binding.chain as Chain, "eth_getCode", [binding.address, "latest"])) === binding.hash, "The reviewed USDC or bridge code changed");
     });
-    const abi: Abi = parseAbi(["function manager() view returns(address)", "function rollupId() view returns(uint64)", "function canonicalBridgeAddress() view returns(address)", "function getWrappedToken(address,uint64) view returns(address)", "function wrappedTokenInfo(address) view returns(address,uint64)", "function BRIDGE() view returns(address)", "function paused() view returns(bool)"]);
+    const abi: Abi = parseAbi(["function rollupId() view returns(uint64)", "function canonicalBridgeAddress() view returns(address)", "function getWrappedToken(address,uint64) view returns(address)", "function wrappedTokenInfo(address) view returns(address,uint64)", "function BRIDGE() view returns(address)", "function paused() view returns(bool)"]);
     const read = async (chain: Chain, to: string, name: string, args: unknown[] = []) => {
       const { decodeFunctionResult } = await import("viem");
       return decodeFunctionResult({ abi, functionName: name, data: await this.io.rpc<Hex>(chain, "eth_call", [{ to, data: encodeFunctionData({ abi, functionName: name, args }) }, "latest"]) });
     };
     await Promise.all((["l1", "l2"] as const).map(async chain => {
       const bridge = this.network.contracts[chain === "l1" ? "bridgeL1" : "bridgeL2"];
-      const [manager, rollup, counterpart, implementation] = await Promise.all([read(chain, bridge.address, "manager"), read(chain, bridge.address, "rollupId"), read(chain, bridge.address, "canonicalBridgeAddress"),
+      const [manager, rollup, counterpart, implementation] = await Promise.all([
+        readBridgeManager(data => this.io.rpc(chain, "eth_call", [{ to: bridge.address, data }, "latest"])),
+        read(chain, bridge.address, "rollupId"), read(chain, bridge.address, "canonicalBridgeAddress"),
         this.io.rpc<Hex>(chain, "eth_getStorageAt", [bridge.address, EIP1967_IMPLEMENTATION_SLOT, "latest"])]);
       const remote = same(counterpart as string, zeroAddress) ? bridge.address : counterpart as string;
       check(same(manager as string, bridge.bindings.manager) && rollup === BigInt(bridge.bindings.rollupId) && same(remote, bridge.bindings.counterpart) && BigInt(implementation) === 0n, "The shared bridge connection changed");

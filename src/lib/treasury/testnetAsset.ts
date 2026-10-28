@@ -7,6 +7,7 @@ import type { MainnetTarget, SetupNetwork } from './mainnetSetup.ts';
 import { findIncomingCallEvidence } from './mainnetSetupRelay.ts';
 import { transferAbi } from './transfers.ts';
 import { probeComposer } from '../composerDiscovery.ts';
+import { readBridgeManager } from '../bridgeManager.ts';
 import { quoteCrossChainFees } from '../fees/payment.mjs';
 import profile from './paired-testnet-network.json' with { type: 'json' };
 
@@ -46,7 +47,8 @@ export class TestnetAsset extends DeploymentIO {
       const expected = profile.chains[chain], bridge = chain === 'l1' ? this.bridgeL1 : this.bridgeL2;
       const [id, reference, code, manager, rollup, peer] = await Promise.all([
         this.rpc<Hex>(chain, 'eth_chainId'), this.rpc<{ hash: Hex }>(chain, 'eth_getBlockByNumber', [expected.checkpoint.number, false]),
-        this.rpc<Hex>(chain, 'eth_getCode', [bridge, 'latest']), this.read<Address>(chain, bridge, 'Bridge', 'manager'),
+        this.rpc<Hex>(chain, 'eth_getCode', [bridge, 'latest']),
+        readBridgeManager(data => this.rpc(chain, 'eth_call', [{ to: bridge, data }, 'latest'])),
         this.read<bigint>(chain, bridge, 'Bridge', 'rollupId'), this.read<Address>(chain, bridge, 'Bridge', 'canonicalBridgeAddress'),
       ]);
       check(BigInt(id) === BigInt(expected.chainId) && reference?.hash === expected.checkpoint.hash, 'Testnet identity changed');

@@ -116,7 +116,7 @@ async function fixture(browser, options = {}) {
     if (method === 'eth_chainId') return reply(path.endsWith('l2') ? options.l2Chain || '0x1892' : options.chain || '0x27d8');
     if (method === 'eth_getCode') return reply(params[0]?.toLowerCase() === bridge ? '0x6000' : '0x');
     if (method === 'eth_call' && params[0]?.to?.toLowerCase() === bridge
-        && params[0]?.data === '0x481c6a75') {
+        && ['0xb3f5aaab', '0x481c6a75'].includes(params[0]?.data)) {
       return reply('0x' + '0'.repeat(24) + manager.slice(2));
     }
     rpcRequests.push({ path, method, params });
@@ -220,7 +220,7 @@ if (require.main === module) (async () => {
       await until(async () => (await f.page.evaluate(() => window.walletRequests.length)) === 1, 'wallet did not receive bridge');
       const follow = f.page.getByRole('dialog').getByRole('link', { name: 'Follow this call →', exact: true });
       await follow.waitFor();
-      assert.match(await follow.getAttribute('href'), new RegExp('mode=inspect&chain=' + (reverse ? 'l2' : 'l1') + '&tx=0x'));
+      assert.match(await follow.getAttribute('href'), new RegExp('mode=trace&chain=' + (reverse ? 'l2' : 'l1') + '&tx=0x'));
       const tx = await f.page.evaluate(() => window.walletRequests[0]);
       const record = await f.page.evaluate(() => JSON.parse(localStorage.getItem('txHistory'))[0]);
       assert.equal(record.type, 'bridge');

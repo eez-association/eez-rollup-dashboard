@@ -4,6 +4,7 @@ import { config, ESTIMATION_SENDER, L1_CHAIN, L2_CHAIN } from "../config";
 import { rpcCall } from "../rpc";
 import { estimateGas, estimateBridgeGas, GasEstimateError, gasToHex, getEip1559Fees } from "../lib/gasEstimation";
 import { prepareNativeBridgeMax } from "../lib/bridgeMax";
+import { readBridgeManager } from "../lib/bridgeManager";
 import type { CrossChainFeeQuote } from "../lib/fees/payment.mjs";
 
 type Logger = (msg: string, type?: "ok" | "err" | "info") => void;
@@ -82,8 +83,6 @@ const BRIDGE_ABI = {
   // Current Bridge uses uint64 rollup IDs.
   bridgeEther: "0x5d81310b",
   bridgeTokens: "0xd2c2fa0f",
-  // manager() view returns (address)
-  manager: "0x481c6a75",
   // wrappedTokenInfo(address) returns (address originalToken, uint64 originalRollupId)
   wrappedTokenInfo: "0x3e38ac74",
 };
@@ -298,13 +297,10 @@ export function useBridge(
         if (typeof code !== "string" || !/^0x[0-9a-fA-F]+$/.test(code)) {
           throw new Error("Invalid contract code response");
         }
-        const result = await rpcCall(rpcUrl, "eth_call", [
-          { to: bridgeAddr, data: BRIDGE_ABI.manager }, "latest",
-        ]);
-        if (typeof result !== "string" || !/^0x0{24}[0-9a-fA-F]{40}$/.test(result)) {
-          throw new Error("Invalid bridge manager response");
-        }
-        return { ready: BigInt(result) !== 0n, error: null };
+        const manager = await readBridgeManager(data => rpcCall(rpcUrl, "eth_call", [
+          { to: bridgeAddr, data }, "latest",
+        ]));
+        return { ready: BigInt(manager) !== 0n, error: null };
       } catch (error) {
         return { ready: null, error: (error as Error).message || "RPC check failed" };
       }

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { decodeAbiParameters, decodeFunctionData, encodeAbiParameters, encodeEventTopics, getContractAddress, toHex, zeroAddress } from 'viem';
+import { decodeAbiParameters, decodeFunctionData, encodeAbiParameters, encodeEventTopics, getContractAddress, toFunctionSelector, toHex, zeroAddress } from 'viem';
 import { TestnetAsset, CLAIM_AMOUNT, readAssetJournal } from '../src/lib/treasury/testnetAsset.ts';
 import { MainnetSetup, setupIdentity } from '../src/lib/treasury/mainnetSetup.ts';
 import { transferAbi } from '../src/lib/treasury/transfers.ts';
@@ -17,8 +17,9 @@ test('existing testnet bridge accepts the same-address default and rejects a cha
   const bridgeCode = read(`verification/${profile.bridges.l1.verification}`).runtime;
   for (const [peer, code, accepted] of [[zeroAddress, bridgeCode, true], [profile.bridges.l2.address, bridgeCode, true], [a(9), bridgeCode, false], [zeroAddress, '0x6000', false]]) {
     const d = new TestnetAsset(target, release, profile.bridges.l1.address, profile.bridges.l2.address);
-    d.read = async (_chain, _address, _abi, method) => ({manager:profile.registry, rollupId:0n, canonicalBridgeAddress:peer})[method];
+    d.read = async (_chain, _address, _abi, method) => ({rollupId:0n, canonicalBridgeAddress:peer})[method];
     d.rpc = async (_chain, method) => {
+      if (method === 'eth_call') return encodeAbiParameters([{ type: 'address' }], [profile.registry]);
       if (method === 'eth_chainId') return toHex(profile.chains.l1.chainId);
       if (method === 'eth_getBlockByNumber') return profile.chains.l1.checkpoint;
       if (method === 'eth_getCode') return code;
@@ -27,6 +28,30 @@ test('existing testnet bridge accepts the same-address default and rejects a cha
       assert.fail(method);
     };
     await assert.rejects(d.validate(), accepted ? /reached protocol validation/ : /configured normal bridge pair/);
+  }
+});
+test('testnet bridge getter compatibility preserves the expected manager binding', async () => {
+  const profile = currentProfile, current = toFunctionSelector('EEZContract()'), legacy = toFunctionSelector('manager()');
+  const code = read(`verification/${profile.bridges.l1.verification}`).runtime;
+  for (const primary of [profile.registry, 'unsupported', zeroAddress, a(9)]) {
+    const d = new TestnetAsset(target, release, profile.bridges.l1.address, profile.bridges.l2.address), calls = [];
+    d.read = async (_chain, _address, _abi, method) => ({ rollupId: 0n, canonicalBridgeAddress: zeroAddress })[method];
+    d.rpc = async (chain, method, params) => {
+      assert.equal(chain, 'l1');
+      if (method === 'eth_chainId') return toHex(profile.chains.l1.chainId);
+      if (method === 'eth_getBlockByNumber') return profile.chains.l1.checkpoint;
+      if (method === 'eth_getCode') return code;
+      if (method === 'eth_getStorageAt') throw new Error('reached protocol validation');
+      assert.equal(method, 'eth_call');
+      assert.equal(params[0].to, profile.bridges.l1.address);
+      assert.equal(params[1], 'latest');
+      calls.push(params[0].data);
+      if (params[0].data === current && primary === 'unsupported') throw new Error('execution reverted');
+      return encodeAbiParameters([{ type: 'address' }], [params[0].data === current ? primary : profile.registry]);
+    };
+    await assert.rejects(d.validate(), primary === profile.registry || primary === 'unsupported'
+      ? /reached protocol validation/ : /configured normal bridge pair/);
+    assert.deepEqual(calls, primary === 'unsupported' ? [current, legacy] : [current]);
   }
 });
 test('active release contains only the current treasury, normal bridge and fixed faucet contracts', () => {
