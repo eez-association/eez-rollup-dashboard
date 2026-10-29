@@ -75,9 +75,11 @@ default. Enable it only after validating the deployment and solver authorization
 3. Set `COW_UPSTREAM_ARTIFACTS_DIR` to a host directory containing the upstream
    `GPv2Settlement.json` ABI. `COW_ROUTE_ARTIFACTS_DIR` defaults to
    `./demos/cow-light/contracts/out`.
-4. Set `COW_SOLVER_KEY_FILE` to a protected host file containing
-   `SOLVER_PRIVATE_KEY=0x...`. Only the solver mounts it, at
-   `/run/secrets/cow-solver`. Its host permissions must allow the container user (UID 1000) to read it. Do not store it in the repository.
+4. Set `SOLVER_PRIVATE_KEY=0x...` in the root `.env`. Compose passes it only to
+   `cow-solver`, never the API or dashboard. Keep `.env` out of git and restrict
+   its permissions (`chmod 600 .env`). Docker administrators can inspect container
+   environment values, and rendered Compose configuration includes this secret;
+   do not paste unfiltered `docker compose config` or inspection output.
 5. Review `COW_SOLVER_MAX_FEE_WEI` (default `5000000000000000`) and ensure the
    authorized solver has gas funds. Enabling this service executes queued orders.
 
@@ -86,11 +88,29 @@ docker compose --profile cow-solver up -d --build cow-api cow-solver
 ```
 
 The image contains no deployment journals, runtime queues, environment files,
-keys or contract build output. Solver artifacts and its key are read-only mounts.
+keys or contract build output. Solver artifacts are read-only mounts.
 Both services run as a non-root UID with a read-only container filesystem.
 The API health check checks HTTP availability, not on-chain deployment readiness.
 For the existing mainnet deployment, the signed-order Composer simulation and
 confirmation of operational solver access remain prerequisites for activation.
+
+File-based signing remains supported by the worker. To use it instead, leave
+`SOLVER_PRIVATE_KEY` empty and add a private Compose override:
+
+```yaml
+services:
+  cow-solver:
+    environment:
+      SOLVER_KEY_FILE: /run/secrets/cow-solver
+    secrets:
+      - cow-solver
+secrets:
+  cow-solver:
+    file: /absolute/path/to/solver.key
+```
+
+The file contains `SOLVER_PRIVATE_KEY=0x...` and must be readable by the
+container user (UID 1000). No key file is required for environment-based signing.
 
 ### Without Docker
 

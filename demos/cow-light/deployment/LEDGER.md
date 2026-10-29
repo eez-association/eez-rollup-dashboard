@@ -23,9 +23,12 @@ python3 demos/cow-light/deployment/create_solver_wallet.py \
   --output "$HOME/.config/eez-cow-light/solver.key"
 ```
 
-Back up the key securely. Send only the printed address to the deployment workstation. Later set
-the server's `COW_SOLVER_KEY_FILE` to the absolute path of this file. Docker's
-solver user (UID 1000) must be able to read it; never make it world-readable.
+Back up the key securely. Send only the printed address to the deployment workstation.
+For the default Compose setup, copy the generated `SOLVER_PRIVATE_KEY` assignment
+into the server's private root `.env`, without printing or sharing it, and run
+`chmod 600 .env`. Only the solver receives it. Alternatively, use the file-based
+Compose override documented in the demo README; its solver user (UID 1000)
+must be able to read the key file. Never make it world-readable.
 The generator can also run inside the built image with an explicitly mounted
 private output directory and the host user's UID/GID. Do not generate a key in
 an ephemeral container filesystem. Do not start the worker yet.

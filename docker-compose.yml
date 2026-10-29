@@ -250,7 +250,7 @@ services:
     command: ["python", "solver/worker.py"]
     environment:
       <<: *cow-environment
-      SOLVER_KEY_FILE: /run/secrets/cow-solver
+      SOLVER_PRIVATE_KEY: "${SOLVER_PRIVATE_KEY:-}"
       GPV2_ARTIFACT: /app/upstream-artifacts/GPv2Settlement.json
       COW_SOLVER_MAX_FEE_WEI: "${COW_SOLVER_MAX_FEE_WEI:-5000000000000000}"
     volumes:
@@ -267,15 +267,6 @@ services:
         read_only: true
         bind:
           create_host_path: false
-    secrets:
-      - source: cow-solver
-        target: cow-solver
-
-
-secrets:
-  cow-solver:
-    file: ${COW_SOLVER_KEY_FILE:-/etc/eez-cow-light/solver.key}
-
 volumes:
   cow-runtime:
   treasury-verification:
