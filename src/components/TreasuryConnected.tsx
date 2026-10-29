@@ -1,6 +1,6 @@
 import { verifiesL1Initiation } from "../lib/treasury/savedPayments";
 import { parseTransferAmount, transferRollup, verifyTransferHelper, transferFunds, transferFunding } from "../lib/treasury/transfers";
-import { describeFeeRates } from "../lib/treasury/feeDisplay";
+import { WalletFeeRates } from "./WalletFeeRates";
 import { checkCancelledSubmission, walletRejected } from "../lib/treasury/submissionRecovery";
 import { treasuryExplorer } from "../lib/treasury/mainnet";
 import type { TreasuryActionGuard } from "../lib/treasury/setupState";
@@ -372,7 +372,6 @@ function PairedTreasuryConnected({ deployment, wallet, payments = false, network
   const nextChain = review && approvals.length >= review.snapshot.threshold ? client.submissionSource(review.transaction) : payments ? source : "l2";
   const correctChain = wallet.chainId && BigInt(wallet.chainId) === BigInt(deployment[nextChain].chainId);
   const locked = !!busy || !!intent && !terminal(outcome) || !!restored.error || ownerChangePending;
-  const feeDescription = fee ? describeFeeRates(fee) : "";
   const displayStatus = busy || outcome?.detail || (review ? "Collect owner approvals, then submit once." : "Review an action to collect owner approvals.");
   const l1Name = deployment.l1.chainId === 10200 ? "Chiado" : "Ethereum";
   let split: { amount: bigint; fromL1: bigint; fromL2: bigint; error: string } | undefined;
@@ -481,6 +480,7 @@ function PairedTreasuryConnected({ deployment, wallet, payments = false, network
           {review && !intent && !correctChain && wallet.address && (approvals.length >= review.snapshot.threshold || currentOwner && !alreadySigned)
             && <p className={styles.hint}>Your wallet will ask to switch to {nextChain === "l1" ? l1Name : "EEZ-X"} before {approvals.length >= review.snapshot.threshold ? "submission" : "signing"}.</p>}
           {review && deployment.payments?.bridgeKind === "standard" && source === "l2" && <p className={styles.hint}>Approve for your EEZ-X Safe, then submit on {l1Name}. EEZ verifies the current shared owners and completes the payment across both chains.</p>}
+          {fee && !terminal(outcome) && <WalletFeeRates fee={fee} description="Fees sent to your wallet for this Safe transaction. The submitting wallet pays gas separately from the Safe’s USDC payment." />}
           {review && !intent && <button className={`btn ${approvals.length >= review.snapshot.threshold ? "btn-solid" : "btn-outline"}`} disabled={locked || !ready || !wallet.address || approvals.length < review.snapshot.threshold}
             onClick={() => void run("Waiting for wallet submission…", submitting)}>Submit Safe transaction</button>}
         </div>}
@@ -506,13 +506,10 @@ function PairedTreasuryConnected({ deployment, wallet, payments = false, network
     {error && <p className={styles.error} role="alert">{error}</p>}
     {payments && busy && <p className={styles.notice} role="status">{busy}</p>}
     {intent && !intent.hash && !terminal(outcome) && <div className={styles.notice}>
-      <p>If you rejected the wallet confirmation before sending, confirm that below to check and clear this request.</p>
       <button type="button" className="btn btn-outline" disabled={!!busy || !ready} onClick={() => void run("Checking the cancelled wallet request…", recoverCancellation)}>I cancelled this request in my wallet</button>
     </div>}
-    {payments && fee && !terminal(outcome) && <p className={styles.hint}>{feeDescription}</p>}
     {!payments && (busy || intent || outcome) && <section className={styles.card} aria-label="Safe transaction status"><h3 aria-live="polite">{outcome?.rollback ? "Rollback verified" : outcome?.kind === "settled" ? `Settled on ${l1Name}` : "Transaction status"}</h3>
       {(!terminal(outcome) || (outcome?.kind === "rejected" && !outcome.rollback)) && <p role="status" aria-live="polite">{displayStatus}</p>}
-      {fee && !terminal(outcome) && <p>{feeDescription} The wallet submits these fees separately from the Safe’s USDC payment.</p>}
       {intent?.payment && outcome?.kind !== "settled" && <p>{formatUSDC(BigInt(intent.payment.amount))} USDC to <code>{intent.payment.recipient}</code> on {intent.payment.destination === "l1" ? l1Name : "EEZ-X"}</p>}
       <TreasuryOutcomeDetails outcome={outcome} deployment={deployment} intent={intent ?? undefined} settlement={history.settlementFor(outcome)} />
       {intent && <>

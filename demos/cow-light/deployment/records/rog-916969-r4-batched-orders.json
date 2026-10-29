@@ -1,0 +1,66 @@
+{
+  "test": "Two signed orders, two sequential same-pool swaps in one GPv2 settlement and L1 posting",
+  "l1ChainId": 10200,
+  "l2ChainId": 916969,
+  "contractsChanged": false,
+  "startedAt": 1793281734,
+  "finishedAt": 1793281749,
+  "amountPerOrder": "1000000000000000",
+  "sequentialOutputs": [
+    "99699104201563730",
+    "99698905103646630"
+  ],
+  "uniformPayoutPerOrder": "99699004652605180",
+  "staleSimulationErrors": [
+    {
+      "code": "unsupported_transaction",
+      "details": {
+        "message": "execution reverted",
+        "messageTruncated": false,
+        "reason": "execution_reverted",
+        "revertData": "0xe450d38c0000000000000000000000006ee612c09e396fd6374a100b83e0f027408e9ccd000000000000000000000000000000000000000000000000016233a03f32bfa6000000000000000000000000000000000000000000000000016233ce9a5bde52",
+        "revertDataLength": 100,
+        "revertDataTruncated": false,
+        "stage": "gas_estimation"
+      },
+      "message": "unsupported quote: gas estimation or final effect validation failed"
+    }
+  ],
+  "before": {
+    "sell": 1008000000000000000,
+    "buy": 1199399004798972734,
+    "settlementBuy": 0,
+    "reserves": [
+      99999601201592202640147,
+      1000004000000000000000,
+      1793279465
+    ]
+  },
+  "after": {
+    "sell": 1006000000000000000,
+    "buy": 1398797014104183094,
+    "settlementBuy": 0,
+    "reserves": [
+      99999401803582897429787,
+      1000006000000000000000,
+      1793281740
+    ]
+  },
+  "orderUids": [
+    "0x6e5290c5b4fb16ad57da8ba2971333ab1d3a175f4fdcd02f297c28595fc9e358bfd6edf2c306d93334bf0e912a00b22bcfea1bd96ae3524a",
+    "0x275bed110d14b5a8fcaf7ffabb8a99011bd9a61b187f570869646778bd91cb07bfd6edf2c306d93334bf0e912a00b22bcfea1bd96ae3524b"
+  ],
+  "settlement": {
+    "txHash": "0xad5615648c7771a3e185aa56aef88b5c90bd0911e4f6c67acbd57be2597ed4c8",
+    "nonce": 15,
+    "message": "Canonical settlement confirmed. Consensus finality is not asserted.",
+    "checkedAt": 1793281744,
+    "settlement": "0xad5615648c7771a3e185aa56aef88b5c90bd0911e4f6c67acbd57be2597ed4c8",
+    "canonicalVerified": true,
+    "settlementBlock": 87600,
+    "l1Tx": "0xec310053edad3c1b7927cd46fc69a30f20da9ff845fdb8457483ebc5ef7d74eb",
+    "l1Block": 23747219,
+    "error": null
+  },
+  "limits": "Stale batch was rejected during simulation, not after submission; no relay fault was injected."
+}

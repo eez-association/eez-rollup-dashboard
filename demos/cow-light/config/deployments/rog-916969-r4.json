@@ -1,0 +1,15 @@
+{
+  "COW_NETWORK": "chiado",
+  "L1_CHAIN_ID": "10200",
+  "L2_CHAIN_ID": "916969",
+  "L2_GENESIS_HASH": "0xbb9e52d97581ec62134cdfd6a4c21330de6002557f66fb8bd49b3e2f800d80ae",
+  "WETH_L1": "0xc04DF6a3C039c7B9b5097387f052037B171180dB",
+  "WETH_L2": "0x4b19045a60dFC46E125672cFc34741883f4C8B9e",
+  "DETERMINISTIC_FACTORY_L1": "0x4e59b44847b379578588920cA78FbF26c0B4956C",
+  "COWSWAP_ARTIFACTS": "contracts/node_modules/@cowprotocol/contracts/lib/contracts",
+  "TOKEN_CATALOG": "config/token-catalog.rog-916969.json",
+  "COW_MANIFEST": "runtime/chiado/deployments/rog-916969-r4/cow-deployment.json",
+  "ROUTE_MANIFEST": "runtime/chiado/deployments/rog-916969-r4/route-deployment.json",
+  "ORDER_QUEUE": "runtime/chiado/deployments/rog-916969-r4/ui-orders.jsonl",
+  "SOLVER_LOG": "runtime/chiado/deployments/rog-916969-r4/solver.log"
+}

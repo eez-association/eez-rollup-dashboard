@@ -1,0 +1,96 @@
+{
+  "version": 1,
+  "observedDate": "2026-10-26",
+  "status": "swap-tested",
+  "l1ChainId": 10200,
+  "l2ChainId": 916969,
+  "rollupId": 1,
+  "l2GenesisHash": "0x87a3e6004e22cb18384ce96e5021ac57840ace14f81e15539510ecccf9ecf17c",
+  "l1Checkpoint": {
+    "number": 23704310,
+    "hash": "0xc9bebe2f0dbb9a5080b10a0e9e4214f09365a71e3f7fd1fd1bc7e8efbda61b3a"
+  },
+  "deployer": "0xbfD6EDf2C306d93334bF0e912A00B22bCFEa1BD9",
+  "contracts": {
+    "factoryL1": "0x273Ea4A1003c7f2c58372e24987c25A92D2855C3",
+    "liquidityL1": "0x5be3b9BB24DC5daAE169e12A5E98F49fE904dEa2",
+    "testWethL1": "0xc04DF6a3C039c7B9b5097387f052037B171180dB",
+    "testUsdL1": "0x273644746B23C218d09C9089b755C31a88454142",
+    "pairL1": "0xe9dcAAa1F31cD383E7CA08C30Bf11F1C1cF53deB",
+    "testWethL2": "0x65E484501FcA749605CdfbA1Fa47265C8a258BF5",
+    "testUsdL2": "0x96F8F77090C9B634EB90D686f6f6F17D927595DD",
+    "authenticatorL2": "0x273Ea4A1003c7f2c58372e24987c25A92D2855C3",
+    "settlementL2": "0x6EE612c09e396fD6374a100B83e0f027408e9ccd",
+    "vaultRelayerL2": "0xCFc19D691192d1120293c1D1Ee5F3a859783F093",
+    "routeL2": "0x5d2278E0FB57c8CAEb62441598ed4e433ACf5871",
+    "helperL1": "0x80122Ba3c887B5d5fc2052c77A93d68F8f52B331",
+    "authorizedL1Caller": "0x8942302dd1C13d7a6b359eaF6749a00d56811A72",
+    "helperProxyL2": "0xa02787ce05581Eb9a6f45861D3F6332ee98fA0C6",
+    "factoryProxyL2": "0xF412887781a39C67CCf5e5DCEfC9E35030826ceD"
+  },
+  "transactions": {
+    "factory": "0xe4bc918b0f20a5382bd804bb15998564c9b8cd43086c1cbc45bedc62b63fd745",
+    "liquidity": "0x2ff84627cb2e8c921b484a738d57b1ad29c7c0885489e76e1a2add0058886927",
+    "bridgeWeth": "0x16baabea0bea911427f9031e935df75957067825e2f0527a20c901ca79c1cb4b",
+    "bridgeUsd": "0x902c3f779f7898c28300f3f4384969d735e1f70b17ddec3803165d88e6ede51a",
+    "fundDeployerL2": "0x2ba2a3921dd0837cb139d1eb9b4730fbd41e07ec79c073278c0a5ab51fa85fbb",
+    "authenticator": "0xe3d62c75e30ece1f9c015d8d658c8fcbcea8bb1b97dabc957057e88ce432495d",
+    "initializeManager": "0xd3792b9ce302b468496479638fdb29025ce3f126513ceeeaabbaa990d43250ff",
+    "addSolver": "0x4ccef272a6e57a9a749039c3d40bf1d85f2359c16f0eb6777ca3d78ee7cf77fe",
+    "settlement": "0x44a16bf491069547f61cca9a4c3c87172604dc0a32c2631704d826c71f72a109",
+    "route": "0xe36056368519a2f3d2bed9cd6b4a8ae0f18e74c7db09f50857e42d7908429d1e",
+    "factoryProxy": "0x71a1b29f569d20b43db9d6a37a66a98868310ffeef7367d8b1fe6234e3da16b2",
+    "helperProxy": "0x029a73ffd1d34b3f0bdd253151e9521f98dbbc6f850bb5cb2fdb807168cc46d1",
+    "helper": "0xf5ff7cb06cf0b7b35d5d321e0e06ff5abdc02f0e5798b68621955543dc9397be",
+    "configureRoute": "0xa3938c4f36fef16400fe2c6d6160a8c7674fdc7ebb43bba2069b4c21bfb38c81",
+    "approveSmokeTest": "0x64abe209489f8aedaf9425b1c6f0bffbd5a426b4ee6b7b7d31b17a48279717c9"
+  },
+  "rejectedSubmission": {
+    "hash": "0x9d66ede742ab3831bc23d61e2bef08fb42a3061ee6c186e3a03ad91fae23a6d1",
+    "reason": "l1_tip_underfunded",
+    "recovery": "Confirmed not admitted and nonce 3 unused; archived rejection and obtained a fresh transaction-bound Composer quote before retry."
+  },
+  "checks": {
+    "allFourL1ReceiptsFinalized": true,
+    "bothWrappersPresentInSafeL2State": true,
+    "allSevenContractsFullyVerifiedOnTheirBlockscoutExplorers": true,
+    "explorerRuntimeMatchesLiveCode": true,
+    "rerunNewTransactions": 0,
+    "rerunNonceBefore": 4,
+    "rerunNonceAfter": 4,
+    "rerunBalanceUnchanged": true,
+    "bootstrapFeeXdai": "0.007925695055522109"
+  },
+  "verificationNotes": [
+    "Custom L1 contracts required Blockscout's Sourcify import; direct compiler verification failed despite independent exact runtime matches.",
+    "Wrappers reproduced with Solidity 0.8.34, optimizer runs 1, viaIR, Osaka, and the Bridge build's complete remappings; separately built WrappedToken metadata differed.",
+    "GPv2 artifacts reproduced exactly with Solidity 0.7.6, optimizer runs 1000000, Istanbul, and literal-content metadata, using the installed upstream sources.",
+    "The L1 route-caller proxy uses historical ../eez-core-protocol/ source paths and remappings. The current standalone proxy artifact has different metadata; the historical build settings reproduce its complete runtime, masking only compiler-declared immutable positions.",
+    "Detailed journals, exact compiler inputs, and verification responses are retained in the private local runtime deployment directory. No signing keys are published."
+  ],
+  "smokeTest": {
+    "sellAmountCtWeth": "0.001",
+    "receivedCtUsd": "0.099699900599199102",
+    "transactionHash": "0xb133c443220269fe35fe3dc940f969e672b27194b480077a446e9bac7ecdcda7",
+    "l2Block": 81195,
+    "l1PostingTransaction": "0xf78774485fcbf4bfe0a8e786ba38e27b77318308bcfdc40fde52eaa8f3559b17",
+    "l1Block": 23705749,
+    "canonicalVerified": true,
+    "consensusFinalityAsserted": false,
+    "sellBalanceBeforeWei": "1000000000000000000",
+    "sellBalanceAfterWei": "999000000000000000",
+    "buyBalanceBeforeWei": "1000000000000000000",
+    "buyBalanceAfterWei": "1099699900599199102",
+    "approvalLimitedToSellAmount": true
+  },
+  "stackVerification": {
+    "gpv2AuthenticatorSettlementAndRelayerFullyVerified": true,
+    "routeAndHelperFullyVerified": true,
+    "bothL2ProxiesFullyVerified": true,
+    "l1CallerProxySourcifyRuntimeMatch": "exact_match",
+    "l1CallerProxyBlockscoutMatch": "partial",
+    "l1CallerProxyNote": "Exact full runtime reproduced independently and published to Sourcify; Blockscout still reports its older partial match after import requests."
+  },
+  "notDeployed": [],
+  "endToEndSwapTested": true
+}

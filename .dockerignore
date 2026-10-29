@@ -12,3 +12,10 @@ contracts/
 
 __pycache__/
 *.py[cod]
+
+# Demo journals and signer files must never enter a dashboard image.
+demos/cow-light/runtime/
+demos/cow-light/.venv/
+demos/cow-light/contracts/node_modules/
+demos/cow-light/contracts/out/
+demos/cow-light/contracts/cache/

@@ -1,0 +1,18 @@
+[Unit]
+Description=EEZ CoW Light generic catalog-token solver
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/opt/eez-cow-light
+EnvironmentFile=-/etc/eez-cow-light/solver.env
+ExecStart=/opt/eez-cow-light/.venv/bin/python /opt/eez-cow-light/solver/worker.py
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

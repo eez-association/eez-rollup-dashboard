@@ -175,6 +175,42 @@ The 2px gradient top rail is the site's signature accent: cards show it on hover
 
 ## Dashboard data and accessibility
 
+CoW Light is a native dashboard tab and reuses the selected dashboard wallet;
+do not embed the standalone demo page or add an independent wallet session.
+Use the shared neutral surfaces, Geist amount typography and pill actions.
+Group sell and receive assets with their network and balance, and keep one
+searchable visual token list beside the swap form, preserving the original
+demo's liquidity browser. Show token symbols and names, pair links and a clear
+selected state; synchronize list selection with the receive control. Keep
+selection locked during pending wallet requests and orders. Only show reserves
+when provided, with their catalog provenance rather than implying live data.
+Keep one
+primary action for connection, quote, exact-amount approval or order signing.
+Show recipient, minimum received and quote expiry before signing. Keep pool
+and contract identifiers in a disclosure. Order history belongs to the
+connected wallet, distinguishes the signed minimum from received amounts,
+and links to the dashboard execution inspector and configured explorers.
+Preserve pending orders across reloads and show uncertain submissions without
+automatically signing or submitting a replacement.
+
+On Chiado, label the sell token **ctWETH** and offer **Get test tokens** as a
+secondary action beside the token list. Show token amount, destination gas,
+recipient, cooldown and the requirement to pay Chiado gas before signing.
+Reuse the shared wallet and network-switch flow. Keep unresolved requests
+visible across reloads; confirm availability only after checking the canonical
+source receipt and observing the destination balances. Hide this action on
+mainnet.
+
+Use the Treasury payment-history row layout for **Your swaps**, including
+outcome filters/counts, manual refresh, network labels, transaction and block
+links, and expand/collapse controls. Expanded details show the connected
+rollup → L1 liquidity → rollup route, the signed sell amount, recipient and
+minimum output. Do not label the minimum as actual received funds or treat
+source submission as settlement. Open the newest order by default and retain
+the user's expansion choices through polling. On mainnet, label the current
+route's sell token **Bridged WETH**; do not offer wrapping into a different
+native L2 WETH contract as a way to fund this route.
+
 The dashboard, monitor, and execution visualizer use a 12px minimum for control
 text, data labels, badges, and secondary values. Hashes and table cells use
 13–14px. Long decoder explanations are limited to approximately 75 characters
