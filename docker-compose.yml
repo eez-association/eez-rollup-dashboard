@@ -1,5 +1,60 @@
 name: eez-rollup-ui
 
+x-cow-common: &cow-common
+  image: eez-cow-light:local
+  build:
+    context: ./demos/cow-light
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+  restart: unless-stopped
+  read_only: true
+  tmpfs:
+    - /tmp:size=32m,mode=1777
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  pids_limit: 128
+  environment: &cow-environment
+    COW_NETWORK: "${COW_NETWORK:-mainnet}"
+    COW_DEPLOYMENT_ENV: "${COW_DEPLOYMENT_ENV:-}"
+    L2_GENESIS_HASH: "${L2_GENESIS_HASH:-}"
+    L1_RPC: "${L1_RPC:-}"
+    L2_RPC: "${L2_RPC:-}"
+    L2_FRONT: "${L2_FRONT:-}"
+    L1_CHAIN_ID: "${L1_CHAIN_ID:-}"
+    L2_CHAIN_ID: "${L2_CHAIN_ID:-}"
+    L2_ROLLUP_ID: "${L2_ROLLUP_ID:-}"
+    BRIDGE_L1: "${BRIDGE_L1:-}"
+    BRIDGE_L2: "${BRIDGE_L2:-}"
+    EEZ_MANAGER_L2: "${EEZ_MANAGER_L2:-}"
+    WETH_L1: "${WETH_L1:-}"
+    WETH_L2: "${WETH_L2:-}"
+    SETTLEMENT_L2: "${SETTLEMENT_L2:-}"
+    NATIVE_WETH_L2: "${NATIVE_WETH_L2:-}"
+    COW_FAUCET_L1: "${COW_FAUCET_L1:-}"
+    TOKEN_CATALOG: "${TOKEN_CATALOG:-}"
+    COW_MANIFEST: "${COW_MANIFEST:-}"
+    ROUTE_MANIFEST: "${ROUTE_MANIFEST:-}"
+    ORDER_QUEUE: "${ORDER_QUEUE:-}"
+    SOLVER_LOG: "${SOLVER_LOG:-}"
+    WRAPPER_REFERENCE_TX: "${WRAPPER_REFERENCE_TX:-}"
+    WRAPPER_PREFIX_LEN: "${WRAPPER_PREFIX_LEN:-}"
+    COW_PUBLIC_L1_RPC: "${COW_PUBLIC_L1_RPC:-}"
+    COW_PUBLIC_L2_FRONT: "${COW_PUBLIC_L2_FRONT:-}"
+    EEZ_UI_L1_RPC_UPSTREAM: "${EEZ_UI_L1_RPC_UPSTREAM:-}"
+    EEZ_UI_L2_RPC_UPSTREAM: "${EEZ_UI_L2_RPC_UPSTREAM:-}"
+    EEZ_UI_L2_FRONT_UPSTREAM: "${EEZ_UI_L2_FRONT_UPSTREAM:-}"
+    EEZ_UI_L1_EXPLORER_URL: "${EEZ_UI_L1_EXPLORER_URL:-}"
+    EEZ_UI_L2_EXPLORER_URL: "${EEZ_UI_L2_EXPLORER_URL:-}"
+    EEZ_L1_BRIDGE_SENDER: "${EEZ_L1_BRIDGE_SENDER:-}"
+    EEZ_L2_BRIDGE_RECEIVER: "${EEZ_L2_BRIDGE_RECEIVER:-}"
+    EEZL2_ADDRESS: "${EEZL2_ADDRESS:-}"
+    EEZ_ROLLUP_ID: "${EEZ_ROLLUP_ID:-}"
+  volumes:
+    - cow-runtime:/app/runtime
+
+
 services:
   ui:
     image: "${EEZ_UI_IMAGE:-eez-rollup-ui:local}"
@@ -22,7 +77,7 @@ services:
       EEZ_UI_LISTEN: "8080"
       EEZ_UI_MONITOR_UPSTREAM: "monitor:8080"
       EEZ_UI_TRACE_UPSTREAM: "trace-decoder:8080"
-      EEZ_UI_COW_UPSTREAM: "${EEZ_UI_COW_UPSTREAM:-http://host.docker.internal:8787}"
+      EEZ_UI_COW_UPSTREAM: "${EEZ_UI_COW_UPSTREAM:-http://cow-api:8787}"
       EEZ_UI_PROTOCOL_COMMIT: "${EEZ_UI_PROTOCOL_COMMIT:-development}"
       EEZ_UI_L1_RPC_UPSTREAM: "${EEZ_UI_L1_RPC_UPSTREAM:-http://host.docker.internal:19545}"
       EEZ_UI_L2_RPC_UPSTREAM: "${EEZ_UI_L2_RPC_UPSTREAM:-http://host.docker.internal:19546}"
@@ -176,5 +231,51 @@ services:
     mem_limit: 512m
     restart: unless-stopped
 
+  cow-api:
+    <<: *cow-common
+    environment:
+      <<: *cow-environment
+      HOST: 0.0.0.0
+      PORT: "8787"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8787/', timeout=5).read()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  cow-solver:
+    <<: *cow-common
+    profiles: [cow-solver]
+    command: ["python", "solver/worker.py"]
+    environment:
+      <<: *cow-environment
+      SOLVER_KEY_FILE: /run/secrets/cow-solver
+      GPV2_ARTIFACT: /app/upstream-artifacts/GPv2Settlement.json
+      COW_SOLVER_MAX_FEE_WEI: "${COW_SOLVER_MAX_FEE_WEI:-5000000000000000}"
+    volumes:
+      - cow-runtime:/app/runtime
+      - type: bind
+        source: ${COW_ROUTE_ARTIFACTS_DIR:-./demos/cow-light/contracts/out}
+        target: /app/contracts/out
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${COW_UPSTREAM_ARTIFACTS_DIR:-./demos/cow-light/contracts/artifacts}
+        target: /app/upstream-artifacts
+        read_only: true
+        bind:
+          create_host_path: false
+    secrets:
+      - source: cow-solver
+        target: cow-solver
+
+
+secrets:
+  cow-solver:
+    file: ${COW_SOLVER_KEY_FILE:-/etc/eez-cow-light/solver.key}
+
 volumes:
+  cow-runtime:
   treasury-verification:

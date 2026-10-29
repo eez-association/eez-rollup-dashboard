@@ -21,6 +21,79 @@ token inventory. The L2 token may have no code before settlement.
 
 ## Run locally
 
+### Docker Compose
+
+The default Compose stack runs the API alongside the dashboard. It connects the dashboard to `http://cow-api:8787`
+on the internal Docker network; no API or solver ports are published.
+The API receives only the public configuration variables listed in the Compose
+file, not the whole `.env` or a signing key.
+
+Set `COW_NETWORK=mainnet` (or `chiado`) explicitly in the root `.env`, keeping
+the dashboard's RPC/bridge settings for that same network. Shared RPC endpoints
+must be reachable from containers: use service names or `host.docker.internal`
+for host services, not `localhost`. `COW_PUBLIC_L1_RPC` and
+`COW_PUBLIC_L2_FRONT` must instead be reachable from the user's browser.
+
+```bash
+docker compose up -d --build
+docker compose logs cow-api
+```
+
+Docker creates the `cow-runtime` named volume automatically, with ownership
+for the image's non-root user. It stores deployment manifests, signed-order
+queues and logs across container recreation. No host `demos/cow-light/runtime`
+directory or UID/GID configuration is needed for a fresh Docker installation.
+Back up this volume; `docker compose down -v` deletes it.
+
+Paths inside demo configuration are **container paths**, relative to `/app`
+when not absolute, for example `runtime/mainnet/cow-deployment.json`.
+Existing host runtime files are not imported automatically. Before switching
+from a host process, stop its API and worker and import its records once:
+
+```bash
+# Run before starting the container services; do not overwrite an active queue.
+tar -C demos/cow-light/runtime -cf - . | \\
+  docker compose run --rm -T --no-deps cow-api \\
+  tar --no-same-owner -xf - -C /app/runtime
+```
+
+External snapshots/catalogs must also be copied into the volume and configured
+using their container paths. Do not point two workers at the same queue.
+
+The API can start without deployment manifests, but trading validation fails
+closed until valid manifests for the existing contracts are installed. Missing
+records do not mean contracts need redeploying. Starting this API alone does
+not simulate or execute orders: it can queue signed orders once deployment
+checks pass, and those orders may execute when a worker is subsequently enabled.
+
+The solver is a separate service under the **`cow-solver` profile**, off by
+default. Enable it only after validating the deployment and solver authorization:
+
+1. Supply the existing CoW and route manifests under `runtime/<network>/`.
+2. Build route ABI artifacts with `forge build --root demos/cow-light/contracts`.
+   This compiles locally; it does not deploy contracts.
+3. Set `COW_UPSTREAM_ARTIFACTS_DIR` to a host directory containing the upstream
+   `GPv2Settlement.json` ABI. `COW_ROUTE_ARTIFACTS_DIR` defaults to
+   `./demos/cow-light/contracts/out`.
+4. Set `COW_SOLVER_KEY_FILE` to a protected host file containing
+   `SOLVER_PRIVATE_KEY=0x...`. Only the solver mounts it, at
+   `/run/secrets/cow-solver`. Its host permissions must allow the container user (UID 1000) to read it. Do not store it in the repository.
+5. Review `COW_SOLVER_MAX_FEE_WEI` (default `5000000000000000`) and ensure the
+   authorized solver has gas funds. Enabling this service executes queued orders.
+
+```bash
+docker compose --profile cow-solver up -d --build cow-api cow-solver
+```
+
+The image contains no deployment journals, runtime queues, environment files,
+keys or contract build output. Solver artifacts and its key are read-only mounts.
+Both services run as a non-root UID with a read-only container filesystem.
+The API health check checks HTTP availability, not on-chain deployment readiness.
+For the existing mainnet deployment, the signed-order Composer simulation and
+confirmation of operational solver access remain prerequisites for activation.
+
+### Without Docker
+
 ```bash
 cd demos/cow-light
 python3 -m venv .venv && . .venv/bin/activate
