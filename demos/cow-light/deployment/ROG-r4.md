@@ -117,3 +117,30 @@ queue and the existing dedicated test wallet; contracts were unchanged. Only the
 first pool-quote read was deliberately stale: Composer execution, fee quoting,
 submission and balance checks used the live network. This does not demonstrate
 recovery of an already-submitted rejected bundle or competing L1 swaps.
+
+### Two-order batch rehearsal
+
+On 2026-10-29, two independently signed orders were executed in one GPv2
+settlement, with two sequential swaps against the same L1 pool. Each sold
+0.001 ctWETH. The swaps produced 0.099699104201563730 and
+0.099698905103646630 ctUSD; GPv2's shared clearing price paid each order
+0.099699004652605180 ctUSD. Both order-fill counters were checked, the wallet
+received the full combined output, and settlement retained zero buy tokens.
+Canonical L2 block 87600 and L1 posting block 23747219 were verified.
+`records/rog-916969-r4-batched-orders.json` contains the receipts and observations.
+
+The stale version, paying the first quote to both orders, failed real Composer
+simulation with ERC20InsufficientBalance. Live balances and pool reserves stayed
+unchanged. This checks rejection before broadcast, not after submission.
+
+An earlier attempt to prepare two separate same-sender settlement transactions
+was rejected during fee quoting: `queued L2 predecessors are outside the quote
+profile`. Neither settlement was broadcast. The successful test therefore used
+one transaction containing both orders; the production worker still processes
+one order per settlement. No contracts or shared-service configuration changed.
+
+Deterministic post-submission relay/builder rejection remains untested: the
+operator chose to keep shared services unchanged. Mainnet and ROG also reported
+different protocol commits (`855fe0602484750861b4c31502a1a91355d33ed6` and
+`84a5b5207880f192a6a5896cbfe0bac5249db47f` respectively), so this ROG result is
+not a substitute for validating the actual mainnet deployment.

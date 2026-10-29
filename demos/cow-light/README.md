@@ -368,6 +368,24 @@ have identical executable code but different metadata; that is not an exact matc
 
 ### Mainnet: configure existing assets and liquidity
 
+Read-only profile audit (does not load signing keys or submit transactions):
+
+```bash
+python3 deployment/validate_mainnet.py --output mainnet-validation.json
+# Add --solver 0x... to verify the intended public solver address is allowlisted.
+```
+
+The command writes its evidence and exits nonzero if any required check fails.
+
+The 2026-10-29 audit found the saved chain IDs, Composer, contract code, bridge
+peers/rollup/manager, canonical WETH wrapper and all 100 catalog pools/decimals
+consistent with live reads. Full deployment validation remains blocked by missing
+local mainnet CoW/route manifests and an unspecified intended solver address.
+The public mainnet CoW config path returned dashboard HTML, not a CoW API.
+These checks do not establish contract security, support for unusual token
+transfer behavior, or production readiness. Public observations are saved in
+`deployment/records/mainnet-validation-2026-10-29.json`.
+
 Do not run the Chiado bootstrap. Use `.env.example` and the mainnet profile to
 configure and validate existing tokens, their canonical wrappers, bridge pair,
 and funded Uniswap V2 pairs in the catalog. No test tokens are minted and no
