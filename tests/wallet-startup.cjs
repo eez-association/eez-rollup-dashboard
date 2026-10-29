@@ -79,7 +79,7 @@ async function fixture(browser, injected) {
 }
 
 (async () => {
-  const browser = await chromium.launch({ headless: true, args: ['--no-sandbox'] });
+  const browser = await chromium.launch({ headless: true, chromiumSandbox: true });
   try {
     const noWallet = await fixture(browser, false);
     assert.equal(await noWallet.page.getByRole('group', { name: 'Latest network blocks' }).count(), 0);

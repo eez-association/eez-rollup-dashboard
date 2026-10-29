@@ -3,7 +3,7 @@ import { Worker } from "node:worker_threads";
 export function workerRunner(config, { timeoutMs = 120000, maxRequests = 6000 } = {}) {
   return (request, progress) => {
     const worker = new Worker(new URL("./worker.mjs", import.meta.url), {
-      workerData: { config, request, maxRequests },
+      workerData: { config, request, maxRequests, deadline: Date.now() + timeoutMs },
       resourceLimits: { maxOldGenerationSizeMb: 192, stackSizeMb: 8 },
     });
     let settled = false, rejectJob;

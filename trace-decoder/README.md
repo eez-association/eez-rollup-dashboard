@@ -10,9 +10,35 @@ read-only Node.js API. The API runs as the internal `trace-decoder` Compose serv
 The CLI and standalone HTML viewer remain available for offline inspection.
 The native dashboard defaults to **Linked flow** and offers **Recorded traces**
 when exact links are verified. Recorded sequence numbers are independent per
-chain. Prepared results without an expected L2 delivery are labeled separately
+chain. The native **Call map** shows branching calls in chain bands and fits its
+width automatically. **Fit width** keeps the overview responsive; **100%** restores
+readable labels with scrolling. **Show local reads** reveals successful local reads
+hidden by default; failed calls, missing execution, cross-chain reads and prepared
+results remain visible. Searching also reveals matching local reads.
+The native call flow connects visible callers to their children, numbers
+calls, and highlights connections for the selected call. Dashed connectors mark
+uncertain or missing execution; recorded traces never connect independent
+transactions. Search and hidden protocol frames can promote descendants to the
+nearest visible ancestor. **Token transfers** (on by
+default) shows ERC20 Transfer events on call cards only when the same event
+appears in both the trace and the committed receipt; amounts describe events,
+not net balance changes. Prepared results without an expected L2 delivery are labeled separately
 and do not by themselves make the API result partial. Both models use curated
 public diagnostic messages; raw provider errors remain server-side.
+
+Missing token decimals and symbols are read from the token on its own chain at
+the receipt's block, with one shared block-hash check afterward. These optional
+reads use JSON-RPC batches on the already validated archive endpoint (or the
+normal read endpoint when no separate archive is configured). Up to eight
+token/chain/block combinations are enriched per decode: at most 24 RPC methods,
+sent in at most two HTTP batches per chain. Batch rejection does not trigger
+individual retries. Unsupported providers and tokens beyond the budget retain
+raw amounts; their transfer events are still displayed.
+
+Metadata gets at most 1.5 seconds, stays within the worker's remaining request
+budget, and reserves its final 250 ms. Fetches are cancelled when that budget expires;
+late custom-transport results are ignored. Lookups never use latest state as a
+fallback or replace conflicting metadata observed inside the transaction.
 
 ## Dashboard API
 

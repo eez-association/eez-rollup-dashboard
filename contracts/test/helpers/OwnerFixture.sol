@@ -5,7 +5,7 @@ import {Test} from "forge-std/Test.sol";
 import {EEZBase} from "eez-core-protocol/src/base/EEZBase.sol";
 import {ProxyInfo} from "eez-core-protocol/src/interfaces/IEEZ.sol";
 import {ICrossChainProxy} from "eez-core-protocol/src/interfaces/ICrossChainProxy.sol";
-import {L1Owners} from "../../src/L1Owners.sol";
+import {L1Owners} from "../../src/l2/L1Owners.sol";
 import {IEEZProxyRegistry} from "../../src/interfaces/IEEZProxyRegistry.sol";
 import {ISafe, ISafeProxyFactory} from "../../src/interfaces/ISafe.sol";
 
@@ -18,6 +18,11 @@ contract ReadThroughManager is EEZBase {
 
     constructor(uint64 id) {
         ROLLUP_ID = id;
+    }
+
+    function MAINNET_ROLLUP_ID() external view returns (uint64) {
+        require(ROLLUP_ID == 0, "only L1");
+        return 0;
     }
 
     function setPeer(ReadThroughManager other) external {

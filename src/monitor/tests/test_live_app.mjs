@@ -27,7 +27,7 @@ function fixture({ unavailable = false, blocked = false } = {}) {
   }
   FakeSocket.blocked = blocked;
   const context = vm.createContext({ URL, AbortController, console,
-    window: { location: { href: "https://eez.asuscomm.com/#/monitor", origin: "https://eez.asuscomm.com" },
+    window: { location: { href: "https://dashboard.example/#/monitor", origin: "https://dashboard.example" },
       addEventListener: (name, fn) => { events[name] = fn; },
       removeEventListener: name => { delete events[name]; } },
     document: { querySelector: selector => element(selector.slice(5, -2)), getElementById: element, createElement: () => element("created") },
@@ -55,7 +55,7 @@ const response = (data) => ({ ok: true, json: async () => data });
 const tick = () => new Promise(setImmediate);
 
 const f = fixture();
-assert.equal(f.sockets[0].url, "wss://eez.asuscomm.com/monitor/api/live");
+assert.equal(f.sockets[0].url, "wss://dashboard.example/monitor/api/live");
 assert.equal(f.requests.length, 0, "connected viewers must not poll snapshots");
 f.sockets[0].push(snapshot(12));
 assert.equal(f.state.snapshot.chains.l2.latest.number, 12);

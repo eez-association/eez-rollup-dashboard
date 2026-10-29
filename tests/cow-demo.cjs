@@ -39,7 +39,7 @@ async function fixture(browser, { mismatch = false, unavailable = false } = {}) 
 }
 
 (async () => {
-  const browser = await chromium.launch({ headless: true, args: ['--no-sandbox'] });
+  const browser = await chromium.launch({ headless: true, chromiumSandbox: true });
   try {
     const f = await fixture(browser);
     await f.page.goto(origin + '/#/cow-demo');

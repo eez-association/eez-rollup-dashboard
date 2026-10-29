@@ -1,6 +1,8 @@
 // Real Safe contracts on one owned Anvil with separate logical chain phases. Only protocol discovery/checkpoints
 // are fixture substitutes: this does not claim EEZ settlement or signer coverage.
 import assert from 'node:assert/strict';
+// Historical Chiado planner rehearsal using an explicit immutable archive.
+// Paired-policy bytecode reproduction is covered by treasury-source-verification.
 import { spawn, execFileSync } from 'node:child_process';
 import { createServer } from 'node:net';
 import { once } from 'node:events';
@@ -17,7 +19,7 @@ import { adoptL1Owners, inspectSafe, SAFE_GUARD_SLOT } from '../../src/lib/treas
 import { buildSafeTransaction, encodeSafeExecution, packEOAApprovals, safeTransactionHash } from '../../src/lib/treasury/safeTransactions.ts';
 import { COMPOSER_DISCOVERY_ABI, COMPOSER_DISCOVERY_MARKER } from '../../src/lib/composerDiscovery.ts';
 const legacy = JSON.parse(readFileSync('src/lib/treasury/deployment-artifacts.json'));
-const release = JSON.parse(readFileSync(`src/lib/treasury/builds/${JSON.parse(readFileSync('src/lib/treasury/current-build.json')).build}.json`));
+const release = JSON.parse(readFileSync(`src/lib/treasury/builds/${({build:'026c1f779c5c3bed2cc56f91707bb7b9eca67c240ef7cfd47ca83017cb868df1'}).build}.json`));
 const artifacts = { ...release, contracts: { ...legacy.contracts, ...release.contracts } };
 const officialRuntime = JSON.parse(readFileSync('tests/fixtures/official-safe-runtime.json'));
 const profile = JSON.parse(readFileSync('src/lib/treasury/shared-network.json'));

@@ -26,6 +26,9 @@ interface Props {
   composerConnection?: ComposerDetection;
   checkingComposer?: boolean;
   onRecheckComposer?: () => void;
+  onConnectComposer?: () => Promise<void>;
+  connectingComposer?: boolean;
+  composerSetupMessage?: string;
 }
 
 const NAV_ITEMS = [
@@ -51,6 +54,9 @@ export function Header({
   composerConnection,
   checkingComposer = false,
   onRecheckComposer,
+  onConnectComposer,
+  connectingComposer,
+  composerSetupMessage,
 }: Props) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -176,7 +182,8 @@ export function Header({
                     </div>
 
                     {composerConnection && onRecheckComposer && <ComposerStatus
-                      connection={composerConnection} checking={checkingComposer} onRecheck={onRecheckComposer} walletName={walletName} />}
+                      connection={composerConnection} checking={checkingComposer} onRecheck={onRecheckComposer} walletName={walletName}
+                      onConnectNetwork={onConnectComposer} connectingNetwork={connectingComposer} setupMessage={composerSetupMessage} />}
 
                     {onToggleTheme && (
                       <div className={styles.ddSection}>

@@ -48,3 +48,31 @@ test("a shared batch dependency does not add its unrelated roots to the connecte
   assert.deepEqual(traceRows(data, { transaction: "L2:other" }).map(row => row.node.id), [4]);
   assert.deepEqual(traceRows(data, { protocol: true }).map(row => row.node.id), [0, 1, 2, 3, 4]);
 });
+
+test("local reads can be hidden without hiding cross-chain evidence or descendants", () => {
+  const data = model();
+  data.nodes[1].protocol = false;
+  data.nodes[1].isStatic = true;
+  data.nodes[2].isStatic = true;
+  data.nodes[2].crossing = { from: "L1", to: "L2", status: "matched" };
+  data.nodes[3].isStatic = true;
+  const rows = traceRows(data, { localReads: false });
+  assert.deepEqual(rows.map(row => row.node.id), [0, 2, 3]);
+  assert.equal(rows[1].parent, 0);
+  assert.deepEqual(traceRows(data, { localReads: true }).map(row => row.node.id), [0, 1, 2, 3]);
+});
+
+test("failed reads, prepared results, top-level reads and explicit search stay visible", () => {
+  const data = model();
+  data.nodes[0].isStatic = true;
+  data.nodes[1].protocol = false;
+  data.nodes[1].isStatic = true;
+  data.nodes[1].contract = "LocalReader";
+  for (const flag of ["failed", "reverted", "preparedResult", "preparedResponse", "crossChainRead"]) {
+    data.nodes[1][flag] = true;
+    assert.ok(traceRows(data, { localReads: false }).some(row => row.node.id === 1), flag);
+    delete data.nodes[1][flag];
+  }
+  assert.equal(traceRows(data, { localReads: false })[0].node.id, 0);
+  assert.deepEqual(traceRows(data, { localReads: false, search: "LocalReader" }).map(row => row.node.id), [1]);
+});

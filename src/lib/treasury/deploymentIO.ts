@@ -34,11 +34,36 @@ export class DeploymentIO {
       && artifacts.modules === "c95f03900bff99be090dadb9de1c74b162365485", "Unexpected treasury deployment artifacts");
   }
   async rpc<T>(chain: Chain, method: string, params: unknown[] = [], front = false): Promise<T> {
-    const response = await fetch(front ? this.target[chain].front : this.target[chain].rpc, { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }), signal: AbortSignal.timeout(15_000) });
-    check(response.ok, `Deployment RPC HTTP ${response.status}`);
-    const body = await response.json(); if (body.error) throw new Error(body.error.message);
-    return body.result;
+    const request = async <R>(url: string, name: string, args: unknown[]): Promise<R> => {
+      const response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: name, params: args }), signal: AbortSignal.timeout(15_000) });
+      check(response.ok, `Deployment RPC HTTP ${response.status}`);
+      const body = await response.json(); if (body.error) throw new Error(body.error.message);
+      return body.result;
+    };
+    const primary = this.target[chain].rpc, alternate = this.target[chain].front;
+    try { return await request<T>(front ? alternate : primary, method, params); }
+    catch (error) {
+      const tag = params[method === "eth_getStorageAt" ? 2 : 1];
+      // A non-archive read node can confirm a receipt but lack its state. Retry
+      // only explicit historical reads on our configured same-chain Composer;
+      // never resend transactions, re-estimate, or replace a block with latest.
+      if (front || alternate === primary || !["eth_getCode", "eth_getStorageAt", "eth_call", "eth_getTransactionCount"].includes(method)
+        || !quantity(tag) || !/no state available for block|missing trie node|historical state.*(unavailable|not available)|state.*pruned/i.test((error as Error).message)) throw error;
+      type Header = { number: Hex; hash: Hex };
+      const [primaryId, alternateId, block, other] = await Promise.all([
+        request<Hex>(primary, "eth_chainId", []), request<Hex>(alternate, "eth_chainId", []),
+        request<Header | null>(primary, "eth_getBlockByNumber", [tag, false]),
+        request<Header | null>(alternate, "eth_getBlockByNumber", [tag, false]),
+      ]);
+      check(quantity(primaryId) && quantity(alternateId) && BigInt(primaryId) === BigInt(alternateId), "Historical read fallback has a different chain ID");
+      check(block && other && digest(block.hash) && digest(other.hash) && same(block.hash, other.hash) && quantity(block.number) && quantity(other.number)
+        && BigInt(block.number) === BigInt(tag) && BigInt(other.number) === BigInt(tag), "Historical read providers disagree on the canonical block");
+      const result = await request<T>(alternate, method, params);
+      const after = await Promise.all([primary, alternate].map(url => request<Header | null>(url, "eth_getBlockByNumber", [tag, false])));
+      check(after.every(header => header && digest(header.hash) && same(header.hash, block.hash)), "Historical read block changed; retry verification");
+      return result;
+    }
   }
   abi(name: string) { return name === "ERC20" ? erc20Abi : name === "Registry" ? registryAbi : this.artifacts.contracts[name]!.abi; }
   async read<T>(chain: Chain, address: Address, artifact: string, method: string, args: unknown[] = [], tag = "latest"): Promise<T> {

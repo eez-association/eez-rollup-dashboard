@@ -1,8 +1,10 @@
 import { createServer } from 'node:http';
 import { resolve } from 'node:path';
-import { VerificationWorker, loadBuilds, publicJob } from './worker.mjs';
+import { VerificationWorker, loadBuilds, loadAdditionalSources, publicJob } from './worker.mjs';
+import { blockscoutApiUrl } from './network.mjs';
 // The existing dashboard config is the sole network authority. No user-supplied
-// URLs, compiler inputs, private keys or new .env settings are accepted.
+// URLs, compiler inputs or private keys are accepted. Provider credentials are
+// server-only environment settings and never come from browser requests.
 const dashboard = process.argv[2] ?? 'http://127.0.0.1:8080';
 const directory = resolve(process.argv[3] ?? '/data');
 let worker, starting = false, admitting = 0;
@@ -16,11 +18,12 @@ async function start() {
       const rpc = new URL(c[`${chain}RpcUrl`], dashboard).href;
       const response = await fetch(rpc, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_chainId', params: [] }), signal: AbortSignal.timeout(10_000) });
       const r = await response.json(); if (r.error || !r.result) throw new Error('Cannot identify verification network');
-      const explorer = c[`${chain}ExplorerApiUrl`] || (c[`${chain}ExplorerUrl`] ? c[`${chain}ExplorerUrl`].replace(/\/$/, '') + '/api' : '');
-      // Etherscan API keys are not required: Ethereum uses public Blockscout.
-      networks[Number(BigInt(r.result))] = { rpc, explorerApi: BigInt(r.result) === 1n ? 'https://eth.blockscout.com/api' : explorer ? new URL(explorer, c[`${chain}ExplorerUrl`] || dashboard).href.replace(/\/$/, '') : '' };
+      // Opt in on Ethereum only; the EEZ chain keeps its configured Blockscout.
+      networks[Number(BigInt(r.result))] = { rpc, peerRollupId: chain === 'l2' ? 0 : Number.isSafeInteger(Number(c.rollupId)) && Number(c.rollupId) > 0 ? Number(c.rollupId) : undefined, explorerApi: BigInt(r.result) === 1n ? 'https://eth.blockscout.com/api' : blockscoutApiUrl(c[`${chain}ExplorerApiUrl`], c[`${chain}ExplorerUrl`], dashboard) };
+      if (BigInt(r.result) === 1n && process.env.ETHERSCAN_API_KEY?.trim())
+        networks[1].etherscanKey = process.env.ETHERSCAN_API_KEY.trim();
     }
-    worker = new VerificationWorker({ directory, builds: loadBuilds('verification/builds'), networks });
+    worker = new VerificationWorker({ directory, builds: loadBuilds('verification/builds'), additionalSources: loadAdditionalSources('verification/supplemental'), networks });
     console.log('Treasury source verification ready');
   } catch { console.error('Treasury verification is waiting for dashboard network configuration'); }
   finally { starting = false; }
@@ -38,6 +41,8 @@ const server = createServer(async (req, res) => {
       try { return send(202, publicJob(await worker.admit(JSON.parse(data)))); }
       finally { admitting--; }
     }
+    const retry = /^\/jobs\/([a-f\d]{64})\/retry$/.exec(req.url ?? '');
+    if (req.method === 'POST' && retry) return send(202, publicJob(worker.retry(retry[1])));
     const match = /^\/jobs\/([a-f\d]{64})$/.exec(req.url ?? '');
     if (req.method === 'GET' && match) { const job = worker.jobs.get(match[1]); return send(job ? 200 : 404, job ? publicJob(job) : { error: 'Unknown job' }); }
     return send(404, { error: 'Unknown verification operation' });

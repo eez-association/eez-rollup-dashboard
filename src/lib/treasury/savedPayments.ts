@@ -33,10 +33,20 @@ export function readPaymentDeployment(value: PaymentDeployment): PaymentDeployme
       || p.combinedL2 !== undefined || p.l1Initiation !== undefined)) throw new Error("Conflicting payment interface versions");
   return value;
 }
+/** v1 signs a fixed epoch; v2 signs an optional deadline (zero is unlimited).
+ * Never reinterpret old approvals as non-expiring payments. */
+export function paymentAuthorizationTime(deployment: PaymentDeployment, p: Payment): bigint {
+  if (deployment.pair?.version === 2) {
+    if (p.deadline === undefined) throw new Error("This policy requires an explicit deadline; use 0 for no expiry");
+    return BigInt(p.deadline);
+  }
+  if (p.deadline !== undefined) throw new Error("This deployed policy still uses period-bound approvals");
+  return BigInt(p.epoch);
+}
 export function encodeSplitPayment(deployment: PaymentDeployment, p: Extract<Payment, { kind?: "fixed" }>) {
   const version = paymentVersion(deployment);
   if (version === 0) throw new Error("This payment requires a treasury created with the current setup");
-  const args = [p.recipient, BigInt(p.amount), p.destination === "l1", BigInt(p.epoch), BigInt(p.fromL1)] as const;
+  const args = [p.recipient, BigInt(p.amount), p.destination === "l1", paymentAuthorizationTime(deployment, p), BigInt(p.fromL1)] as const;
   return version === 2 ? encodeFunctionData({ abi: splitAbi, functionName: "paySplit", args })
     : encodeFunctionData({ abi: oldAbi, functionName: "paySplit", args: [deployment.tokenL1, ...args] });
 }

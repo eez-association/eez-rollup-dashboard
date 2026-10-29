@@ -43,6 +43,24 @@ export async function verifyTransferHelper(client: TreasuryClient) {
   const code = await client.rpc<Hex>(client.config.l1.rpc, "eth_getCode", [transferHelper.address, "latest"]);
   check(keccak256(code) === transferHelper.codeHash, "Safe’s verified batch helper is unavailable on this network");
 }
+/** A Safe-to-Safe deposit needs its source balance, independent of payment
+ * allowances and the shared spending budget. Keep the read pinned and reorg checked.
+ */
+export async function transferFunds(client: TreasuryClient) {
+  const c = client.config;
+  const block = await client.rpc<{ number: Hex; hash: Hex; timestamp: Hex }>(c.l1.rpc, "eth_getBlockByNumber", ["latest", false]);
+  check(block?.number && block.hash, "Transfer source observation is unavailable");
+  const abi = parseAbi(["function balanceOf(address) view returns(uint256)"]);
+  const balance = decodeFunctionResult({ abi, functionName: "balanceOf", data: await client.rpc<Hex>(c.l1.rpc, "eth_call",
+    [{ to: c.payments!.tokenL1, data: encodeFunctionData({ abi, functionName: "balanceOf", args: [c.safeL1] }) }, block.number]) });
+  const again = await client.rpc<{ hash: Hex }>(c.l1.rpc, "eth_getBlockByNumber", [block.number, false]);
+  check(again?.hash === block.hash, "Chain state changed while reading the transfer balance");
+  return { balance, epoch: BigInt(block.timestamp) / 600n };
+}
+export function transferFunding(balance: bigint, amount: bigint) {
+  check(amount <= balance, "Insufficient balance in the source Safe");
+  return { fromL1: amount, fromL2: 0n };
+}
 export async function transferRollup(client: TreasuryClient): Promise<string> {
   const c = client.config;
   const standard = c.payments!.bridgeKind === "standard", name = standard ? "rollupId" : "treasuryRollupId";

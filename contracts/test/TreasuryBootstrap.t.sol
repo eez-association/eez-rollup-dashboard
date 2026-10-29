@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.34;
 import {Test} from "forge-std/Test.sol";
-import {TreasuryBootstrap} from "../src/TreasuryBootstrap.sol";
+import {TreasuryBootstrap} from "../src/shared/TreasuryBootstrap.sol";
 
 contract BootstrapTarget {
     uint256 public value;

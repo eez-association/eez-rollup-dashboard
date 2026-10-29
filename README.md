@@ -169,96 +169,84 @@ container. The tab checks both chain IDs before opening the trading UI and
 shows an unavailable state if the API is not running. This proxy does not
 start the API, deploy contracts, or expose the solver's control endpoint.
 
-On the configured **Chiado 10200 / EEZ-X 906969** dashboard, this tab opens
-wallet-approved setup when no shared manifest is saved. **Start setup** connects
-an existing verified Chiado Safe (Safe / SafeL2 1.3.0 or 1.4.1) and deploys or
-connects its EEZ-X mirror. The Chiado owner set and threshold are retained. Setup
-uses the predeployed shared Test USDC and bridge pair; it does not fund the Safes.
-Transaction calls are visible at each setup step. The connected view provides
-payment review, a funding split, shared owners and payment history.
+The dashboard deploys and operates only the current paired-contract release.
+Both Ethereum and Chiado use the same `PairedTreasuryPolicy` setup engine. It
+connects an existing L1 Safe to a new or existing `L1Owners` mirror, deploys one
+policy on each chain, grants each local policy 100 tokens per ten minutes, and
+activates the pair in the final Safe batch. L2 counts the shared 150-token budget
+once. Local contributions transfer first, then the authenticated peer contributes.
+Normal bridge submissions use L1 while signatures retain the initiating Safe's
+domain and nonce. Ethereum uses its existing Circle USDC and normal bridges.
 
-The normal wallet integration collects approvals and submits named transactions.
-Progress survives reloads. Add an owner by entering its address in Shared owners;
-the current Chiado quorum approves the change. Limits remain 100 per Safe and
-150 shared per ten minutes. See the
-[shared-network runbook](docs/runbooks/treasury-shared-network.md).
+Before each of the final two setup submissions, four parallel RPC reads check
+the pinned protocol implementation on each chain and the latest recorded setup
+block hash on each chain. A failed check preserves the journal and collected
+approvals without opening wallet confirmation. These checks run once per
+submission attempt, not while collecting owner signatures; they supplement the
+existing simulation and final deployment validation.
 
-On the existing Ethereum-backed network, the treasury asks for the user's
-**Ethereum Safe address**, then deploys or connects its EEZ-X mirror with the
-selected wallet. Six transactions batch application deployment and allowance
-configuration, reusing the existing bridge and Circle USDC. Mainnet setup has its
-own browser journal and application artifact bundle; Chiado remains unchanged.
-No new `.env` variables, automatic funding or token minting are used. An explicit
-runtime `treasury` manifest remains an optional import for existing deployments.
-The [mainnet runbook](docs/runbooks/treasury-mainnet.md) covers setup, exact code
-bindings, isolated native/browser rehearsal, real-USDC fork checks and remaining
-production requirements. These checks are not a production security audit.
+On **Chiado 10200 / EEZ-X 699069**, configure the normal bridges and an existing
+`treasuryTokenAddress` in the local runtime configuration. The configured
+`TestUSDC` and its normal-bridge wrapped representation must already exist.
+The user supplies an existing L1 Safe and creates or reuses its L2 mirror;
+the six Safe setup steps neither deploy the token nor require a faucet claim.
 
-Simulation is no longer offered. Supported networks without treasury bindings show the Safe chooser;
-other networks show a configuration prompt. **Get Test USDC** is available only for configured Chiado
-treasuries; it is hidden on Ethereum. To fund the mirror from the existing Chiado
-Safe, choose **Move to EEZ-X Safe** in payment review. This owner-approved internal
-transfer uses the shared bridge and does not consume the policy's payment budgets.
-See the [transfer procedure](docs/runbooks/treasury-shared-network.md#moving-funds-to-the-mirror-safe).
+After setup, **Get USDC from faucet** appears beside each Safe only when the
+configured token matches the current `TestUSDC` bytecode and bridge bindings.
+It is hidden for ordinary tokens and Ethereum-mainnet configurations. Clicking
+the L1 button calls `claim(safeL1)`; the L2 button calls `claimOnL2(safeL2)` through
+the normal bridge. Each sends exactly **1,000 test tokens**, with a normal wallet
+confirmation and gas paid on Chiado. Each Safe has its own claim journal and pending button. The other faucet and
+payment controls remain usable; wallet requests are sequenced to avoid reusing
+an L1 nonce. Both claims remain recoverable after reload. No separate faucet screen is part of setup.
 
-The [shared-network setup](docs/runbooks/treasury-shared-network.md) reuses verified
-Safe infrastructure and batches application deployment and Safe configuration.
-Existing Safes retain their quorum requirements. Reloading preserves confirmed
-deployments and pending requests; each batch shows its contracts and calls before
-approval. Setup does not fund either Safe.
-**Start new treasury** returns to the Safe chooser with the same connected wallet:
-enter an existing L1 Safe and deploy or connect its EEZ-X mirror. There is no
-archive collection or download step. Pending setup, payment and owner-change
-requests must be resolved first. See the
-[restart procedure](docs/runbooks/treasury-shared-network.md#start-a-new-treasury-with-the-same-wallet).
+The contribution slider includes **25%**, **50%**, and **75%** presets for the
+EEZ-X share. They preserve the exact total, use the same balance/allowance checks
+as the slider, and lock when the payment is reviewed.
 
-The [isolated treasury launcher](tests/integration/README.md#connected-treasury-ui)
-opens **Payments** in the same hidden tab. Its fixture deploys and funds both
-Safes, the owner adapter, payment policy, official allowance modules and a test
-bridge pair. Each Safe grants 100 USDC per ten minutes; the policy enforces 150
-across both. The UI reads actual holdings and counters, collects EIP-712 owner
-approvals and submits through Composer. **Start from** selects the Safe signing
-domain and nonce; the split control sets each Safe's contribution.
+Setup retains its progress bar, chain and spending-limit context, current owner
+list, approval badges, Safe nonce, wallet/gas guidance and transaction history.
+The final step distinguishes L2 signatures from L1 submission and reports
+validation, gas estimation and Composer quoting before the wallet opens.
+**Change setup** is available before the first submission. **Start new treasury**
+archives the selected journal and verification requests before returning to the
+chooser; pending deployments, payments, owner changes or claims prevent restart.
 
-Enter the rehearsal sequence in the form: pay 40 on EEZ-X, pay 110 to the L1
-recipient with 100 from its local Safe and 10 from EEZ-X, then try another 1.
-After the next reset, a 10% rule pays 30 from the remaining combined 300; a
-110-USDC payment to EEZ-X then uses 100 locally and 10 from L1. Rule approvals
-bind the percentage, and the UI distinguishes estimates from execution results.
-These fixtures use six-decimal test tokens with bridge backing. Their funding
-belongs to the isolated harness, not normal dashboard setup.
+Source publication counts full explorer verification separately from exact
+Sourcify matches and partial explorer matches. Verification-only supplemental
+factory inputs live under `verification/supplemental/`, identified by their
+content hashes and recompiled in integration checks. They do not change the
+active deployment release or reinterpret saved setup journals.
 
-**Owner demo** retains the fixture's value-setting action. The invoice test
-requires explicit merchant acceptance after both payment legs and compares
-rollback evidence. **Payment history** retains this browser's payment attempts
-across reloads, including settled payments, preparation rejections, verified
-rollbacks and unresolved requests. Expanded entries show the actual split and
-transaction/block links. Submitted outcomes are rechecked on reload; missing
-evidence remains unresolved. See the
-[history scope and validation](docs/audits/2026-10-20-treasury-history/README.md).
-Use `npm run dev:treasury -- --runtime /path/to/rollupX` and follow the printed
-URL and linked wallet/setup instructions. This launcher keeps its private chain
-state separate from the normal dashboard networks.
+The current testnet profile pins the public dashboard's chain checkpoints,
+protocol implementations and normal bridge bytecode. A zero bridge counterpart
+override means the same bridge address on the other chain, matching the normal
+bridge implementation. Policies validate that effective counterpart during
+construction and activation; payments do not repeat those setup checks.
 
-For the full wallet and Safe-app walkthrough, use the
-[treasury rehearsal runbook](docs/runbooks/treasury-rehearsal.md).
-`npm run treasury:safe -- start "$TREASURY_RUN/ui-session.json"` attaches a
-pinned local Safe application and indexer to that devnet. The dashboard remains
-the payment/signing interface; **Open L1 Safe** handles owner administration.
+Deployment and claim requests are saved before the wallet sends. Reloading keeps
+unresolved requests locked and verifies their exact transaction identity before
+advancing. L2 claims require canonical normal-bridge incoming-call evidence and
+the exact 1,000-token mint. Mainnet and testnet setups use separate, asset-bound
+paired journals. Legacy journals are neither resumed nor overwritten, legacy
+manifests cannot open signing controls, and historical artifact bundles remain
+verification evidence only. The old Chiado infrastructure deployer is retired.
 
-The [One treasury, two Safes proposal](docs/proposals/one-treasury-two-safes.md)
-contains the full design, demo script and development plan. Treasury demo
-application contracts and tooling live alongside the UI in this repository;
-the runtime and core protocol remain external dependencies at the revisions
-recorded in the proposal.
+The [contract project](contracts/README.md) documents `PairedTreasuryPolicy`,
+`L1Owners`, `TreasuryBootstrap`, and the fixed `TestUSDC` faucet. The current release
+also contains the standard Safe/AllowanceModule dependencies, `Bridge`, and
+`WrappedToken`. Run `npm run test:contracts` after initializing the submodules.
+`node tests/integration/treasury-paired-setup.mjs` exercises genuine packaged
+planner batches, both Safe approval batches, activation and all four payment
+routes on an isolated Anvil EVM with read-through managers. It does not prove
+native EEZ relay or rollback behavior. The native `--ui` fixture remains gated
+pending migration; older runbooks and audit records describe historical flows.
 
-The [contract project](contracts/README.md) includes `L1Owners`, `TreasuryPolicy`, `TreasuryBridge`,
-pinned Safe/AllowanceModule/EEZ sources, contract tests and frontend signature
-helpers. Run `npm run test:contracts` after initializing its submodules. The
-[isolated browser integration](tests/integration/README.md#browser-integration)
-checks owner verification, the 40 / 110 / rejected 1 sequence, a next-period
-10% rule paying 30, and a 110-USDC split to EEZ-X through the real Composer, proof
-signer and independent follower. The invoice scenario additionally checks an actual L1 inclusion failure and a distinct preparation rejection; see its [validation record](docs/audits/2026-10-20-treasury-invoices/README.md). See the [rule validation and remaining limits](docs/audits/2026-10-20-treasury-rules/README.md).
+`npm run test:treasury:browser` drives all six setup steps through sandboxed
+Chromium with real planner calldata, contracts and Safe owner signatures. It
+checks wallet cancellation and reloads every pending step before confirming it.
+Its final L1 alias request is verified but executed directly on logical L2 in
+the single-EVM fixture; native transport and settlement need the native suite.
 
 Transaction history uses network logos for the route, labels transaction links
 “L1 tx:” and “L2 tx:”, and shows linked L1/L2 blocks in their own column.
@@ -517,6 +505,18 @@ npm run dev
 Open <http://127.0.0.1:8080/dashboard/>. The generated `.runtime/config.json` is ignored by
 Git.
 
+To test the production build with the same runtime configuration:
+
+```bash
+npm run build
+EEZ_UI_RUNTIME_CONFIG=.runtime/config.json npm run preview -- --host 127.0.0.1 --port 8083 --strictPort
+```
+
+Preview serves the browser configuration and proxies RPC/Composer requests to
+the configured upstream paths, including path-based public gateways. Public
+gateway URLs are suitable for a local preview; a deployment on that gateway's
+own server must retain its internal upstream configuration to avoid proxy loops.
+
 ## Cross-chain fee quotes
 
 Enable quoting separately for each source chain in the existing deployment `.env`:
@@ -666,7 +666,20 @@ under the ignored `.runtime/trace-decoder/` directory.
 
 Install the pinned Playwright dependency and Chromium once with `npm ci` and
 `npx playwright install chromium`. `npm test` covers the SDK/payment boundary and
-existing unit regressions. To test a built preview in two terminals:
+existing unit regressions. Browser tests explicitly enable Chromium's sandbox.
+On Ubuntu systems that restrict unprivileged user namespaces, an existing Google
+Chrome installation can supply its sandbox helper:
+
+```bash
+export CHROME_DEVEL_SANDBOX=/opt/google/chrome/chrome-sandbox
+```
+
+Use only an installed, root-owned sandbox helper; do not disable AppArmor or add
+`--no-sandbox` to make the tests pass. See the
+[Chromium sandbox guidance](https://chromium.googlesource.com/chromium/src/+/main/docs/security/apparmor-userns-restrictions.md).
+Without a usable sandbox the tests fail at browser launch.
+
+To test a built preview in two terminals:
 
 ```bash
 npm run build
@@ -795,8 +808,8 @@ unavailability remains a blocking error; no gas limit is invented. Upgrade
 Composer before relying on these hints: older unstructured errors still surface
 immediately, and no submission or wallet signature is retried.
 
-Wallets may apply their own gas policy. Rabby's saved Chiado RPC must use
-`https://eez.asuscomm.com/composer/l1` for cross-chain estimation.
+Wallets may apply their own gas policy. For cross-chain estimation, set Rabby's
+Chiado RPC to the L1 Composer URL shown by your current dashboard deployment.
 
 Bridge regression checks include:
 

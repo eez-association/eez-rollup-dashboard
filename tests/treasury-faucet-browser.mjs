@@ -12,7 +12,7 @@ const fixture = { owner: address(100), faucet: address(110), hash: hash('request
 // This fixture tests explicit reload recovery; HMR reconnects must not reload it mid-assertion.
 const server = await createServer({ configFile: false, envFile: false, plugins: [react()], server: { host: '127.0.0.1', port: 0, hmr: false }, base: '/' });
 await server.listen(); const origin = `http://127.0.0.1:${server.httpServer.address().port}`;
-const browser = await chromium.launch({ headless: true, args: ['--no-sandbox'] });
+const browser = await chromium.launch({ headless: true, chromiumSandbox: true });
 const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
 const page = await context.newPage(); page.setDefaultTimeout(18000);
 const errors = [], passed = [];

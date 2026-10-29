@@ -29,7 +29,7 @@ test('direct fee simulation decodes verified calls, explains parent reverts, and
   const requests = [], explorerAddresses = [], errors = [], broadcasts = [];
   let browser, mode = 'success';
   try {
-    browser = await chromium.launch({ headless: true });
+    browser = await chromium.launch({ headless: true, chromiumSandbox: true });
     const page = await browser.newPage({ viewport: { width: 1440, height: 1100 } });
     page.on('pageerror', error => errors.push(error.message));
     const origin = `http://127.0.0.1:${server.httpServer.address().port}`;

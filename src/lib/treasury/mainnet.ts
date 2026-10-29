@@ -1,3 +1,5 @@
+import pairedTestnet from './paired-testnet-network.json' with { type: 'json' };
+import { pairedPolicyAbi } from "./pairedPolicy.ts";
 import { paymentVersion, verifiesL1Initiation, verifiesReverseFunding } from "./savedPayments.ts";
 import { decodeFunctionResult, encodeFunctionData, isAddress, keccak256, parseAbi, toHex, zeroAddress } from "viem";
 import type { Abi, Address, Hex } from "viem";
@@ -27,7 +29,7 @@ function bound(c: TreasuryConfig, chain: "l1" | "l2", a: Address) {
  * Hashes are reviewed operator inputs; matching them is not a security audit. */
 export function parseMainnetBindings(c: TreasuryConfig) {
   const m = c.mainnet, p = c.payments;
-  check(c.l1.chainId === 1 && c.l2.chainId > 1 && c.l2.chainId !== 906969 && c.l2.chainId !== 10200,
+  check(c.l1.chainId === 1 && c.l2.chainId > 1 && c.l2.chainId !== 906969 && c.l2.chainId !== pairedTestnet.chains.l2.chainId && c.l2.chainId !== 10200,
     "Mainnet requires Ethereum and a separately configured Ethereum-anchored EEZ network");
   check(m && Number.isSafeInteger(m.rollupId) && m.rollupId > 0 && address(m.usdcImplementation), "Missing mainnet deployment bindings");
   check(c.safeImplementations && !c.action && p && !p.invoiceMerchant && !p.invoiceControl,
@@ -83,23 +85,28 @@ export async function validateMainnet(client: TreasuryClient) {
   check(blocks.every(b => b?.hash && b.number), "Mainnet validation blocks are unavailable");
   const tags = { l1: blocks[0]!.number, l2: blocks[1]!.number };
   const codes = new Map<string, Hex>();
-  for (const b of c.code) {
+  await Promise.all(c.code.map(async b => {
     const code = await client.rpc<Hex>(c[b.chain].rpc, "eth_getCode", [b.address, tags[b.chain]]);
     check(code !== "0x" && keccak256(code) === b.hash, "Mainnet contract code changed");
     codes.set(`${b.chain}:${b.address.toLowerCase()}`, code);
-  }
+  }));
   const slot = async (chain: "l1" | "l2", proxy: Address, position: Hex, expected: Address) => {
     const value = await client.rpc<Hex>(c[chain].rpc, "eth_getStorageAt", [proxy, position, tags[chain]]);
     check(/^0x[\da-f]{64}$/i.test(value) && same(`0x${value.slice(-40)}`, expected), "Mainnet proxy implementation changed; review its new code before reconnecting");
   };
-  await slot("l1", p.tokenL1, USDC_IMPLEMENTATION_SLOT, m.usdcImplementation);
-  for (const chain of ["l1", "l2"] as const)
-    await slot(chain, chain === "l1" ? c.safeL1 : c.safeL2, toHex(0, { size: 32 }), c.safeImplementations![chain]);
-  for (const b of c.protocol!) await slot(b.chain, b.proxy, EIP1967_IMPLEMENTATION_SLOT, b.implementation);
+  await Promise.all([
+    slot("l1", p.tokenL1, USDC_IMPLEMENTATION_SLOT, m.usdcImplementation),
+    ...(["l1", "l2"] as const).map(chain => slot(chain, chain === "l1" ? c.safeL1 : c.safeL2, toHex(0, { size: 32 }), c.safeImplementations![chain])),
+    ...c.protocol!.map(b => slot(b.chain, b.proxy, EIP1967_IMPLEMENTATION_SLOT, b.implementation)),
+    ...(["l1", "l2"] as const).map(chain => {
+      const implementation = m.bridgeImplementations[chain];
+      return slot(chain, chain === "l1" ? p.bridgeL1 : p.bridgeL2, EIP1967_IMPLEMENTATION_SLOT,
+        implementation.kind === "eip1967" ? implementation.address : zeroAddress);
+    }),
+  ]);
   const { default: artifacts } = await import("./deployment-artifacts.json", { with: { type: "json" } });
   for (const chain of ["l1", "l2"] as const) {
     const bridge = chain === "l1" ? p.bridgeL1 : p.bridgeL2, implementation = m.bridgeImplementations[chain];
-    await slot(chain, bridge, EIP1967_IMPLEMENTATION_SLOT, implementation.kind === "eip1967" ? implementation.address : zeroAddress);
     const executable = implementation.kind === "eip1967" ? implementation.address : bridge;
     const code = codes.get(`${chain}:${executable.toLowerCase()}`)!;
     for (const name of ["ConfiguredTreasuryBridge", "BootstrapTreasuryBridge", "SharedTreasuryBridge"] as const) {
@@ -115,9 +122,9 @@ export async function validateMainnet(client: TreasuryClient) {
   const [symbol, decimals, paused, l1Rollup, l2Rollup, policyRollup, origin, authority, limitL1, limitL2] = await Promise.all([
     read("l1", p.tokenL1, usdcAbi, "symbol"), read("l1", p.tokenL1, usdcAbi, "decimals"), read("l1", p.tokenL1, usdcAbi, "paused"),
     read("l1", c.registry, networkAbi, "MAINNET_ROLLUP_ID"), read("l2", c.manager, networkAbi, "ROLLUP_ID"),
-    read("l2", p.policy, policyAbi, "rollupId"), read("l2", p.bridgeL2, networkAbi, "wrappedTokenInfo", [p.tokenL2]),
+    read("l2", p.policy, p.pair ? pairedPolicyAbi : policyAbi, p.pair ? "l2RollupId" : "rollupId"), read("l2", p.bridgeL2, networkAbi, "wrappedTokenInfo", [p.tokenL2]),
     read("l2", p.tokenL2, networkAbi, "BRIDGE"),
-    read("l1", p.moduleL1, networkAbi, "getTokenAllowance", [c.safeL1, p.bridgeExecutorL1!, p.tokenL1]),
+    read("l1", p.moduleL1, networkAbi, "getTokenAllowance", [c.safeL1, p.pair?.policyL1 ?? p.bridgeExecutorL1!, p.tokenL1]),
     read("l2", p.moduleL2, networkAbi, "getTokenAllowance", [c.safeL2, p.policy, p.tokenL2]),
   ]);
   for (const limit of [limitL1, limitL2] as bigint[][])
@@ -126,10 +133,10 @@ export async function validateMainnet(client: TreasuryClient) {
   check(l1Rollup === 0n && l2Rollup === BigInt(m.rollupId) && policyRollup === BigInt(m.rollupId), "Mainnet rollup binding changed");
   const [original, source] = origin as [Address, bigint];
   check(same(original, ETHEREUM_USDC) && source === 0n && same(authority as Address, p.bridgeL2), "Mainnet wrapped token origin or mint authority changed");
-  for (const chain of ["l1", "l2"] as const) {
+  await Promise.all((["l1", "l2"] as const).map(async (chain, i) => {
     const again = await client.rpc<Block | null>(c[chain].rpc, "eth_getBlockByNumber", [tags[chain], false]);
-    check(again?.hash === blocks[chain === "l1" ? 0 : 1]!.hash, "Mainnet state changed during verification; retry");
-  }
+    check(again?.hash === blocks[i]!.hash, "Mainnet state changed during verification; retry");
+  }));
   return { l1: blocks[0]!, l2: blocks[1]! };
 }
 

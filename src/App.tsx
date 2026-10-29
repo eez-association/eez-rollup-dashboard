@@ -128,6 +128,7 @@ export function App() {
   const [visualizerRoute, setVisualizerRoute] = useState(() => window.location.hash);
   const visualizerParams = new URLSearchParams(visualizerRoute.split("?")[1] ?? "");
   const [dashboardTab, setDashboardTab] = useState<DashboardTab>(() => getInitialTab(treasuryVisible));
+  const [returnToTreasury, setReturnToTreasury] = useState(false);
   useEffect(() => {
     document.title = `${view === "debug" ? "Quote Debugger" : view === "visualizer" ? "Execution Visualizer" : view === "monitor" ? "Network Monitor" : dashboardTab === "counter-demo" ? "Counter Demo" : dashboardTab === "treasury-demo" ? "Treasury Demo" : dashboardTab === "cow-demo" ? "CoW Light Demo" : "Dashboard"} — ${config.rollupName}`;
   }, [view, dashboardTab, configLoaded]);
@@ -137,6 +138,19 @@ export function App() {
     setDashboardTab(tab);
     window.location.hash = tab === "dashboard" ? "" : `#/${tab}`;
   }, []);
+
+  const openTreasuryGasBridge = (destination: "l1" | "l2") => {
+    const current = latestBridgeState.current;
+    if (!["idle", "confirmed", "failed"].includes(current.phase) || current.phase === "failed" && current.txHash) {
+      throw new Error("A bridge transfer is still unresolved. Open Bridge & Calls and finish checking it before starting another.");
+    }
+    bridgeHook.setDirection(destination === "l2" ? "l1-to-l2" : "l2-to-l1");
+    bridgeHook.setAsset("eth");
+    bridgeHook.setDestination("");
+    bridgeHook.setGasOverride(null);
+    setReturnToTreasury(true);
+    switchTab("dashboard");
+  };
 
   const navigate = useCallback((v: string) => {
     setView(v);
@@ -359,10 +373,14 @@ export function App() {
         composerConnection={wallet.composerConnection}
         checkingComposer={wallet.checkingComposer}
         onRecheckComposer={wallet.recheckComposer}
+        onConnectComposer={wallet.connectComposer}
+        connectingComposer={wallet.connectingComposer}
+        composerSetupMessage={wallet.composerSetupMessage}
       />
 
       {wallet.isConnected && <ComposerStatus connection={wallet.composerConnection}
-        checking={wallet.checkingComposer} onRecheck={wallet.recheckComposer} walletName={wallet.walletName} variant="notice" />}
+        checking={wallet.checkingComposer} onRecheck={wallet.recheckComposer} walletName={wallet.walletName} variant="notice"
+        onConnectNetwork={wallet.connectComposer} connectingNetwork={wallet.connectingComposer} setupMessage={wallet.composerSetupMessage} />}
 
       {view === "monitor" ? (
         <NetworkMonitorView />
@@ -417,6 +435,12 @@ export function App() {
             {dashboardTab === "dashboard" && (
               <div className={styles.dashboardGrid}>
                 <section className={styles.bridgeColumn} aria-label="Bridge transfers">
+                  {returnToTreasury && treasuryVisible && <div className={styles.feeNotice} role="region" aria-label="Safe setup funding">
+                    <p>Your Safe setup is saved. Bridge native currency to your wallet, then return to continue.</p>
+                    <button type="button" className="btn btn-outline btn-sm" onClick={() => {
+                      setReturnToTreasury(false); switchTab("treasury-demo");
+                    }}>Return to Safe setup</button>
+                  </div>}
                   <BridgePanel
                     state={bridgeHook.state}
                     recentTokens={bridgeHook.recentTokens}
@@ -537,7 +561,7 @@ export function App() {
 
             {treasuryVisible && dashboardTab === "treasury-demo" && (
               <Suspense fallback={<p role="status">Loading treasury preview…</p>}>
-                <TreasuryDemo wallet={wallet} ready={configLoaded} />
+                <TreasuryDemo wallet={wallet} ready={configLoaded} onBridgeGas={openTreasuryGasBridge} />
               </Suspense>
             )}
 

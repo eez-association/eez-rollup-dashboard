@@ -2,9 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { encodeEventTopics, encodeAbiParameters, parseAbi, parseAbiParameters } from 'viem';
-import { VerificationWorker, creations, loadBuilds, publicJob } from '../scripts/verification/worker.mjs';
-import { appendSourceRequest, sourceRequests, deliverSourceRequest, retainSourceRequests } from '../src/lib/treasury/sourceVerification.ts';
+import { encodeEventTopics, encodeAbiParameters, parseAbi, parseAbiParameters, toFunctionSelector, zeroAddress } from 'viem';
+import { VerificationWorker, creations, loadBuilds, loadAdditionalSources, publicJob } from '../scripts/verification/worker.mjs';
+import { appendSourceRequest, sourceRequests, deliverSourceRequest, retainSourceRequests, dependencySourceRequests } from '../src/lib/treasury/sourceVerification.ts';
+import { blockscoutApiUrl, verificationEndpoint } from '../scripts/verification/network.mjs';
 const build = 'ab'.repeat(32), tx = '0x'+'12'.repeat(32), blockHash = '0x'+'34'.repeat(32), address = '0x'+'56'.repeat(20);
 const runtime = '0x60006000556001a164736f6c6343000822000a';
 const artifact = { runtime, bytecode: '0x6000', immutables: [], immutableGroups: [], input: 'source', compiler: '0.8.34+commit.80d5c536', target: 'A.sol:A' };
@@ -20,7 +21,7 @@ function fixture(t, change = {}) {
     if (url === 'https://rpc.invalid') {
       const {method,params} = JSON.parse(options.body);
       const results = { eth_chainId:'0x'+state.chainId.toString(16), eth_getTransactionReceipt: state.receipt,
-        eth_getBlockByNumber: {hash:state.block}, eth_getCode: params[1]==='0x1f'?state.parentCode:state.code };
+        eth_getBlockByNumber: {number:'0x20',hash:state.block}, eth_getCode: params[1]==='0x1f'?state.parentCode:state.code };
       return Response.json({result:results[method]});
     }
     if(state.fail) return new Response('',{status:503});
@@ -31,6 +32,58 @@ function fixture(t, change = {}) {
   const config = { directory, builds:{[build]:manifest}, networks:{[state.chainId]:{rpc:'https://rpc.invalid',explorerApi:'https://explorer.invalid/api'}}, fetcher, now:()=>state.time };
   return {state,config,worker:new VerificationWorker(config)};
 }
+test('explorer website roots and explicit API bases normalize to the same Blockscout endpoint', () => {
+  for (const path of ['/explorer', '/explorer/', '/explorer/api', '/explorer/api/', '/explorer/api/v2'])
+    assert.equal(blockscoutApiUrl(`https://example.invalid${path}`, '', 'http://127.0.0.1:8083'), 'https://example.invalid/explorer/api');
+  assert.equal(blockscoutApiUrl('', 'https://example.invalid', ''), 'https://example.invalid/api');
+  assert.equal(blockscoutApiUrl('', '', 'http://127.0.0.1:8083'), '');
+});
+test('verification routes preserve configured API query parameters without corrupting the path', () => {
+  const base = blockscoutApiUrl('https://example.invalid/explorer?key=fixture#ignored', '', '');
+  const url = new URL(verificationEndpoint(base, 'v2/smart-contracts/0x1234'));
+  assert.equal(url.pathname, '/explorer/api/v2/smart-contracts/0x1234');
+  assert.equal(url.searchParams.get('key'), 'fixture'); assert.equal(url.hash, '');
+});
+test('accepted explorer publications stay on short polls and manual retry preserves the job', async t => {
+  const { state, worker } = fixture(t), job = worker.enqueue(request);
+  job.attempts = 12; await worker.tick();
+  assert.equal(job.nextAttempt - state.time, 15000);
+  const copy = JSON.stringify(job.contracts); worker.retry(job.id);
+  assert.equal(job.nextAttempt, 0); assert.equal(job.attempts, 0); assert.equal(JSON.stringify(job.contracts), copy);
+  worker.processing = job.id; job.nextAttempt = 999; worker.retry(job.id); assert.equal(job.nextAttempt, 999);
+});
+test('supplemental sources verify factory children without changing the requested deployment build', async t => {
+  const sources = loadAdditionalSources('verification/supplemental'); assert(sources.length);
+  const a = sources.find(a => a.target.endsWith(':CrossChainProxy')), { state, config } = fixture(t, { code: a.runtime });
+  const worker = new VerificationWorker({ ...config, additionalSources: sources }), job = await worker.admit(request);
+  assert.equal(job.request.build, build); await worker.tick();
+  assert.equal(job.contracts[0].name, 'CrossChainProxy'); assert.equal(job.contracts[0].status, 'pending');
+  const submitted = JSON.parse(await state.posts[0].body.get('files[0]').text()); assert.deepEqual(submitted, a.sourceInput);
+});
+test('RollupX source verification accepts the current bridge getter and publishes exact retained inputs on L2', async t => {
+  const sources=loadAdditionalSources('verification/supplemental');
+  const source=sources.find(a=>a.target==='src/periphery/Bridge.sol:Bridge'&&a.sourceInput.sources['src/periphery/Bridge.sol'].content.includes('IEEZ public EEZContract'));
+  assert(source);
+  const {state,config}=fixture(t,{chainId:696991,code:source.runtime});
+  config.networks[696991].peerRollupId=0;
+  const worker=new VerificationWorker({...config,additionalSources:sources}), selectors=[];
+  worker.rpc=async(_network,method,params=[])=>{
+    if(method==='eth_chainId')return '0xaa29f';
+    if(method==='eth_getBlockByNumber')return {number:'0x20',hash:blockHash};
+    if(method==='eth_getCode')return source.runtime;
+    assert.equal(method,'eth_call');selectors.push(params[0].data);
+    // The bare implementation has no configured EEZ binding; verification must
+    // still publish it without requiring the removed manager() getter.
+    assert([toFunctionSelector('EEZContract()'),toFunctionSelector('canonicalBridgeAddress()')].includes(params[0].data));
+    return encodeAbiParameters([{type:'address'}],[zeroAddress]);
+  };
+  const job=await worker.admit({build,chainId:696991,address});
+  await worker.tick();
+  assert(selectors.includes(toFunctionSelector('EEZContract()')));
+  assert.equal(job.request.chainId,696991);
+  assert(state.posts.some(post=>post.url.includes(`/smart-contracts/${address}/verification/via/standard-input`)));
+  assert.equal(job.contracts[0].name,'Bridge');
+});
 test('receipt discovery includes nested creation, Safe factories, aliases, wrapped tokens and claim transfers', () => {
   const abis = parseAbi(['event Created(uint256 indexed index,address indexed target,bytes32 initHash)',
     'event CrossChainProxyCreated(address indexed proxy,address indexed originalAddress,uint64 indexed originalRollupId)',
@@ -90,16 +143,17 @@ test('the worker admits only retained builds, configured chains and transaction 
 test('release bundles retain compiler inputs for every new deployment artifact',()=>{
   const builds=loadBuilds('verification/builds');const current=JSON.parse(readFileSync('src/lib/treasury/current-build.json')).build;
   const bundle=JSON.parse(readFileSync(`src/lib/treasury/builds/${current}.json`));
-  assert.equal(Object.keys(bundle.contracts).length,18);
+  assert.deepEqual(Object.keys(bundle.contracts).sort(), ['Safe','SafeL2','SafeProxyFactory','SafeProxy','AllowanceModule','MultiSendCallOnly',
+    'L1Owners','TreasuryBootstrap','PairedTreasuryPolicy','TestUSDC','WrappedToken','Bridge'].sort());
   assert.equal(bundle.contracts.InvoiceMerchant, undefined);
-  for (const name of ['TreasuryPolicy','StandardBridgeTreasuryPolicy']) {
+  for (const name of ['PairedTreasuryPolicy']) {
     const abi=bundle.contracts[name].abi;
-    assert.equal(abi.find(x=>x.type==='constructor').inputs.length,8);
+    assert.equal(abi.find(x=>x.type==='constructor').inputs.length,5);
     assert(abi.some(x=>x.name==='paySplit'));
     assert(!abi.some(x=>['payRule','RulePaid','BPS_DENOMINATOR','InvalidFraction'].includes(x.name)));
     assert(!abi.some(x=>x.name==='pay' || x.name==='payRouted'));
     assert(!abi.some(x=>/invoice/i.test(x.name??'')));
-    if(name==='StandardBridgeTreasuryPolicy')assert(!abi.some(x=>/aliasReader/i.test(x.name??'')));
+    for (const method of ['PAIR_VERSION','connectPeer','activate','payFromPeer']) assert(abi.some(x=>x.name===method));
   }
   for(const [name,a] of Object.entries(bundle.contracts)){const v=builds[current].contracts[name];assert.equal(a.runtime,v.runtime);assert.equal(a.bytecode,v.bytecode);assert(builds[current].inputs[v.input]);}
   assert(bundle.contracts.SafeProxyFactory.runtime.includes(bundle.contracts.SafeProxy.bytecode.slice(2)));
@@ -112,6 +166,7 @@ test('confirmation outbox ignores historical and incomplete setup, survives deli
   const storage={length:entries.size,key:i=>[...entries.keys()][i],getItem:key=>entries.get(key)};
   assert.deepEqual(sourceRequests(storage),outbox);
   await assert.rejects(deliverSourceRequest(outbox[0],'/jobs',async()=>new Response('',{status:503})),/retry automatically/);
+  await assert.rejects(deliverSourceRequest(outbox[0],'/jobs',async()=>Response.json({error:'Wait for a successful canonical receipt'},{status:400})),/successful canonical receipt.*retry automatically/);
   assert.deepEqual(sourceRequests(storage),outbox);
 });
 
@@ -195,4 +250,59 @@ test('capacity pressure cannot evict a completed job while canonical rechecking 
   try { await assert.rejects(worker.admit({...request,transactionHash:'0x'+'22'.repeat(32)}),/queue is full/); }
   finally {release();await running;}
   assert.equal(worker.jobs.size,1);assert(worker.jobs.has(job.id));
+});
+
+test('existing contracts are admitted by address without requiring a deployment receipt',async t=>{
+ const {state,worker,config}=fixture(t);state.receipt=null;
+ const byAddress={build,chainId:request.chainId,address};
+ const job=await worker.admit(byAddress);assert.equal(job.status,'queued');assert.equal(worker.jobs.size,1);
+ const count=state.calls.length;assert.equal(await worker.admit(byAddress),job);assert.equal(state.calls.length,count);
+ await worker.tick();assert.equal(job.contracts[0].name,'A');assert.equal(state.posts.length,1);
+ const resumed=new VerificationWorker(config);state.explorer={is_verified:true,is_partially_verified:false};state.time+=16000;
+ await resumed.tick();assert.equal(resumed.jobs.get(job.id).status,'verified');
+});
+test('address requests cannot publish unknown or mismatched bytecode or consume capacity',async t=>{
+ const {state,worker}=fixture(t,{code:runtime+'00'});
+ const job=await worker.admit({build,chainId:request.chainId,address});
+ assert.equal(job.status,'source-unavailable');assert.equal(worker.jobs.size,0);assert.equal(state.posts.length,0);
+ state.explorer={is_verified:true,is_partially_verified:false};
+ const verified=await worker.admit({build,chainId:request.chainId,address});
+ assert.equal(verified.status,'verified');assert.equal(worker.jobs.size,0);assert.equal(state.posts.length,0);
+ for(const invalid of [{build,chainId:request.chainId,address,transactionHash:tx},{build,chainId:request.chainId,address:'0x'+'00'.repeat(20)},{build,chainId:request.chainId,address:'https://example.com'}])assert.throws(()=>worker.enqueue(invalid));
+});
+test('address observations reject reorgs before publication',async t=>{
+ const f=fixture(t),fetcher=f.config.fetcher;
+ f.config.fetcher=async(url,options)=>{
+  if(url==='https://rpc.invalid'){
+   const r=JSON.parse(options.body);
+   if(r.method==='eth_getBlockByNumber'&&r.params[0]!=='latest')return Response.json({result:{number:'0x20',hash:tx}});
+  }
+  return fetcher(url,options);
+ };
+ const worker=new VerificationWorker(f.config);
+ await assert.rejects(worker.admit({build,chainId:request.chainId,address}),/observation changed/);
+ assert.equal(worker.jobs.size,0);assert.equal(f.state.posts.length,0);
+});
+test('known proxy layouts discover their implementation on the same canonical block',async t=>{
+ const f=fixture(t),implementation='0x'+'78'.repeat(20),fetcher=f.config.fetcher;
+ f.config.builds={[build]:{...manifest,contracts:{A:{...artifact,target:'Proxy.sol:EEZProxy'}}}};
+ f.config.fetcher=async(url,options)=>{
+  if(url==='https://rpc.invalid'){
+   const r=JSON.parse(options.body);
+   if(r.method==='eth_getStorageAt'){assert.equal(r.params[2],'0x20');return Response.json({result:'0x'+'00'.repeat(12)+implementation.slice(2)});}
+   if(r.method==='eth_getCode'&&r.params[0]===implementation)return Response.json({result:'0x6001'});
+  }
+  return fetcher(url,options);
+ };
+ const worker=new VerificationWorker(f.config),snapshot=await worker.addressSnapshot({build,chainId:request.chainId,address},f.config.networks[request.chainId]);
+ assert.deepEqual(snapshot.contracts.map(c=>c.address),[address,implementation]);
+ assert.equal(snapshot.receipt.blockHash,blockHash);
+});
+test('saved and configured treasuries automatically include reused dependencies without changing journals',()=>{
+ const other='0x'+'78'.repeat(20),c={version:1,environment:'dashboard-testnet',payments:{pair:{version:1}},l1:{chainId:10200},l2:{chainId:906969},code:[{chain:'l1',address},{chain:'l2',address:other},{chain:'l1',address}],safeImplementations:{l2:other}};
+ assert.deepEqual(dependencySourceRequests(c,build),[{build,chainId:10200,address},{build,chainId:906969,address:other}]);
+ assert.deepEqual(dependencySourceRequests({...c,environment:'isolated-devnet'},build),[]);
+ const map=new Map([['eez:treasury:paired-setup:test',JSON.stringify({build})],['eez:treasury:paired-setup:test:manifest',JSON.stringify(c)]]),before=JSON.stringify([...map]);
+ const storage={length:map.size,key:i=>[...map.keys()][i],getItem:k=>map.get(k)??null};
+ assert.deepEqual(sourceRequests(storage),dependencySourceRequests(c,build));assert.equal(JSON.stringify([...map]),before);
 });

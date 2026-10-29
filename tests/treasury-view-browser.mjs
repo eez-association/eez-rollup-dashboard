@@ -25,7 +25,7 @@ const settled = { kind: 'settled', hash: intent.hash, block: '262', detail: 'Set
   contributions: { fromL1: p.fromL1, fromL2: '17740000' } };
 const server = await createServer({ configFile: false, envFile: false, cacheDir: resolve(directory, 'node_modules/.vite'), plugins: [react()], server: { host: '127.0.0.1', port: 0 }, base: '/' });
 await server.listen(); const origin = `http://127.0.0.1:${server.httpServer.address().port}`;
-const browser = await chromium.launch({ headless: true, args: ['--no-sandbox'] });
+const browser = await chromium.launch({ headless: true, chromiumSandbox: true });
 const context = await browser.newContext({ viewport: { width: 1440, height: 1100 }, permissions: ['clipboard-read', 'clipboard-write'] });
 const page = await context.newPage(); page.setDefaultTimeout(15000);
 const errors = [], passed = [], requests = [];

@@ -65,6 +65,10 @@ async function main() {
   let lastProgress = 0;
   const trace = await decodeCrossChainTrace({
     ...config, fetch: boundedFetch, scanConcurrency: 2,
+    metadataBudget: () => ({
+      timeoutMs: Math.max(0, workerData.deadline - Date.now() - 250),
+      maxRequests: Math.max(0, workerData.maxRequests - requests),
+    }),
     originChain: request.chain === "auto" ? undefined : request.chain.toUpperCase(),
     expectedL1ChainId: request.chainIds.l1, expectedL2ChainId: request.chainIds.l2,
     onDiagnostic: item => {

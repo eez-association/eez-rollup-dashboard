@@ -11,7 +11,7 @@ import { toHex, encodeFunctionData, parseAbi } from 'viem';
 const exec = promisify(execFile);
 
 export async function browserScenario(f, session, directory) {
-  const browser = await chromium.launch({ headless: true, args: ['--no-sandbox'] });
+  const browser = await chromium.launch({ headless: true, chromiumSandbox: true });
   const context = await browser.newContext({ viewport: { width: 1440, height: 1100 } });
   // Forward this isolated fixture's HTTP through Playwright's request client.
   // Host interface churn otherwise causes Chromium ERR_NETWORK_CHANGED even on

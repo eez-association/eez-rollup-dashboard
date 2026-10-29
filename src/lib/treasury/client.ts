@@ -1,3 +1,6 @@
+import { treasuryRpc } from "./rpcTransport.ts";
+import pairedTestnet from './paired-testnet-network.json' with { type: 'json' };
+import { validatePairedPayments } from "./pairedPolicy.ts";
 import { readPaymentDeployment, paymentVersion, recordedPaymentTransaction, verifiesL1Initiation, verifiesReverseFunding } from "./savedPayments.ts";
 import type { RecordedPayment } from "./savedPayments.ts";
 import { verifyTransferHelper, transferRollup } from "./transfers.ts";
@@ -71,7 +74,7 @@ export function parseTreasuryConfig(value: unknown): TreasuryConfig {
   for (const [chain, address] of [["l1", c.safeL1], ["l2", c.safeL2], ["l2", c.adapter], ...(c.action ? [["l2", c.action] as const] : [])] as const)
     requireThat(c.code.some(b => b.chain === chain && same(b.address, address)), "Missing application code identity");
   if (c.environment !== "isolated-devnet") {
-    if (c.environment === "dashboard-testnet") requireThat(c.l1.chainId === 10200 && c.l2.chainId === 906969, "Unsupported dashboard testnet pair");
+    if (c.environment === "dashboard-testnet") requireThat(c.l1.chainId === pairedTestnet.chains.l1.chainId && c.l2.chainId === (c.payments?.pair ? pairedTestnet.chains.l2.chainId : 906969), "Unsupported dashboard testnet pair");
     requireThat(c.fees && /^[1-9]\d{0,77}$/.test(c.fees.maxTotalWei), "Dashboard treasury requires a fee reservation limit");
     requireThat(Array.isArray(c.protocol) && c.protocol.length === 2, "Shared treasury requires protocol implementation bindings");
     for (const chain of ["l1", "l2"] as const) {
@@ -98,10 +101,17 @@ export function parseTreasuryConfig(value: unknown): TreasuryConfig {
       requireThat(p.invoiceMerchant && url.origin === new URL(c.l2.rpc).origin && url.pathname === "/treasury-fixture/invoices" && !url.search && !url.hash && !url.username && !url.password, "Invalid invoice fixture endpoint");
     }
     requireThat(p.bridgeKind === undefined || p.bridgeKind === "standard", "Unsupported bridge profile");
-    if (p.bridgeKind === "standard") requireThat(verifiesL1Initiation(p) && verifiesReverseFunding(p) && p.safeL2Alias && isAddress(p.safeL2Alias)
-      && c.code.some(b => b.chain === "l1" && same(b.address, p.safeL2Alias!))
-      && p.bridgeExecutorL1 && isAddress(p.bridgeExecutorL1) && c.code.some(b => b.chain === "l1" && same(b.address, p.bridgeExecutorL1!)), "Missing standard bridge relay/executor identity");
-    else requireThat(p.safeL2Alias === undefined && p.bridgeExecutorL1 === undefined, "Unexpected mirror relay identity");
+    if (p.bridgeKind === "standard") {
+      requireThat(verifiesL1Initiation(p) && verifiesReverseFunding(p) && p.safeL2Alias && isAddress(p.safeL2Alias)
+        && c.code.some(b => b.chain === "l1" && same(b.address, p.safeL2Alias!)), "Missing standard bridge relay identity");
+      if (p.pair) {
+        requireThat([1, 2].includes(p.pair.version) && p.version === 2 && isAddress(p.pair.policyL1) && BigInt(p.pair.policyL1) > 1n
+          && isAddress(p.pair.peerProxyL2) && BigInt(p.pair.peerProxyL2) > 1n && !p.bridgeExecutorL1 && !p.predecessor && !p.aliasReaderL1 && !p.invoiceMerchant
+          && c.code.some(b => b.chain === "l1" && same(b.address, p.pair!.policyL1))
+          && c.code.some(b => b.chain === "l2" && same(b.address, p.pair!.peerProxyL2)), "Invalid paired policy identity");
+      } else requireThat(p.bridgeExecutorL1 && isAddress(p.bridgeExecutorL1)
+        && c.code.some(b => b.chain === "l1" && same(b.address, p.bridgeExecutorL1!)), "Missing standard bridge executor identity");
+    } else requireThat(p.pair === undefined && p.safeL2Alias === undefined && p.bridgeExecutorL1 === undefined, "Unexpected mirror relay identity");
     if (verifiesL1Initiation(p)) requireThat(c.l1.front && (!c.fees || /^[1-9]\d{0,77}$/.test(c.fees.l1MaxTotalWei ?? "")), "Missing L1 Composer or fee configuration");
     requireThat(p.decimals === 6 && p.period === 600 && p.globalLimit === "150000000" && (c.environment === "isolated-devnet" ? p.assetLabel === "Devnet USDC" : c.environment === "ethereum-mainnet" ? p.assetLabel === "USDC" : p.assetLabel === "Test USDC"), "Unsupported payment configuration");
     for (const key of ["policy", "alias", "tokenL1", "tokenL2", "moduleL1", "moduleL2", "bridgeL1", "bridgeL2", "recipient"] as const)
@@ -193,37 +203,45 @@ export class TreasuryClient {
   readonly config: TreasuryConfig;
   constructor(config: TreasuryConfig) { this.config = config; }
   async rpc<T>(url: string, method: string, params: unknown[] = []): Promise<T> {
-    const response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }), signal: AbortSignal.timeout(12_000) });
-    requireThat(response.ok, `Treasury RPC unavailable (${response.status})`);
-    const body = await response.json();
-    if (body.error) throw new Error(body.error.message || "Treasury RPC failed");
-    return body.result as T;
+    return treasuryRpc<T>(url, method, params);
   }
   async read(url: string, address: Address, abi: typeof safeAbi | typeof actionAbi | typeof l1OwnersAbi, functionName: "getOwners" | "getThreshold" | "nonce" | "VERSION" | "safeL1" | "manager" | "safe" | "value", tag = "latest"): Promise<unknown> {
     const result = await this.rpc<Hex>(url, "eth_call", [{ to: address, data: encodeFunctionData({ abi, functionName }) }, tag]);
     return decodeFunctionResult({ abi, functionName, data: result });
   }
+  private validation?: Promise<void>;
   async validate() {
+    if (this.validation) return this.validation;
+    const pending = this.validateBindings(); this.validation = pending;
+    try { await pending; } finally { if (this.validation === pending) this.validation = undefined; }
+  }
+  private async validateBindings() {
     const c = this.config;
     await Promise.all((["l1", "l2"] as const).map(async name => {
       const chain = c[name];
       const [id, genesis] = await Promise.all([this.rpc<Hex>(chain.rpc, "eth_chainId"), this.rpc<Block>(chain.rpc, "eth_getBlockByNumber", [chain.checkpoint?.number ?? "0x0", false])]);
       requireThat(BigInt(id) === BigInt(chain.chainId) && genesis && same(genesis.hash, chain.checkpoint?.hash ?? chain.genesis!), "Network identity changed; reconnect to the current deployment");
     }));
-    await Promise.all(c.code.map(async binding => {
-      const code = await this.rpc<Hex>(c[binding.chain].rpc, "eth_getCode", [binding.address, "latest"]);
-      requireThat(code !== "0x" && keccak256(code) === binding.hash, "Deployed contract code does not match this treasury deployment");
-    }));
-    for (const binding of c.protocol ?? []) {
-      const slot = await this.rpc<Hex>(c[binding.chain].rpc, "eth_getStorageAt", [binding.proxy,
-        "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc", "latest"]);
-      requireThat(same(`0x${slot.slice(-40)}`, binding.implementation), "Protocol implementation changed; revalidate this treasury deployment");
-    }
-    if (c.safeImplementations) for (const chain of ["l1", "l2"] as const) {
-      const slot = await this.rpc<Hex>(c[chain].rpc, "eth_getStorageAt", [chain === "l1" ? c.safeL1 : c.safeL2, "0x0", "latest"]);
-      requireThat(same(`0x${slot.slice(-40)}`, c.safeImplementations[chain]), "Safe implementation changed; revalidate this treasury deployment");
-    }
+    // Mainnet already checks code and proxy slots at fixed, reorg-checked
+    // blocks. Avoid a second sweep at latest for the same identities.
+    await Promise.all([
+      c.environment === "ethereum-mainnet" ? validateMainnet(this) : Promise.all([
+        ...c.code.map(async binding => {
+          const code = await this.rpc<Hex>(c[binding.chain].rpc, "eth_getCode", [binding.address, "latest"]);
+          requireThat(code !== "0x" && keccak256(code) === binding.hash, "Deployed contract code does not match this treasury deployment");
+        }),
+        ...(c.protocol ?? []).map(async binding => {
+          const slot = await this.rpc<Hex>(c[binding.chain].rpc, "eth_getStorageAt", [binding.proxy,
+            "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc", "latest"]);
+          requireThat(same(`0x${slot.slice(-40)}`, binding.implementation), "Protocol implementation changed; revalidate this treasury deployment");
+        }),
+        ...(!c.safeImplementations ? [] : (["l1", "l2"] as const).map(async chain => {
+          const slot = await this.rpc<Hex>(c[chain].rpc, "eth_getStorageAt", [chain === "l1" ? c.safeL1 : c.safeL2, "0x0", "latest"]);
+          requireThat(same(`0x${slot.slice(-40)}`, c.safeImplementations![chain]), "Safe implementation changed; revalidate this treasury deployment");
+        })),
+      ]),
+      this.validatePayments(),
+    ]);
     const [l1Version, l2Version, owners, threshold, remote, manager, actionSafe] = await Promise.all([
       this.read(c.l1.rpc, c.safeL1, safeAbi, "VERSION"), this.read(c.l2.rpc, c.safeL2, safeAbi, "VERSION"),
       this.read(c.l2.rpc, c.safeL2, safeAbi, "getOwners"), this.read(c.l2.rpc, c.safeL2, safeAbi, "getThreshold"),
@@ -233,12 +251,11 @@ export class TreasuryClient {
     requireThat(supportedSafeVersion(l1Version, "l1") && supportedSafeVersion(l2Version, "l2") && threshold === 1n && (owners as Address[]).length === 1
       && same((owners as Address[])[0]!, c.adapter) && same(remote as string, c.safeL1) && same(manager as string, c.manager)
       && same(actionSafe as string, c.safeL2), "Safe or owner-adapter binding changed");
-    await this.validatePayments();
-    if (c.environment === "ethereum-mainnet") await validateMainnet(this);
   }
   async validatePayments() {
     const c = this.config, p = c.payments;
     if (!p) return;
+    if (p.pair) return validatePairedPayments(this);
     const bindings = [["safeL1", c.safeL1], ["safeL2", c.safeL2], ["canonicalToken", p.tokenL1], ["wrappedToken", p.tokenL2], ["allowanceL2", p.moduleL2], ["bridge", p.bridgeL2]];
     for (const [name, expected] of bindings) requireThat(same(await contractRead(this, "l2", p.policy, paymentAbi, name!) as string, expected!), "Payment policy bindings changed");
     const [limit, period, d1, d2, m1, m2] = await Promise.all([
@@ -321,26 +338,38 @@ export class TreasuryClient {
     requireThat(count > 0 && count <= sorted.length, "Invalid L1 Safe threshold");
     return { source, owners: sorted, threshold: count, nonce: nonce as bigint, value: value as bigint, l1Block: String(BigInt(l1.number)), fingerprint: `${count}:${sorted.join(",").toLowerCase()}` };
   }
-  async wallet(provider: EthereumProvider, expectedAddress?: string, source: "l1" | "l2" = "l2") {
-    const c = this.config;
-    const accounts = await provider.request({ method: "eth_accounts" }) as string[];
+  private async walletIdentity(provider: EthereumProvider, expectedAddress?: string, source: "l1" | "l2" = "l2") {
+    const [accounts, id] = await Promise.all([
+      provider.request({ method: "eth_accounts" }) as Promise<string[]>,
+      provider.request({ method: "eth_chainId" }) as Promise<string>,
+    ]);
     requireThat(accounts[0] && (!expectedAddress || same(accounts[0], expectedAddress)), "Wallet account changed; try again with the selected owner");
-    const id = await provider.request({ method: "eth_chainId" }) as string;
-    requireThat(BigInt(id) === BigInt(c[source].chainId), "Switch your wallet to the selected Safe’s network first");
+    requireThat(BigInt(id) === BigInt(this.config[source].chainId), "Switch your wallet to the selected Safe’s network first");
+    return getAddress(accounts[0]);
+  }
+  async wallet(provider: EthereumProvider, expectedAddress?: string, source: "l1" | "l2" = "l2") {
+    const c = this.config, sender = await this.walletIdentity(provider, expectedAddress, source);
     const result = await probeComposer(provider, { l1ChainId: toHex(c.l1.chainId), l2ChainId: toHex(c.l2.chainId), registryAddress: c.registry, l2Address: c.manager });
     requireThat(result.status === "detected", `Wallet RPC: ${result.detail}`);
     const genesis = await provider.request({ method: "eth_getBlockByNumber", params: [c[source].checkpoint?.number ?? "0x0", false] }) as Block;
     requireThat(genesis && same(genesis.hash, c[source].checkpoint?.hash ?? c[source].genesis!), "Wallet is connected to a different treasury deployment");
-    return getAddress(accounts[0]);
+    return sender;
   }
-  async approve(provider: EthereumProvider, tx: ReviewedSafeTransaction, snapshot: Snapshot, address: Address): Promise<Approval> {
+  async approve(provider: EthereumProvider, tx: ReviewedSafeTransaction, snapshot: Snapshot, address: Address, onSignature: () => void = () => {}): Promise<Approval> {
     const source = this.transactionSource(tx);
-    if (this.config.environment === "ethereum-mainnet") await this.validate();
-    if (tx.message.operation === 1) await verifyTransferHelper(this);
-    await this.wallet(provider, address, source);
+    // The testnet signs the immutable reviewed transaction without another
+    // complete audit. Keep the production gate and delegatecall helper checks.
+    await Promise.all([
+      this.config.environment === "ethereum-mainnet" ? this.validate() : undefined,
+      tx.message.operation === 1 ? verifyTransferHelper(this) : undefined,
+    ]);
+    requireThat((snapshot.source ?? "l2") === source && snapshot.nonce === tx.message.nonce,
+      "Safe signing snapshot does not match the reviewed transaction");
+    await this.walletIdentity(provider, address, source);
     requireThat(snapshot.owners.some(owner => same(owner, address)), "This wallet is not an L1 Safe owner");
+    onSignature();
     const signature = await provider.request({ method: "eth_signTypedData_v4", params: [address, safeTypedDataJSON(tx)] }) as Hex;
-    await this.wallet(provider, address, source);
+    await this.walletIdentity(provider, address, source);
     // Threshold 1 validates this one recovered EOA approval. The real threshold
     // is enforced when packing the complete quorum and again by the L1 Safe.
     await packEOAApprovals(tx, snapshot.owners, 1, [{ owner: address, signature }]);
@@ -359,12 +388,12 @@ export class TreasuryClient {
   async prepare(provider: EthereumProvider, tx: ReviewedSafeTransaction, snapshot: Snapshot, approvals: Approval[], payment?: Payment): Promise<{ intent: Intent; request: Record<string, string>; expiresAt?: string }> {
     const c = this.config, source = this.transactionSource(tx), transport = this.submissionSource(tx), chain = c[transport];
     requireThat(source === "l2" || payment?.source === "l1", "L1 initiation requires a reviewed payment");
-    await this.validate();
-    requireThat(unchanged(snapshot, await this.snapshot(source)), "Owners or Safe nonce changed. Review the action again.");
+    const [, current] = await Promise.all([this.validate(), this.snapshot(source)]);
+    requireThat(unchanged(snapshot, current), "Owners or Safe nonce changed. Review the action again.");
     if (payment) requireThat(safeTransactionHash(paymentTransaction(c, payment, tx.message.nonce)) === safeTransactionHash(tx), "Payment changed after review");
     if (payment?.kind === "transfer") {
-      await verifyTransferHelper(this);
-      requireThat(payment.rollupId === await transferRollup(this), "The bridge destination changed. Review the transfer again.");
+      const [, rollup] = await Promise.all([verifyTransferHelper(this), transferRollup(this)]);
+      requireThat(payment.rollupId === rollup, "The bridge destination changed. Review the transfer again.");
     }
     const sender = await this.wallet(provider, undefined, transport);
     const packed = source === "l1" ? await packEOAApprovals(tx, snapshot.owners, snapshot.threshold, approvals)

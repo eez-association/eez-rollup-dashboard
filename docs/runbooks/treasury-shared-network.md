@@ -4,14 +4,14 @@
 for production use, including the Ethereum mainnet integration.** Source
 verification and passing tests do not constitute a security audit.
 
-Target the existing Chiado **10200** and EEZ-X **906969**, rollup **1**. All code,
+Target the existing Chiado **10200** and EEZ-X **699169**, rollup **2**. All code,
 checks and deployment records belong in this repository. The running protocol,
 operator wallets and chain data are not redeployed for this demo.
 
 Choose the deployment wallet using the dashboard's normal wallet selector.
-New setup requires an **existing Chiado Safe address** with a verified Safe /
-SafeL2 1.3.0, 1.4.1 or 1.5.0 implementation, including **1.3.0+L2**. Its owners and
-threshold are retained. Existing EEZ-X mirrors support 1.3.0 and 1.4.1. On EEZ-X,
+Choose **Use an existing Safe** to retain a verified Safe /
+SafeL2 1.3.0, 1.4.1 or 1.5.0 implementation, including **1.3.0+L2**, with its
+current owners and threshold. Existing EEZ-X mirrors support 1.3.0 and 1.4.1. On EEZ-X,
 deploy a mirror Safe using the L1 owner adapter or reuse an existing compatible
 Safe. Add owners later by entering their addresses in **Shared owners**; the
 current Chiado quorum approves each change. Keep **100 per Safe / 150 global** per ten minutes, with no Guard.
@@ -20,6 +20,19 @@ bridge pair. Setup only connects the Safes and configures spending; it does not
 require a token balance, request token approvals or transfer tokens. Fund either
 Safe separately with the matching canonical or wrapped asset when ready to pay.
 There is no funding or faucet screen in treasury setup.
+Completed testnet setups retain a network-selection hint scoped to the configured
+endpoints, bridges, token and protocol profile. On reload it may restore the saved
+Safe addresses immediately; it never caches balances, owners, nonces or approvals.
+Fresh owner/balance reads run together before the full treasury validation, while
+the network-ready gate remains closed. Wallet actions also await a fresh network
+selection check, then the usual journal lock and action-specific validation.
+Malformed, changed, incomplete or restarted setups do not use the hint.
+The ready badge and payment controls wait for both network-selection and treasury
+validation. A queued action rechecks its validation context and the complete saved
+manifest under the journal lock, even when the Safe instance ID is unchanged.
+Independent owner/balance failures preserve successful display reads but keep
+actions blocked. The reload browser regression covers these cases, changed live
+network identity, leaving the screen during validation and journal preservation.
 Validation and the local UI rollout are recorded in the
 [setup-without-funding audit](../audits/2026-10-21-treasury-no-funding/README.md).
 
@@ -29,6 +42,146 @@ Its addresses, transaction receipts and current checks are recorded in the
 Infrastructure deployment is separate from each treasury setup and from
 real-wallet/Safe-app acceptance. The linked audit records the state observed at
 the time; the dashboard verifies the selected treasury before opening it.
+
+## Network configuration after the October 28 redeployment
+
+The treasury profile in `src/lib/treasury/paired-testnet-network.json` pins the
+chain IDs, registry, manager, bridge code and canonical block references. The
+main dashboard discovers chain IDs from RPC, while deployment addresses come
+from the server's runtime configuration. Both must describe the same deployment;
+changing the wallet network cannot repair a stale profile.
+
+The current public deployment uses registry
+`0x6258189D3a04EB31a196A8931077dfe001A9f6Fd` and the same-address `EEZBridge`
+`0xe993715bE7a0F60d484C5D19c4f008Ba79df1D4E` on Chiado and EEZ-X. Its rollup ID
+is **2**, distinct from chain ID **699169**. Compiler inputs for the bridge,
+its `EEZBridgedToken` children and the L1 protocol proxy are retained as
+verification-only supplemental sources. Existing release bundles are unchanged.
+
+Test USDC was provisioned for this bridge and rollup after the redeployment:
+
+- Chiado token: `0x5120287810Dbce61092a64b5E4BDD26B6079A601`.
+- EEZ-X wrapped token: `0x3f1CE94d61cE9B33993d94b1f5aac66f199DDBa3`.
+- Deployment transaction: `0xc2c05de5f37b351e8b874eb71fa0be480f591c7cfd5942d450c112919b1c0d1d` (Chiado).
+- Initial L2 claim: `0xf77652d6a1883b3c141f1d1f08c8bcc6825cd0f579717f4430f5c6e0136e26b0` (submitted on Chiado).
+
+The initial claim issued exactly 1,000 test tokens on EEZ-X and established the
+wrapped representation. Local runtime `treasuryTokenAddress` now selects the
+Chiado token. Token bindings, canonical bridge execution and the resulting
+network configuration were validated before enabling Safe setup. This local
+configuration change does not publish or update the public dashboard.
+The old token and saved treasury journals belong to the previous deployment;
+retain those records without relabeling them. Historical audits above describe
+their original deployment, not this one.
+
+## Optional payment expiry (paired policy version 2)
+
+New setups use `PAIR_VERSION = 2`. The fourth `paySplit` argument is an optional
+Unix-second deadline, and the dashboard demo explicitly signs **0 (no expiry)**.
+Crossing a ten-minute budget reset no longer invalidates these approvals. A
+nonzero deadline remains supported and is checked on both chains. Safe nonce,
+owner signatures, balances and spending limits are still enforced.
+
+Each Safe's 100-token allowance is checked in its own execution-time period.
+The shared 150-token budget is counted once in L2's execution-time period;
+`Paid` reports that L2 period even when initiated on L1. UI capacity display, review and pre-submission checks use L2 `latest` state,
+with balances, allowances, timestamps and spending pinned to the same observed
+block per chain and block hashes rechecked afterward. No extra reads are added.
+A stalled latest block does not reset capacity merely because wall-clock time
+passed. Settlement and recovery retain their safe/canonical evidence.
+Version-2 reconciliation matches the signed deadline
+in the exact peer call rather than requiring the preview period in the event.
+
+A new immutable release contains this behavior. Already deployed version-1
+policies are unchanged and keep epoch-bound signing/reconciliation. Fresh
+setups use the new release; no automatic on-chain upgrade or revocation of old
+allowances is performed. Do not treat a changed frontend as a policy migration.
+
+## Create both Safes from the dashboard
+
+Alternatively choose **Create new Safes**. This uses the same six-step
+paired setup and current release; no new Solidity contract is introduced:
+
+1. On L1, deploy or reuse identical Safe infrastructure through the verified
+   deterministic deployer, then create the Safe with the selected wallet as sole
+   owner, threshold 1, at the address reserved for both chains.
+2. On L2, prepare `L1Owners` and create another Safe with that same wallet owner
+   and threshold 1. It is not yet governed by the adapter.
+3. Deploy the L2 allowance module and paired policy.
+4. Deploy the L1 allowance module and policy, and provision the L1 aliases for
+   the L2 Safe, adapter and policy. Keeping these deployments here avoids the
+   contract-creation size limit in step 1.
+5. The L1 Safe approves its peer connection and local allowance.
+6. The wallet signs the L2 Safe's first transaction (nonce 0). Its call-only batch
+   first calls `swapOwner(sentinel, wallet, L1Owners)`, then configures the peer and
+   allowance and activates both policies. The signature is an ordinary EOA Safe
+   signature on L2; the outer submission still uses the L1 Composer route.
+
+New setups require the same code-hash-verified deterministic deployer
+(`0x4e59b44847b379578588920ca78fbf26c0b4956c`) on both networks. It uses CREATE2
+to deploy the released Safe singleton and SafeProxyFactory with identical initcode
+and salt, giving those helpers matching addresses too. Safe creation then uses
+the same explicit wallet initializer and persisted random salt on both chains.
+The owner is never the bootstrap executor or `msg.sender`. Occupied Safe addresses,
+mismatching infrastructure code and changed plans fail closed. No new Solidity
+code or rewritten release bundle is needed. The deployer interface follows the
+[deterministic deployment proxy](https://github.com/Arachnid/deterministic-deployment-proxy).
+Before handover, the L2 Safe must still have its initial wallet owner, threshold 1
+and nonce 0. Afterward its only owner is `L1Owners`, and payments use the normal
+adapter signature path. A failed setup batch rolls back the ownership replacement
+within the Safe transaction. Source publication and setup recovery cover both
+new Safes, including reloads before the first L1 address is available.
+
+New **Create new Safes** setups guarantee the same planned address on both
+chains. They are independent instances with separate balances, nonces and signing
+domains. Older saved create-both plans retain their original, possibly different
+addresses; an already deployed Safe cannot be moved to a different address.
+No funding or token claims are part of this path. The original existing-Safe path
+still creates its mirror directly with the adapter owner.
+
+Local validation: `node tests/integration/treasury-matching-safes.mjs` verifies
+matching addresses and independent state on two isolated EVMs, L2 owner handover,
+plan integrity, collision rejection and deployer checks.
+`node tests/integration/treasury-paired-setup.mjs --create-both` separately exercises
+the earlier saved-plan shape and executes released contracts, handover, setup-failure rollback, reload recovery and
+all four payment routes on an isolated EVM. This does not validate native EEZ relay
+or cross-chain rollback. A read-only plan check also confirms supported factory
+availability on the configured live testnet. The first matching-address batch
+also passes a live gas estimate without broadcasting a deployment. These checks
+do not establish a complete native cross-chain run of the new matching path.
+
+### Next iteration: combine deployment steps (deferred)
+
+Status: design proposal only. Keep the current six-step flow for user testing;
+do not enable this path or change its deployment/signing behavior yet.
+
+First evaluate merging steps 2 and 3 into one L2 deployment batch. If safe within
+the creation-size and gas limits for the selected infrastructure, this reduces
+setup to five steps without predicting contracts across transactions.
+
+Then evaluate merging L1 steps 1 and 4 by predicting the L2 Safe, owner adapter
+and policy addresses before any deployment. The proposed four-step flow is:
+
+1. Prepare/create the L1 Safe and policy, and provision the L2 connections.
+2. Deploy the L2 Safe, adapter, allowance module and policy together.
+3. Approve L1 peer connection and allowance through the L1 Safe.
+4. Approve L2 setup, including the first-transaction ownership handover for fresh
+   Safes, and activate both policies.
+
+Address predictions are exact only for fixed deployment inputs. The current
+bootstrap uses CREATE (wallet address and wallet nonce); its deployed helpers
+use CREATE (bootstrap address and creation nonce). SafeProxyFactory uses CREATE2
+with its actual creation code, singleton, initializer and salt. Changing wallet
+nonces, infrastructure reuse, owners or action order can invalidate the plan.
+
+Before implementing, freeze and persist both chains' full deployment plans;
+verify factory code and CREATE2 derivation; test whether the protocol permits
+provisioning proxies before their remote contracts exist; check collisions,
+batch size/gas limits, nonce drift, reorgs and recovery after only one chain
+completes. Evaluate a verified CREATE2 factory for helpers to remove dependence
+on wallet nonces. This would be a separately reviewed deployment design, not a
+change to existing immutable releases. Matching addresses for new Safes are
+implemented independently of this deferred step-combining proposal.
 
 The simplified contract build targets fresh treasury setups. It does not migrate
 existing policy contracts or preserve earlier constructor layouts.
@@ -81,6 +234,22 @@ discovers top-level and nested creations (including Safe factories), matches
 runtime bytecode including metadata, and submits the retained standard JSON
 compiler input. Only compiler-declared immutable locations may differ.
 
+Opening a configured or saved paired treasury also automatically queues its
+existing contract addresses, including reused tokens, allowance modules, Safe
+implementations, bridges and protocol bindings. Address verification reads code
+at a fixed canonical block; it does not require a creation transaction, so it
+also covers genesis contracts and old deployments whose receipts are unavailable.
+Known proxy layouts reveal their implementation, and normal bridges reveal their
+local manager and counterpart proxy. Dependency discovery is bounded to 16
+addresses per job and never accepts caller-supplied RPC URLs or compiler inputs.
+
+Verification-only inputs for already deployed protocol revisions are retained in
+`verification/supplemental/`, independently recompiled, and matched including
+metadata and constructor immutable references. Adding these inputs does not
+upgrade deployed contracts, change the dashboard's protocol dependency pin, or
+rewrite an immutable treasury release. Unsupported bytecode remains visibly
+`source-unavailable`; it is never published using an approximate source match.
+
 Build with `npm run build:treasury-release` and check with
 `npm run check:treasury-release`. The release builder compiles portable source
 paths, retains each exact compiler/version/settings/source input, and independently
@@ -97,7 +266,12 @@ inputs live in `verification/dependencies/` and are also recompiled exactly.
 Solidity compiler inside the frontend image.
 
 Docker Compose starts `verification` alongside `ui`; it uses the UI's existing
-runtime RPC/explorer settings. There are no new `.env` variables or signing keys.
+runtime RPC/explorer settings. No signing keys are needed. Optionally set
+`ETHERSCAN_API_KEY` in the server's local `.env` to publish Ethereum mainnet
+sources through Etherscan V2. Compose passes it only to `verification`; it is
+never included in browser configuration or build arguments. Restart that service
+after changing the key. For a standalone worker, export it in that process's
+environment (the Node worker does not load `.env` itself).
 Its `/data` volume (`treasury-verification`) preserves jobs across restarts. It
 shares the UI network namespace, listens only on loopback port 18081, and is
 proxied at `/treasury-verification/`. When recreating the UI, recreate the worker
@@ -115,13 +289,23 @@ disclosure reports address-specific progress and explorer links.
 Jobs retry provider errors with bounded backoff. A queued submission, verified
 twin or partial match never counts as full verification. Exact Sourcify runtime
 verification on Chiado/Ethereum is recorded separately from explorer publication;
-creation matches are also separate. Ethereum source links point to Blockscout,
-where the worker publishes, even when ordinary transaction links use Etherscan.
+creation matches are also separate. With `ETHERSCAN_API_KEY`, Ethereum source
+links point to Etherscan; without it they point to public Blockscout. EEZ and
+Chiado continue using their configured Blockscout explorers. Etherscan requests
+use the official fixed V2 endpoint, are paced, and persist submission IDs for
+status polling after restarts. Queued responses and similar-contract matches
+never count as full verification. API failures retain retryable jobs and expose
+only generic errors, never credential-bearing URLs. Constructor arguments are
+left to Etherscan detection; deployments it cannot resolve remain pending rather
+than being reported verified. Source publication and status polling follow the
+[Etherscan verification API](https://docs.etherscan.io/api-reference/endpoint/verifysourcecode).
 Completed jobs are periodically rechecked
 against canonical chain state. Jobs for another configured network remain stored
 but cannot run through a mismatching RPC. Unknown build IDs and unconfirmed
-transaction hashes cannot enter the public queue. Admission requires at least
-one newly observed deployment with exact retained bytecode. Configuration-only
+transaction hashes cannot enter the public queue. Transaction admission requires at least
+one newly observed deployment with exact retained bytecode. Address admission
+requires a match against retained compiler output; already fully verified third-party
+contracts can be reported without allocating queue capacity. Configuration-only
 confirmations return `not-applicable`; unknown code returns a visible
 `source-unavailable` result without allocating a persistent job. Events naming
 already existing contracts do not establish a new deployment. Candidate discovery
@@ -470,7 +654,8 @@ transactions when necessary. More than two occupied addresses stops preparation.
 No transaction count is hardcoded for a particular wallet.
 
 Older saved setups that create an L1 Safe may include a separate implementation
-transaction. New setup requires an existing L1 Safe. Existing EEZ-X Safes that
+transaction. The existing-Safe path retains its supplied L1 Safe; the current
+**Create new Safes** path is described above. Existing EEZ-X Safes that
 need owner adoption add one current-quorum Safe transaction and its signatures.
 The exact remaining plan is shown after review; no wallet batch extension or
 account delegation is required. Creation batches check the 49,152-byte EVM input

@@ -2,7 +2,7 @@
 pragma solidity 0.8.34;
 
 import {Script} from "forge-std/Script.sol";
-import {L1Owners} from "../src/L1Owners.sol";
+import {L1Owners} from "../src/l2/L1Owners.sol";
 import {IEEZProxyRegistry} from "../src/interfaces/IEEZProxyRegistry.sol";
 
 /// @notice Deploys only the adapter and its required local proxy; no funding or Safe administration.

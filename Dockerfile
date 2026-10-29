@@ -16,6 +16,7 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 COPY scripts/verification ./scripts/verification
 COPY src/lib/treasury/runtimeCode.ts ./src/lib/treasury/runtimeCode.ts
+COPY src/lib/bridgeManager.ts ./src/lib/bridgeManager.ts
 COPY verification ./verification
 RUN mkdir /data && chown node:node /data
 USER node

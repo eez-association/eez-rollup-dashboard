@@ -4,7 +4,7 @@ pragma solidity 0.8.34;
 import {OwnerFixture, OwnerTestTarget} from "./helpers/OwnerFixture.sol";
 import {EEZL2} from "eez-core-protocol/src/L2/EEZL2.sol";
 import {ExecutionEntry, StaticExecutionEntryL2} from "eez-core-protocol/src/interfaces/IEEZL2.sol";
-import {L1Owners} from "../src/L1Owners.sol";
+import {L1Owners} from "../src/l2/L1Owners.sol";
 import {ISafe} from "../src/interfaces/ISafe.sol";
 import {IEEZProxyRegistry} from "../src/interfaces/IEEZProxyRegistry.sol";
 

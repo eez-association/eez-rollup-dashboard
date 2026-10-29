@@ -8,10 +8,12 @@ import type { TreasuryClient, TreasuryConfig } from "./client.ts";
 
 export type PaymentDeployment = {
   version?: 0 | 1 | 2;
+  pair?: { version: 1 | 2; policyL1: Address; peerProxyL2: Address };
   bridgeKind?: "standard"; bridgeExecutorL1?: Address; safeL2Alias?: Address;
   predecessor?: Address; aliasReaderL1?: Address; policy: Address; alias: Address; tokenL1: Address; tokenL2: Address; moduleL1: Address; moduleL2: Address;
   bridgeL1: Address; bridgeL2: Address; invoiceMerchant?: Address; invoiceControl?: string; recipient: Address; decimals: 6; period: 600; globalLimit: "150000000"; assetLabel: "Devnet USDC" | "Test USDC" | "USDC" };
-type PaymentIdentity = { source?: "l1" | "l2"; recipient: Address; destination: "l1" | "l2"; epoch: string };
+// For pair v2, epoch is display metadata; only deadline is signed as the time condition.
+type PaymentIdentity = { source?: "l1" | "l2"; recipient: Address; destination: "l1" | "l2"; epoch: string; deadline?: string };
 // Missing kind is the existing fixed-payment format, including saved submissions.
 export type Payment = PaymentIdentity & (
   { kind?: "fixed"; amount: string; fromL1: string } |
@@ -19,12 +21,12 @@ export type Payment = PaymentIdentity & (
   { kind: "invoice"; invoiceId: Hex; amount: string; destination: "l1" }
 );
 export type PaymentContributions = { fromL1: string; fromL2: string };
-export type PaymentState = { epoch: bigint; resetsAt: number; observedL1: string; observedL2: string; balanceL1: bigint; balanceL2: bigint;
+export type PaymentState = { observedTimestamp?: bigint; epoch: bigint; resetsAt: number; observedL1: string; observedL2: string; balanceL1: bigint; balanceL2: bigint;
   allowanceL1: readonly bigint[]; allowanceL2: readonly bigint[]; spent: bigint; globalLimit: bigint };
 export const paymentAbi = parseAbi([
   "function bridgeExecutorL1() view returns(address)",
   "function SPLIT_VERSION() view returns (uint256)",
-  "function paySplit(address recipient,uint256 amount,bool onL1,uint256 expectedEpoch,uint256 fromL1)",
+  "function paySplit(address recipient,uint256 amount,bool onL1,uint256 epochOrDeadline,uint256 fromL1)",
   "function payInvoice(address token,address recipient,uint256 amount,bytes32 invoiceId,uint256 expectedEpoch)",
   "function invoiceMerchant() view returns (address)",
   "event InvoicePaid(bytes32 indexed invoiceId)",
@@ -38,7 +40,7 @@ export const paymentAbi = parseAbi([
   "function bridgeL1() view returns (address)", "function rollupId() view returns (uint64)",
   "function GLOBAL_LIMIT() view returns (uint256)", "function PERIOD() view returns (uint256)",
   "event Paid(address indexed token,address indexed recipient,bool onL1,uint256 amount,uint256 fromL1,uint256 fromL2,uint256 epoch)",
-  "error GlobalLimit()", "error Capacity()", "error StaleEpoch()",
+  "error GlobalLimit()", "error Capacity()", "error StaleEpoch()", "error PaymentExpired()",
 ]);
 export const treasuryBridgeAbi = parseAbi([
   "function wrappedTokenInfo(address) view returns (address,uint64)", "function BRIDGE() view returns(address)",
@@ -67,6 +69,8 @@ export function formatPercentage(bps: bigint) {
 export function checkedPayment(p: Payment): Payment {
   if (!p || (p.source !== undefined && !["l1", "l2"].includes(p.source)) || !isAddress(p.recipient) || BigInt(p.recipient) === 0n || !["l1", "l2"].includes(p.destination)
       || "funding" in p || !/^\d{1,16}$/.test(p.epoch)) throw new Error("Invalid payment review");
+  if (p.deadline !== undefined && (typeof p.deadline !== "string" || !/^(0|[1-9]\d{0,77})$/.test(p.deadline)
+    || BigInt(p.deadline) >= 1n << 256n || p.kind === "transfer" || p.kind === "invoice")) throw new Error("Invalid optional payment deadline");
   if (p.kind === "transfer") {
     if (p.source !== "l1" || p.destination !== "l2" || "fromL1" in p || "bps" in p || "invoiceId" in p
       || !/^[1-9]\d{0,77}$/.test(p.amount) || BigInt(p.amount) >= 1n << 256n
@@ -89,7 +93,7 @@ export function paymentTransaction(c: TreasuryConfig, input: Payment, nonce: big
   const p = checkedPayment(input);
   if (!c.payments) throw new Error("Payments are not deployed on this deployment");
   if (p.kind === "transfer") return transferTransaction(c, p, nonce);
-  if ([c.safeL1, c.safeL2, c.payments.policy, c.payments.alias, c.payments.bridgeL1, c.payments.bridgeL2, c.payments.bridgeExecutorL1].some(a => a?.toLowerCase() === p.recipient.toLowerCase()))
+  if ([c.safeL1, c.safeL2, c.payments.policy, c.payments.alias, c.payments.bridgeL1, c.payments.bridgeL2, c.payments.bridgeExecutorL1, c.payments.pair?.policyL1, c.payments.pair?.peerProxyL2].some(a => a?.toLowerCase() === p.recipient.toLowerCase()))
     throw new Error("Payments cannot target this treasury’s contracts. Choose Move to EEZ-X Safe to transfer between your Safes.");
   if (p.kind === "invoice" && !c.payments.invoiceMerchant) throw new Error("This devnet does not support invoice payments");
   const data = p.kind === "invoice"
@@ -98,7 +102,7 @@ export function paymentTransaction(c: TreasuryConfig, input: Payment, nonce: big
   const source = p.source ?? "l2";
   if (source === "l1" && (!verifiesL1Initiation(c.payments) || !c.l1.front)) throw new Error("This policy supports initiation from EEZ-X only");
   return buildSafeTransaction({ chainId: BigInt(c[source].chainId), safe: source === "l1" ? c.safeL1 : c.safeL2,
-    to: source === "l1" ? c.payments.alias : c.payments.policy, nonce, data });
+    to: source === "l1" ? (c.payments.pair?.policyL1 ?? c.payments.alias) : c.payments.policy, nonce, data });
 }
 const min = (a: bigint, b: bigint) => a < b ? a : b;
 export const remaining = (a: readonly bigint[]) => a[0]! > a[1]! ? a[0]! - a[1]! : 0n;
@@ -114,7 +118,9 @@ export function fundingPreview(s: PaymentState, p: Payment) {
     return { fromL1: amount, fromL2: 0n };
   }
   const amount = BigInt(p.amount);
-  if (BigInt(p.epoch) !== s.epoch) throw new Error("The budget period changed. Review the payment again.");
+  if (p.deadline === undefined && BigInt(p.epoch) !== s.epoch) throw new Error("The budget period changed. Review the payment again.");
+  if (p.deadline !== undefined && BigInt(p.deadline) !== 0n && s.observedTimestamp !== undefined && BigInt(p.deadline) < s.observedTimestamp)
+    throw new Error("The payment deadline expired. Review the payment again.");
   if (s.spent + amount > s.globalLimit) throw new Error(`Shared budget exceeded: ${formatUSDC(s.globalLimit - s.spent)} USDC remains globally`);
   const cap1 = min(s.balanceL1, remaining(s.allowanceL1)), cap2 = min(s.balanceL2, remaining(s.allowanceL2));
   const fromL1 = p.kind === "invoice" ? min(amount, cap1) : BigInt(p.fromL1);
@@ -127,31 +133,35 @@ export async function contractRead(client: TreasuryClient, chain: "l1" | "l2", a
   const result = await client.rpc<Hex>(client.config[chain].rpc, "eth_call", [{ to: address, data }, tag]);
   return decodeFunctionResult({ abi, functionName: name, data: result });
 }
-/** Payments use settled L2 state; setup can verify newly included configuration
- * against latest state without waiting for the safe checkpoint. */
+/** Read one coherent capacity snapshot. Interactive capacity checks explicitly
+ * select latest; callers needing a settled observation can retain safe. This
+ * helper does not establish payment settlement. */
 export async function paymentState(client: TreasuryClient, l2Tag: "safe" | "latest" = "safe"): Promise<PaymentState> {
   const c = client.config, p = c.payments!;
   const [l1, l2] = await Promise.all((["l1", "l2"] as const).map(chain => client.rpc<{ number: Hex; hash: Hex; timestamp: Hex }>(c[chain].rpc, "eth_getBlockByNumber", [chain === "l1" ? "latest" : l2Tag, false])));
   if (!l1 || !l2) throw new Error("Missing payment chain observation");
-  // An idle rollup can keep an older safe block across a reset. Read settled
-  // storage at that block, but quote the period of the current L1 clock; a
-  // payment signs that epoch and execution checks it again on both chains.
-  const epoch = BigInt(l1.timestamp) / 600n;
+  // v1 approvals bind the current L1 period. v2 approvals bind only a deadline:
+  // quote each allowance at its observed local period and the shared budget at
+  // L2's observed period. Execution checks the then-current capacity again.
+  const executionPeriods = p.pair?.version === 2;
+  const epoch = BigInt(executionPeriods ? l2.timestamp : l1.timestamp) / 600n;
+  const localEpochs = executionPeriods ? [BigInt(l1.timestamp) / 600n, BigInt(l2.timestamp) / 600n] : [epoch, epoch];
   if (BigInt(l2.timestamp) / 600n > epoch) throw new Error("Waiting for L1 to reach the observed L2 budget period");
   const [b1, b2, a1, a2, spent] = await Promise.all([
     contractRead(client, "l1", p.tokenL1, tokenAbi, "balanceOf", [c.safeL1], l1.number),
     contractRead(client, "l2", p.tokenL2, tokenAbi, "balanceOf", [c.safeL2], l2.number),
-    contractRead(client, "l1", p.moduleL1, allowanceAbi, "getTokenAllowance", [c.safeL1, p.bridgeKind === "standard" ? p.bridgeExecutorL1! : p.alias, p.tokenL1], l1.number),
+    contractRead(client, "l1", p.moduleL1, allowanceAbi, "getTokenAllowance", [c.safeL1, p.pair?.policyL1 ?? (p.bridgeKind === "standard" ? p.bridgeExecutorL1! : p.alias), p.tokenL1], l1.number),
     contractRead(client, "l2", p.moduleL2, allowanceAbi, "getTokenAllowance", [c.safeL2, p.policy, p.tokenL2], l2.number),
     contractRead(client, "l2", p.policy, paymentAbi, "spent", [epoch], l2.number),
   ]);
-  const allowances = ([a1, a2] as (readonly bigint[])[]).map(a => {
-    if (a[2] !== 10n || a[3]! % 10n !== 0n || a[3]! > epoch * 10n)
+  const allowances = ([a1, a2] as (readonly bigint[])[]).map((a, i) => {
+    const localEpoch = localEpochs[i]!;
+    if (a[2] !== 10n || a[3]! % 10n !== 0n || a[3]! > localEpoch * 10n)
       throw new Error("Safe allowance periods do not match the shared budget");
     // AllowanceModule.getAllowance resets on load, without a storage write.
     // Apply that same aligned reset to historical L2 reads; preserve the grant
     // and nonce, and never change the actual settled token balances.
-    return a[3]! < epoch * 10n ? [a[0]!, 0n, a[2]!, epoch * 10n, a[4]!] : a;
+    return a[3]! < localEpoch * 10n ? [a[0]!, 0n, a[2]!, localEpoch * 10n, a[4]!] : a;
   });
   if (p.predecessor) {
     const carried = await contractRead(client, "l2", p.policy, paymentAbi, "carriedSpending", [epoch], l2.number) as readonly bigint[];
@@ -159,13 +169,14 @@ export async function paymentState(client: TreasuryClient, l2Tag: "safe" | "late
   }
   const again = await Promise.all((["l1", "l2"] as const).map((chain, i) => client.rpc<{ hash: Hex }>(c[chain].rpc, "eth_getBlockByNumber", [[l1, l2][i]!.number, false])));
   if (again[0]?.hash !== l1.hash || again[1]?.hash !== l2.hash) throw new Error("Chain state changed while reading payment capacity");
-  return { epoch, resetsAt: Number((epoch + 1n) * 600n), observedL1: String(BigInt(l1.number)), observedL2: String(BigInt(l2.number)),
+  return { observedTimestamp: BigInt(l1.timestamp) > BigInt(l2.timestamp) ? BigInt(l1.timestamp) : BigInt(l2.timestamp), epoch, resetsAt: Number((epoch + 1n) * 600n), observedL1: String(BigInt(l1.number)), observedL2: String(BigInt(l2.number)),
     balanceL1: b1 as bigint, balanceL2: b2 as bigint, allowanceL1: allowances[0]!, allowanceL2: allowances[1]!, spent: spent as bigint, globalLimit: 150_000_000n };
 }
 export function settledPayment(c: TreasuryConfig, p: RecordedPayment, logs: { address: Address; data: Hex; topics: [Hex, ...Hex[]] }[]): PaymentContributions | undefined {
   p = checkedRecordedPayment(p);
+  const emittingPolicy = c.payments!.pair && p.source === "l1" ? c.payments!.pair.policyL1 : c.payments!.policy;
   const events = logs.flatMap(log => {
-    if (log.address.toLowerCase() !== c.payments!.policy.toLowerCase()) return [];
+    if (log.address.toLowerCase() !== emittingPolicy.toLowerCase()) return [];
     try { return [decodeEventLog({ abi: paymentAbi, ...log })]; } catch { return []; }
   });
   const invoices = events.filter(event => event.eventName === "InvoicePaid");
@@ -175,7 +186,7 @@ export function settledPayment(c: TreasuryConfig, p: RecordedPayment, logs: { ad
   const a = paid[0]!.args;
   const identity = (event: { token: Address; recipient: Address; onL1: boolean; epoch: bigint }) =>
     event.token.toLowerCase() === c.payments!.tokenL1.toLowerCase() && event.recipient.toLowerCase() === p.recipient.toLowerCase()
-    && event.onL1 === (p.destination === "l1") && event.epoch === BigInt(p.epoch);
+    && event.onL1 === (p.destination === "l1") && (c.payments!.pair?.version === 2 ? p.deadline !== undefined : event.epoch === BigInt(p.epoch));
   if (!identity(a) || a.amount === 0n || a.amount > 150_000_000n || a.fromL1 + a.fromL2 !== a.amount) return undefined;
   if ("fromL1" in p && a.fromL1 !== BigInt(p.fromL1)) return undefined;
   const contributions = { fromL1: String(a.fromL1), fromL2: String(a.fromL2) };

@@ -8,7 +8,7 @@ import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, openSync, existsSy
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 import { encodeDeployData, encodeFunctionData, getContractAddress, toHex, zeroAddress } from 'viem';
-import { VerificationWorker, loadBuilds } from '../../scripts/verification/worker.mjs';
+import { VerificationWorker, loadBuilds, loadAdditionalSources } from '../../scripts/verification/worker.mjs';
 import { matchesRuntime } from '../../src/lib/treasury/runtimeCode.ts';
 const current=JSON.parse(readFileSync('src/lib/treasury/current-build.json')).build;
 const bundle=JSON.parse(readFileSync(`src/lib/treasury/builds/${current}.json`));
@@ -22,16 +22,35 @@ const rpcUrl=`http://127.0.0.1:${port}`;
 const rpc=async(method,params=[])=>{const r=await(await fetch(rpcUrl,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method,params})})).json();if(r.error)throw Error(r.error.message);return r.result;};
 const evidence={build:current,scope:'isolated Anvil, real solc standard JSON recompilation, controlled explorer transport',transactions:[],verified:[]};
 try {
+  for (const source of loadAdditionalSources('verification/supplemental')) {
+    const version=source.compiler.split('+')[0],solc=['.local/share/svm','.svm'].map(p=>resolve(homedir(),p,version,`solc-${version}`)).find(existsSync);
+    assert(solc); const output=JSON.parse(execFileSync(solc,['--standard-json'],{input:JSON.stringify(source.sourceInput),encoding:'utf8',maxBuffer:64*1024*1024}));
+    assert(!(output.errors??[]).some(e=>e.severity==='error'));
+    const [path,name]=source.target.split(':'),compiled=output.contracts[path][name].evm.deployedBytecode;
+    assert.equal('0x'+compiled.object,source.runtime,'supplemental compiler input must reproduce every byte, including metadata');
+    assert.deepEqual(Object.values(compiled.immutableReferences??{}),source.immutableGroups);
+  }
   for(let i=0;i<100;i++){try{await rpc('eth_chainId');break;}catch{await new Promise(r=>setTimeout(r,50));}}
   const [owner]=await rpc('eth_accounts');
-  async function send(data,to){const tx=await rpc('eth_sendTransaction',[{from:owner,to,data,gas:'0x1c9c380'}]);let receipt;for(let i=0;i<100&&!receipt;i++){receipt=await rpc('eth_getTransactionReceipt',[tx]);if(!receipt)await new Promise(r=>setTimeout(r,20));}assert(receipt,'deployment receipt timeout');assert.equal(receipt.status,'0x1');evidence.transactions.push(tx);return receipt;}
+  async function send(data,to,record=true){const tx=await rpc('eth_sendTransaction',[{from:owner,to,data,gas:'0x1c9c380'}]);let receipt;for(let i=0;i<100&&!receipt;i++){receipt=await rpc('eth_getTransactionReceipt',[tx]);if(!receipt)await new Promise(r=>setTimeout(r,20));}assert(receipt,'deployment receipt timeout');assert.equal(receipt.status,'0x1');if(record)evidence.transactions.push(tx);return receipt;}
   async function deploy(name,args=[]){const a=artifacts[name];return (await send(encodeDeployData({abi:a.abi,bytecode:a.bytecode,args}))).contractAddress;}
-  const safe=await deploy('Safe'),factory=await deploy('SafeProxyFactory');await deploy('AllowanceModule');
+  const safe=await deploy('Safe'),factory=await deploy('SafeProxyFactory'),module=await deploy('AllowanceModule');
   const initializer=encodeFunctionData({abi:artifacts.Safe.abi,functionName:'setup',args:[[owner],1n,zeroAddress,'0x',zeroAddress,zeroAddress,0n,zeroAddress]});
   await send(encodeFunctionData({abi:artifacts.SafeProxyFactory.abi,functionName:'createProxyWithNonce',args:[safe,initializer,77n]}),factory);
+  // Real compiled fixture bindings let the packaged policy constructor execute.
+  // Only released contracts enter the verification queue; this is no EEZ proof.
+  async function fixture(source,name,args=[]) {
+    const a=JSON.parse(readFileSync(`contracts/out/${source}.sol/${name}.json`));
+    const address=(await send(encodeDeployData({abi:a.abi,bytecode:a.bytecode.object,args}),undefined,false)).contractAddress;
+    return {address,abi:a.abi};
+  }
+  const manager=await fixture('OwnerFixture','ReadThroughManager',[0n]),bridge=await fixture('Bridge','Bridge');
+  await send(encodeFunctionData({abi:bridge.abi,functionName:'initialize',args:[manager.address,0n,owner]}),bridge.address,false);
+  await send(encodeFunctionData({abi:bridge.abi,functionName:'setCanonicalBridgeAddress',args:[safe]}),bridge.address,false);
+  const token=await deploy('TestUSDC',[bridge.address,1n]);
   const nonce=BigInt(await rpc('eth_getTransactionCount',[owner,'latest'])),executor=getContractAddress({from:owner,nonce});
   const target=getContractAddress({from:executor,nonce:1n});
-  await deploy('TreasuryBootstrap',[[{create:true,target,data:encodeDeployData({abi:artifacts.TreasuryAliasReader.abi,bytecode:artifacts.TreasuryAliasReader.bytecode,args:[safe]}),returnHash:toHex(0n,{size:32})}]]);
+  await deploy('TreasuryBootstrap',[[{create:true,target,data:encodeDeployData({abi:artifacts.PairedTreasuryPolicy.abi,bytecode:artifacts.PairedTreasuryPolicy.bytecode,args:[safe,module,token,bridge.address,1n]}),returnHash:toHex(0n,{size:32})}]]);
   const verified=new Map(),compiled=new Map();
   const fetcher=async(url,options)=>{
     if(url===rpcUrl)return fetch(url,options);
@@ -62,6 +81,6 @@ try {
   for(let i=0;i<evidence.transactions.length;i++)await worker.tick();
   assert([...worker.jobs.values()].every(j=>j.status==='verified'));
   evidence.verified=[...worker.jobs.values()].flatMap(j=>j.contracts.map(c=>({address:c.address,name:c.name,status:c.status})));
-  assert.equal(evidence.verified.length,6);assert(evidence.verified.some(c=>c.name==='SafeProxy'));assert(evidence.verified.some(c=>c.name==='TreasuryAliasReader'));
+  assert.equal(evidence.verified.length,7);assert(evidence.verified.some(c=>c.name==='SafeProxy'));assert(evidence.verified.some(c=>c.name==='PairedTreasuryPolicy'));assert(evidence.verified.some(c=>c.name==='TestUSDC'));
   evidence.passed=true;console.log(`PASS: ${evidence.verified.length} real deployments, exact recompilation, nested discovery and restart recovery`);
 } finally {writeFileSync(`${directory}/summary.json`,JSON.stringify(evidence,null,2));node.kill('SIGTERM');await once(node,'exit');console.log(`Evidence: ${directory}`);}

@@ -5,7 +5,7 @@ const {chromium} = require('playwright');
 const {fixture,until,target,eoa} = require('./cross-chain-calls.cjs');
 
 (async () => {
-  const browser = await chromium.launch({headless:true,args:['--no-sandbox']});
+  const browser = await chromium.launch({headless:true,chromiumSandbox: true});
   let scenarios = 0;
   try {
     for (const [chain,l2Chain] of [['0x27d8','0x1892'],['0x1','0xaa29e']]) for (const reverse of [false,true]) for (const walletName of ['Rabby','MetaMask']) for (const destination of [target,eoa]) {

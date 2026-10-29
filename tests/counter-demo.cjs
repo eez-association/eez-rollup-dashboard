@@ -106,7 +106,7 @@ async function until(check,message){
  throw new Error(message);
 }
 (async()=>{
- const browser=await chromium.launch({headless:true,args:['--no-sandbox']});let scenarios=0;
+ const browser=await chromium.launch({headless:true,chromiumSandbox: true});let scenarios=0;
  try {
   for(const destination of ['l2','l1']){
    const f=await fixture(browser),source=destination==='l1'?'l2':'l1';
