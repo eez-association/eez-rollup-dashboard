@@ -52,6 +52,8 @@
 .tokenName > span { color: var(--text-dim); font: 12px/1.5 var(--sans); }
 .tokenSelection { flex-shrink: 0; color: var(--text-dim); font: 12px/1.5 var(--mono); }
 .selectedToken .tokenSelection { color: var(--text-bright); }
+.walletFeeSummary { display: flex; flex-wrap: wrap; gap: 4px 16px; color: var(--text-dim); font: 12px/1.5 var(--mono); }
+.walletFeeSummary strong { color: var(--text-bright); font-weight: 400; user-select: text; }
 .tokenStatus { display: grid; justify-items: end; gap: 2px; flex-shrink: 0; }
 .bridgeBadge { border: 1px solid var(--border); border-radius: 100px; padding: 2px 8px; font: 12px/1.5 var(--mono); color: var(--text-dim); }
 .bridgeReady { color: var(--green); background: var(--green-dim); border-color: var(--green-border); }

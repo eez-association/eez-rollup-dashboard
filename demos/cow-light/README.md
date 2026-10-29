@@ -141,8 +141,8 @@ until the solver records canonical settlement evidence.
 
 ### Mainnet sell asset
 
-The swap form shows copyable max gas price and priority fee estimates for L2
-approval/wrap transactions. Rates are refreshed before each wallet submission,
+The swap form shows compact, read-only max gas price and priority fee text only
+during L2 approval/wrap transactions. Rates are refreshed before each wallet submission,
 and the displayed values are the exact fee fields passed to the wallet. Failed
 fee reads block sending. Swap order signing costs no gas; solver settlement
 costs are separate and are not represented by these wallet fee rates.
