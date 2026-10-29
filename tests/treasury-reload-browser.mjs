@@ -8,16 +8,15 @@ try{
  const f=await mount();
  const safe=page.getByRole('region',{name:'Chiado Safe funds',exact:true});
  await safe.waitFor();await safe.getByText('300',{exact:false}).first().waitFor();
- await page.getByText('Checking network',{exact:true}).waitFor();
  assert(await page.getByRole('button',{name:'Review payment',exact:true}).isDisabled(),'balances must not authorize payment while validation is pending');
  assert.deepEqual(await page.evaluate(()=>window.ownersTest.walletCalls),[]);
  await page.evaluate(()=>window.ownersTest.releaseValidation());
  await page.waitForTimeout(150);
- await page.getByText('Checking network',{exact:true}).waitFor();
  assert(await page.getByRole('button',{name:'Review payment',exact:true}).isDisabled(),'network readiness must include both validations');
  assert.deepEqual(await page.evaluate(()=>window.ownersTest.walletCalls),[]);
  await page.evaluate(()=>window.ownersTest.releaseNetwork());
- await page.getByText('Network ready',{exact:true}).waitFor();
+ await page.getByRole('button',{name:'Review payment',exact:true}).and(page.locator(':enabled')).waitFor();
+ assert.equal(await page.getByRole('region',{name:'Setup transaction history',exact:true}).count(),0);
  await page.getByRole('button',{name:'Review payment',exact:true}).click();
  await page.getByRole('button',{name:'Edit payment',exact:true}).waitFor();
  assert.equal(await page.getByRole('button',{name:'Sign approval',exact:true}).isDisabled(),false);

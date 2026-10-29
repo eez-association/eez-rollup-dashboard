@@ -30,7 +30,9 @@ try{
  await page.waitForFunction(()=>window.selection?.safeL1===undefined);
  assert.equal((await page.evaluate(()=>window.selection)).safeL2,undefined);
  assert.equal((await page.evaluate(()=>window.selection)).options.matching,true);
- await page.getByText('Both Safes will have the same address, with independent balances and transactions on each chain. You can resume setup after closing the dashboard.',{exact:true}).waitFor();
+ assert.equal(await page.getByText('Both Safes will have the same address, with independent balances and transactions on each chain. You can resume setup after closing the dashboard.',{exact:true}).count(),0);
+ assert.equal(await page.getByText('Owner:',{exact:false}).count(),0);
+ assert.equal(await page.getByText('EEZ-X verifies each transaction',{exact:false}).count(),0);
  await page.screenshot({path:'.runtime/treasury-mainnet-bridge-20261022/create-both-chooser.png',fullPage:true});
  await page.getByRole('button',{name:'Use an existing Safe',exact:true}).click();
  assert.equal(await page.getByLabel('Ethereum Safe address',{exact:true}).inputValue(),'0x0000000000000000000000000000000000000064');

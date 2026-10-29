@@ -89,26 +89,34 @@ try {
   sourceOnly = false; undiscovered = false;
   complete = true;
   await page.evaluate(() => window.dispatchEvent(new Event('treasury-source-request')));
-  await details.locator('summary').filter({ hasText: /^Contract sources verified on explorers$/ }).waitFor();
-  assert.equal(await details.locator('li').filter({ hasText: 'Verified on explorer' }).count(), 3);
+  await details.waitFor({ state: 'hidden' });
   assert.equal(await page.evaluate(key => localStorage.getItem(key), key), outbox);
-  passed.push('all independent jobs can finish without losing the durable outbox');
+  passed.push('completed explorer verification hides the status without losing the durable outbox');
+  sourceOnly = true;
+  await page.evaluate(() => window.dispatchEvent(new Event('treasury-source-request')));
+  await details.locator('summary').filter({ hasText: /^Publishing to explorers · 0 of 3 verified$/ }).waitFor();
+  sourceOnly = false;
+  await page.evaluate(() => window.dispatchEvent(new Event('treasury-source-request')));
+  await details.waitFor({ state: 'hidden' });
+  passed.push('verification keeps checking after success and shows new pending results');
   await page.evaluate(() => window.unmountVerification());
   const deployment = { version: 1, environment: 'dashboard-testnet', payments: { pair: { version: 1 } },
     l1: { chainId: 10200 }, l2: { chainId: 906969 }, code: [
       { chain: 'l1', address: '0x'+'44'.repeat(20) }, { chain: 'l2', address: '0x'+'55'.repeat(20) },
       { chain: 'l2', address: '0x'+'66'.repeat(20) },
     ] };
+  const configuredResponse = page.waitForResponse(response => response.url().endsWith('/treasury-verification/jobs') && response.request().postDataJSON()?.address === deployment.code.at(-1).address);
   await page.evaluate(async deployment => {
     window.unmountVerification(); localStorage.clear();
     const { mount } = await import('/tests/fixtures/treasury-verification-browser.tsx');
     window.unmountVerification = mount(deployment);
   }, deployment);
-  await details.locator('summary').filter({ hasText: 'Contract sources verified on explorers' }).waitFor();
-  await page.waitForFunction(() => document.querySelectorAll('[aria-label="Contract source verification"] li').length === 3);
+  await configuredResponse;
+  await details.waitFor({ state: 'hidden' });
   assert.deepEqual(dependencies.map(r=>[r.chainId,r.address]),deployment.code.map(r=>[deployment[r.chain].chainId,r.address]));
   assert(dependencies.every(r=>!r.transactionHash),'existing contracts do not require a new creation transaction');
   dependencies.length=0;
+  const savedResponse = page.waitForResponse(response => response.url().endsWith('/treasury-verification/jobs') && response.request().postDataJSON()?.address === deployment.code.at(-1).address);
   await page.evaluate(async ({deployment,build}) => {
     window.unmountVerification();
     localStorage.setItem('eez:treasury:paired-setup:saved',JSON.stringify({build}));
@@ -116,7 +124,8 @@ try {
     const { mount } = await import('/tests/fixtures/treasury-verification-browser.tsx');
     window.unmountVerification = mount();
   }, {deployment,build:requests[0].build});
-  await page.waitForFunction(() => document.querySelectorAll('[aria-label="Contract source verification"] li').length === 3);
+  await savedResponse;
+  await details.waitFor({ state: 'hidden' });
   assert.equal(dependencies.length,3);assert(dependencies.every(r=>r.build===requests[0].build));
   passed.push('configured and saved treasuries automatically verify reused contracts without new transactions or journal rewrites');
   assert.deepEqual(errors, []);

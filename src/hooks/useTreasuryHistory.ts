@@ -20,6 +20,7 @@ export function useTreasuryHistory(client: TreasuryClient, restored: Intent | nu
   const generation = useRef(0);
   const running = useRef(false);
   const observationVersions = useRef(new Map<string, number>());
+  const restoredRemembered = useRef(false);
   const update = useCallback((action: () => HistoryEntry[]) => {
     try { const next = action(); setEntries(next); setError(""); return next; }
     catch (failure) { const message = `Payment history could not be saved or read: ${failure instanceof Error ? failure.message : String(failure)}. Existing records have been kept.`;
@@ -41,7 +42,8 @@ export function useTreasuryHistory(client: TreasuryClient, restored: Intent | nu
     running.current = true; setChecking(true);
     const current = generation.current;
     try {
-      const saved = restored?.payment ? update(() => store.remember(restored)) : update(() => store.read());
+      const saved = restored?.payment && !restoredRemembered.current ? update(() => store.remember(restored)) : update(() => store.read());
+      restoredRemembered.current = true;
       await client.validate();
       const queue = [...saved].reverse(); let cursor = 0;
       const reconcile = async () => {

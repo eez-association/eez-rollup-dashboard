@@ -62,6 +62,7 @@ export function TreasurySourceVerification() {
   const pending = jobs.some(j => !['verified','reverted','not-applicable'].includes(j.job.status));
   const retryable = jobs.filter(({ job }) => !['verified','reverted','not-applicable','source-unavailable'].includes(job.status));
   if (!unique.length && !error) return null;
+  if (!pending && verified === unique.length && !error) return null;
   return <details className={styles.hint} aria-label="Contract source verification">
     <summary>{error ? 'Contract source verification will retry automatically' : loading ? 'Checking contract sources…' : !pending ? 'Contract sources verified on explorers' : `Publishing to explorers · ${verified} of ${unique.length} verified${partial ? ` · ${partial} partial` : ''}`}</summary>
     {error && <p role="status">{error}</p>}

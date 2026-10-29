@@ -4,7 +4,7 @@ import { decodeFunctionData, encodeAbiParameters, encodeEventTopics, encodeFunct
 import { checkedPayment, fundingPreview, paymentTransaction, parseUSDC } from '../src/lib/treasury/payments.ts';
 import { TreasuryClient, readIntent, safeAbi } from '../src/lib/treasury/client.ts';
 import { safeTransactionHash } from '../src/lib/treasury/safeTransactions.ts';
-import { transferAbi, transferHelper, parseTransferAmount, verifyTransferHelper } from '../src/lib/treasury/transfers.ts';
+import { transferAbi, transferHelper, parseTransferAmount, verifyTransferHelper, transferFunds, transferFunding } from '../src/lib/treasury/transfers.ts';
 const address = n => getAddress(toHex(n, {size:20})), hash = s => keccak256(toHex(s));
 const c = { version:1, environment:'isolated-devnet', instance:hash('treasury'), l1:{chainId:1337,rpc:'http://127.0.0.1/l1',front:'http://127.0.0.1/front/l1'}, l2:{chainId:1338,rpc:'http://127.0.0.1/l2',front:'http://127.0.0.1/front/l2'},
   safeL1:address(1),safeL2:address(2),registry:address(3),manager:address(4),adapter:address(5),code:[],ownerLabels:{},
@@ -12,6 +12,26 @@ const c = { version:1, environment:'isolated-devnet', instance:hash('treasury'),
 const p = {kind:'transfer',source:'l1',destination:'l2',recipient:c.safeL2,amount:'427740000',epoch:'5',rollupId:'1'};
 const transaction = paymentTransaction(c,p,5n);
 const intent = {version:1,instance:c.instance,nonce:'5',value:'0',safeHash:safeTransactionHash(transaction),data:'0x1234',sender:address(20),sourceNonce:'0x4',startBlock:'0x20',l2StartBlock:'0x30',hash:hash('source'),payment:p};
+test('transfer funding reads only the pinned source balance and rejects reorgs and insufficient funds', async () => {
+  const client = new TreasuryClient(c), calls = [];
+  let reorg = false;
+  client.rpc = async (url, method, params) => {
+    assert.equal(url, c.l1.rpc, 'a deposit balance check does not need L2 or payment-budget reads');
+    calls.push({ method, params });
+    if (method === 'eth_getBlockByNumber') return { number: '0x10', hash: hash(reorg && params[0] !== 'latest' ? 'reorg' : 'block'), timestamp: '0x3a98' };
+    assert.equal(method, 'eth_call');
+    assert.equal(params[0].to, c.payments.tokenL1);
+    assert.equal(params[1], '0x10');
+    return encodeAbiParameters([{ type: 'uint256' }], [427740000n]);
+  };
+  const funds = await transferFunds(client);
+  assert.deepEqual(funds, { balance: 427740000n, epoch: 25n });
+  assert.equal(calls.length, 3);
+  assert.deepEqual(transferFunding(funds.balance, 427740000n), { fromL1: 427740000n, fromL2: 0n });
+  assert.throws(() => transferFunding(funds.balance, 427740001n), /Insufficient balance/);
+  reorg = true;
+  await assert.rejects(transferFunds(client), /Chain state changed/);
+});
 test('internal transfer signs an exact approve/bridge/reset batch from the existing L1 Safe', () => {
   assert.equal(parseTransferAmount('427.74'),427740000n); assert.throws(()=>parseUSDC('427.74'),/at most 150/);
   assert.equal(transaction.domain.verifyingContract,c.safeL1); assert.equal(transaction.message.operation,1);
