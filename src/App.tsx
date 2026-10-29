@@ -413,7 +413,7 @@ export function App() {
               <h1 id="page-heading" className="eez-page-heading">Toward a <strong>synchronous Ethereum</strong></h1>
               <p className="eez-description">Experience <strong>atomic synchronous composability</strong> across L1 and L2 with EEZ</p>
             </div>
-            <a className="eez-pill" href="https://eez-demos.vercel.app/" target="_blank" rel="noopener noreferrer">
+            <a className="eez-pill" href="https://build.eez.io/" target="_blank" rel="noopener noreferrer">
               Quickstarts <span className="eez-arrow" aria-hidden="true">→</span>
             </a>
           </section>
@@ -583,7 +583,7 @@ export function App() {
       )}
       <footer className={styles.footer}>
         <span>[ EEZ NETWORK ]</span>
-        <a href="https://eez-demos.vercel.app/" target="_blank" rel="noopener noreferrer">Learn how EEZ works ↗</a>
+        <a href="https://build.eez.io/" target="_blank" rel="noopener noreferrer">Learn how EEZ works ↗</a>
       </footer>
     </>
   );
