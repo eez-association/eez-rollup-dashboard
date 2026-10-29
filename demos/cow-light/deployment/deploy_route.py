@@ -2,7 +2,6 @@
 """Deploy or reuse the selected network's L2 route and deterministic L1 helper."""
 import json, os, sys
 from pathlib import Path
-from eth_account import Account
 from web3 import Web3
 
 BASE=Path(__file__).resolve().parents[1]
@@ -11,6 +10,7 @@ from network_config import load_config
 from deployment.bootstrap_chiado import atomic_json
 from deployment.l2_transactions import L2Transactions
 from deployment.route_identity import authorized_l1_caller
+from deployment.signers import deployment_signer, check_infrastructure
 CFG=load_config()
 L1=Web3(Web3.HTTPProvider(CFG['L1_RPC']))
 L2=Web3(Web3.HTTPProvider(CFG['L2_RPC']))
@@ -21,25 +21,19 @@ FACTORY=Web3.to_checksum_address(CFG['DETERMINISTIC_FACTORY_L1'])
 BRIDGE_L1=Web3.to_checksum_address(CFG['BRIDGE_L1']); WETH_L1=Web3.to_checksum_address(CFG['WETH_L1'])
 MABI=[{'type':'function','name':'computeCrossChainProxyAddress','stateMutability':'view','inputs':[{'type':'address'},{'type':'uint64'}],'outputs':[{'type':'address'}]},{'type':'function','name':'createCrossChainProxy','stateMutability':'nonpayable','inputs':[{'type':'address'},{'type':'uint64'}],'outputs':[{'type':'address'}]}]
 
-def key():
-    if os.getenv('DEPLOYER_PRIVATE_KEY'): return os.environ['DEPLOYER_PRIVATE_KEY']
-    path=os.getenv('DEPLOYER_KEY_FILE')
-    if path:
-        for line in Path(path).read_text().splitlines():
-            if line.startswith(('DEPLOYER_PRIVATE_KEY=','FUZZER_PRIVATE_KEY=')): return line.split('=',1)[1].strip()
-    raise RuntimeError('set DEPLOYER_PRIVATE_KEY or DEPLOYER_KEY_FILE')
 
 def artifact(name):
     d=json.loads((BASE/'contracts'/'out'/f'{name}.sol'/f'{name}.json').read_text()); b=d['bytecode']
     return d['abi'], b['object'] if isinstance(b,dict) else b
 
 def main():
+    check_infrastructure(CFG)
     CFG.check_chains(l1=L1,l2=L2)
     deployment_identity=CFG.deployment_identity(L2)
     cow_identity=CFG.read_manifest('COW_MANIFEST').get('deploymentIdentity') or {}
     if {k:str(v).lower() for k,v in cow_identity.items()} != {k:str(v).lower() for k,v in deployment_identity.items()}:
         raise ValueError('GPv2 deployment identity is missing or stale; validate the current deployment first')
-    a=Account.from_key(key()); mgr=L2.eth.contract(MANAGER,abi=MABI)
+    a=deployment_signer(CFG); mgr=L2.eth.contract(MANAGER,abi=MABI)
     saved=CFG.read_manifest('ROUTE_MANIFEST')
     rabi,rbin=artifact('L2UniversalV2Route'); existing=os.getenv('UNIVERSAL_ROUTE_L2') or saved.get('routeL2')
     habi,hbin=artifact('L1UniversalV2BridgeHelper')

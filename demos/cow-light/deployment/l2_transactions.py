@@ -59,9 +59,20 @@ class L2Transactions:
                 tx.update(validate_fee_quote(request, result['result'],
                     lambda text: Web3.to_hex(Web3.keccak(text=text)), int(time.time()),
                     max_fee_cap=budget // tx['gas']))
+            budget = int(os.environ.get('COW_DEPLOY_MAX_FEE_WEI', '5000000000000000'))
+            if budget <= 0 or tx['gas'] * tx['maxFeePerGas'] > budget:
+                raise ValueError('Deployment transaction exceeds total fee budget')
             if self.l2.eth.get_balance(self.account.address) < tx['value'] + tx['gas'] * tx['maxFeePerGas']:
                 raise ValueError('Insufficient deployer balance for bounded transaction cost')
             signed = self.account.sign_transaction(tx)
+            if cross_chain:
+                # A human may take longer than the Composer quote lifetime.
+                # Never refresh fee fields underneath an existing signature.
+                validate_fee_quote(request, result['result'],
+                    lambda text: Web3.to_hex(Web3.keccak(text=text)), int(time.time()),
+                    max_fee_cap=budget // tx['gas'])
+            if self.front.eth.get_transaction_count(self.account.address, 'pending') != nonce:
+                raise ValueError('Deployer nonce changed during signing; not broadcasting')
             return Web3.to_hex(signed.hash), signed.raw_transaction
 
         def receipt(tx_hash):

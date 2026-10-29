@@ -1,7 +1,7 @@
 import sys
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from deployment.l2_transactions import L2Transactions
@@ -66,6 +66,22 @@ class TransactionSafetyTests(unittest.TestCase):
         self.sender.l2.eth.get_balance.return_value = 0
         with self.assertRaisesRegex(ValueError, 'Insufficient deployer'):
             self.sender.send('stage', lambda: {})
+        self.sender.account.sign_transaction.assert_not_called()
+
+    def test_expired_quote_after_hardware_confirmation_never_returns_signed_bytes(self):
+        self.sender.front.provider.make_request.return_value = {'result': {}}
+        fees = {'maxFeePerGas': 200, 'maxPriorityFeePerGas': 100}
+        with patch('deployment.l2_transactions.validate_fee_quote',
+                   side_effect=[fees, ValueError('quote expired')]):
+            with self.assertRaisesRegex(ValueError, 'quote expired'):
+                self.sender.send('helper', lambda: {'to': '0x' + '22' * 20}, cross_chain=True)
+        self.sender.account.sign_transaction.assert_called_once()
+        self.sender.front.eth.send_raw_transaction.assert_not_called()
+
+    def test_local_transaction_total_budget_applies_before_signing(self):
+        with patch.dict('os.environ', {'COW_DEPLOY_MAX_FEE_WEI': '1'}):
+            with self.assertRaisesRegex(ValueError, 'total fee budget'):
+                self.sender.send('stage', lambda: {})
         self.sender.account.sign_transaction.assert_not_called()
 
 

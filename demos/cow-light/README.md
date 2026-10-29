@@ -441,6 +441,10 @@ have identical executable code but different metadata; that is not an exact matc
 
 ### Mainnet: configure existing assets and liquidity
 
+For Ledger deployments from a workstation with a separate server-side solver, follow
+[the Ledger runbook](deployment/LEDGER.md). It covers signer selection, device
+confirmation, quote expiry, manager ownership, and runtime-record transfer.
+
 Read-only profile audit (does not load signing keys or submit transactions):
 
 ```bash
