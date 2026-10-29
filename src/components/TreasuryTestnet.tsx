@@ -8,7 +8,6 @@ import { savedNetwork, savedNetworkKey } from '../lib/treasury/savedNetwork';
 import { TreasuryMainnetSetup } from './TreasuryMainnetSetup';
 import { TreasuryConnected } from './TreasuryConnected';
 import type { TreasuryWallet } from './TreasuryConnected';
-import { TreasuryPairedHistory } from './TreasuryPairedHistory';
 import { TreasuryPairedRestart } from './TreasuryPairedRestart';
 import styles from './TreasuryDemo.module.css';
 
@@ -66,5 +65,5 @@ export function TreasuryTestnet({ wallet, target, bridgeL1, bridgeL2, token, onB
       if (!lock || validation.current !== pending || !current || JSON.stringify(current) !== JSON.stringify(loaded.deployment)) throw new Error('The selected treasury changed or another action is running');
       await action();
     });
-  }} /><TreasuryPairedHistory target={target} network={network} /><TreasuryPairedRestart network={network} wallet={wallet} onRestart={restart} /></div>;
+  }} /><TreasuryPairedRestart network={network} wallet={wallet} onRestart={restart} /></div>;
 }

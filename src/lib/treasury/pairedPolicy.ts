@@ -31,11 +31,14 @@ export async function validatePairedPayments(client: TreasuryClient) {
   const rollup = c.mainnet ? BigInt(c.mainnet.rollupId) : await contractRead(client, "l2", p.policy, pairedPolicyAbi, "l2RollupId", [], blocks[1]!.number) as bigint;
   const registered = async (chain: "l1" | "l2", proxy: Address, original: Address, origin: bigint, tag: Hex) => {
     const manager = chain === "l1" ? c.registry : c.manager;
-    const expected = await contractRead(client, chain, manager, registryAbi, "computeCrossChainProxyAddress", [original, origin], tag) as Address;
-    const [valid, owner, source] = await contractRead(client, chain, manager, registryAbi, "authorizedProxies", [proxy], tag) as [boolean, Address, bigint];
-    check(same(expected, proxy) && valid && same(owner, original) && source === origin, "Paired policy proxy identity changed");
+    const [expected, registration] = await Promise.all([
+      contractRead(client, chain, manager, registryAbi, "computeCrossChainProxyAddress", [original, origin], tag),
+      contractRead(client, chain, manager, registryAbi, "authorizedProxies", [proxy], tag),
+    ]);
+    const [valid, owner, source] = registration as [boolean, Address, bigint];
+    check(same(expected as Address, proxy) && valid && same(owner, original) && source === origin, "Paired policy proxy identity changed");
   };
-  for (const [i, chain] of (["l1", "l2"] as const).entries()) {
+  await Promise.all((["l1", "l2"] as const).map(async (chain, i) => {
     const onL1 = chain === "l1", tag = blocks[i]!.number;
     const policy = onL1 ? pair.policyL1 : p.policy, safe = onL1 ? c.safeL1 : c.safeL2;
     const module = onL1 ? p.moduleL1 : p.moduleL2, token = onL1 ? p.tokenL1 : p.tokenL2;
@@ -62,9 +65,10 @@ export async function validatePairedPayments(client: TreasuryClient) {
     check(enabled === true && decimals === 6 && a[0] === 100_000_000n && a[2] === 10n && a[3]! % 10n === 0n,
       "Paired Safe allowance configuration changed");
     await registered(chain, peerProxy, peerPolicy, onL1 ? rollup : 0n, tag);
-  }
+  }));
   await registered("l1", p.safeL2Alias!, c.safeL2, rollup, blocks[0]!.number);
-  for (const [i, chain] of (["l1", "l2"] as const).entries())
+  await Promise.all((["l1", "l2"] as const).map(async (chain, i) => {
     check((await client.rpc<Block>(c[chain].rpc, "eth_getBlockByNumber", [blocks[i]!.number, false]))?.hash === blocks[i]!.hash,
       "Paired policy observations changed; retry validation");
+  }));
 }

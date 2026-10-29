@@ -9,7 +9,6 @@ import { parseTreasuryConfig, requireDashboardTreasury } from '../lib/treasury/c
 import { TreasuryConnected } from './TreasuryConnected';
 import type { TreasuryWallet } from './TreasuryConnected';
 import profile from '../lib/treasury/paired-testnet-network.json';
-import { TreasuryPairedHistory } from './TreasuryPairedHistory';
 import { TreasuryPairedRestart } from './TreasuryPairedRestart';
 import styles from './TreasuryDemo.module.css';
 
@@ -59,8 +58,7 @@ function TreasuryDemoView({ wallet, ready, onBridgeGas }: TreasuryDemoProps) {
       if (!lock || loadMainnetManifest(localStorage, network)?.instance !== deployment.instance) throw new Error('The selected treasury changed or another action is running');
       await action();
     });
-  } : undefined} />{network && !config.treasury && <><TreasuryPairedHistory target={target} network={network} />
-    <TreasuryPairedRestart network={network} wallet={wallet} onRestart={restart} /></>}</div>;
+  } : undefined} />{network && !config.treasury && <TreasuryPairedRestart network={network} wallet={wallet} onRestart={restart} />}</div>;
 }
 export function TreasuryDemo(props: TreasuryDemoProps) {
   return <><TreasuryDemoView {...props} />{props.ready && <TreasurySourceVerification />}</>;

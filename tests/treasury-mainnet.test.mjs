@@ -4,7 +4,8 @@ import { readFileSync } from 'node:fs';
 import { decodeFunctionData, encodeFunctionResult, keccak256, parseAbi, toHex, zeroAddress } from 'viem';
 import { parseTreasuryConfig, requireDashboardTreasury, TreasuryClient } from '../src/lib/treasury/client.ts';
 import { ETHEREUM_USDC, EIP1967_IMPLEMENTATION_SLOT, USDC_IMPLEMENTATION_SLOT, treasuryExplorer, validateMainnet } from '../src/lib/treasury/mainnet.ts';
-import { paymentTransaction } from '../src/lib/treasury/payments.ts';
+import { paymentTransaction, tokenAbi, moduleAbi, allowanceAbi } from '../src/lib/treasury/payments.ts';
+import { pairedPolicyAbi, validatePairedPayments } from '../src/lib/treasury/pairedPolicy.ts';
 import { safeTransactionHash } from '../src/lib/treasury/safeTransactions.ts';
 const a = n => toHex(n, { size: 20 }), h = s => keccak256(toHex(s));
 const implementation = a(23);
@@ -102,6 +103,32 @@ test('mainnet validation binds USDC implementation, rollup and wrapped mint auth
   assert(f.calls.every(c => ['eth_getBlockByNumber', 'eth_getCode', 'eth_getStorageAt', 'eth_call'].includes(c.method)));
 });
 
+test('each mainnet action reads bytecode once, overlaps reads, and verifies fresh state again on the next action', async () => {
+  const f = fixture(), rpc = f.client.rpc;
+  let active = 0, peak = 0;
+  f.client.rpc = async (url, method, params) => {
+    const chain = url === f.c.l1.rpc ? 'l1' : 'l2';
+    if (method === 'eth_chainId') return toHex(f.c[chain].chainId);
+    if (method === 'eth_getBlockByNumber' && params[0] === '0x0') return { hash: f.c[chain].genesis };
+    if (method !== 'eth_getCode') return rpc(url, method, params);
+    peak = Math.max(peak, ++active);
+    await new Promise(resolve => setTimeout(resolve, 5));
+    try { return await rpc(url, method, params); } finally { active--; }
+  };
+  // Isolate the deployment audit; paired-policy bindings have their own validation.
+  f.client.validatePayments = async () => {};
+  f.client.read = async (_url, _address, _abi, name) => ({
+    VERSION: '1.4.1', getOwners: [f.c.adapter], getThreshold: 1n, safeL1: f.c.safeL1, manager: f.c.manager,
+  })[name];
+  await f.client.validate();
+  assert(peak > 1, 'bytecode reads should overlap');
+  const codeReads = f.calls.filter(c => c.method === 'eth_getCode');
+  assert.equal(codeReads.length, f.c.code.length, 'no duplicate latest-state bytecode sweep');
+  assert(codeReads.every(c => c.params[1] === '0x10'), 'all bytecode reads use the checked observation block');
+  f.changes.codes[implementation] = '0x6001';
+  await assert.rejects(f.client.validate(), /code changed/, 'successful validation must not cache state across actions');
+});
+
 test('a proxy upgrade blocks verification even while the proxy bytecode is unchanged', async () => {
   for (const [target, slot] of [[ETHEREUM_USDC, USDC_IMPLEMENTATION_SLOT], [a(17), EIP1967_IMPLEMENTATION_SLOT], [a(4), toHex(0, { size: 32 })], [a(2), EIP1967_IMPLEMENTATION_SLOT]]) {
     const f = fixture(); f.changes.slots[`${target}:${slot}`] = toHex(100, { size: 32 });
@@ -170,4 +197,38 @@ test('upgradeable bridge implementations must be explicitly bound and verified',
   await validateMainnet(f.client);
   f.changes.codes[target] = '0x6001';
   await assert.rejects(validateMainnet(f.client), /code changed/);
+});
+
+
+test('parallel paired-policy verification still rejects changed bindings, inactive policies, wrong proxies and reorgs', async () => {
+  const c = config();
+  c.payments.pair = { version: 2, policyL1: a(40), peerProxyL2: a(41) };
+  const p = c.payments, pair = p.pair;
+  const registry = parseAbi(['function computeCrossChainProxyAddress(address,uint64) view returns(address)', 'function authorizedProxies(address) view returns(bool,address,uint64)']);
+  const abi = [...pairedPolicyAbi, ...tokenAbi, ...moduleAbi, ...allowanceAbi, ...registry];
+  let change = '';
+  const client = new TreasuryClient(c);
+  client.rpc = async (url, method, params) => {
+    const onL1 = url === c.l1.rpc, chain = onL1 ? 'l1' : 'l2';
+    if (method === 'eth_getBlockByNumber') return { number: '0x10', hash: h(change === 'reorg' && params[0] !== 'latest' ? 'reorg' : chain) };
+    assert.equal(method, 'eth_call'); assert.equal(params[1], '0x10');
+    const { functionName: name, args } = decodeFunctionData({ abi, data: params[0].data });
+    const safe = onL1 ? c.safeL1 : c.safeL2, peerPolicy = onL1 ? p.policy : pair.policyL1;
+    const proxy = onL1 ? p.alias : pair.peerProxyL2;
+    let result = { configuration: [safe, p.tokenL1, onL1 ? p.bridgeL1 : p.bridgeL2, onL1 ? p.bridgeL2 : p.bridgeL1,
+      onL1 ? 0n : 7n, 7n, change === 'binding' ? a(99) : peerPolicy, proxy],
+      PAIR_VERSION: 2n, active: change !== 'inactive', PERIOD: 600n, GLOBAL_LIMIT: 150000000n,
+      token: onL1 ? p.tokenL1 : p.tokenL2, allowanceModule: onL1 ? p.moduleL1 : p.moduleL2, manager: onL1 ? c.registry : c.manager,
+      peerSafe: onL1 ? c.safeL2 : c.safeL1, localAliasOnPeer: onL1 ? pair.peerProxyL2 : p.alias,
+      isModuleEnabled: true, decimals: 6, getTokenAllowance: [100000000n, 0n, 10n, 0n, 0n] }[name];
+    if (name === 'computeCrossChainProxyAddress') result = args[0].toLowerCase() === c.safeL2.toLowerCase() ? p.safeL2Alias : proxy;
+    if (name === 'authorizedProxies') result = [change !== 'proxy', args[0].toLowerCase() === p.safeL2Alias.toLowerCase() ? c.safeL2 : peerPolicy, onL1 ? 7n : 0n];
+    assert.notEqual(result, undefined, name);
+    return encodeFunctionResult({ abi, functionName: name, result });
+  };
+  await validatePairedPayments(client);
+  for (const [failure, message] of [['binding', /configuration changed/], ['inactive', /activation/], ['proxy', /proxy identity/], ['reorg', /observations changed/]]) {
+    change = failure;
+    await assert.rejects(validatePairedPayments(client), message);
+  }
 });

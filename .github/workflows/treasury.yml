@@ -71,6 +71,8 @@ jobs:
           node tests/treasury-payment-history-browser.mjs
           node tests/treasury-history-loading-browser.mjs
           node tests/treasury-payment-signing-browser.mjs
+          node tests/treasury-transfer-review-browser.mjs
+          node tests/treasury-reload-browser.mjs
           node tests/integration/treasury-paired-setup.mjs --browser
           node tests/treasury-verification-browser.mjs
           node tests/trace-details.cjs

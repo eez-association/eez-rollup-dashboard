@@ -1,7 +1,7 @@
 import { retainSourceRequests } from "../lib/treasury/sourceVerification";
 import { loadTreasuryArtifacts } from "../lib/treasury/release";
 import { useEffect, useRef, useState } from "react";
-import { formatEther, getAddress, isAddress } from "viem";
+import { getAddress, isAddress } from "viem";
 import type { Address, Hex } from "viem";
 import type { TreasuryWallet } from "./TreasuryConnected";
 import type { TreasuryConfig } from "../lib/treasury/client";
@@ -34,7 +34,6 @@ export function TreasuryMainnetSetup({ wallet, target, onComplete, onBridgeGas, 
     return () => clearInterval(timer);
   }, [confirmationKey]);
   const [balances, setBalances] = useState<{ address: Address; l1: bigint; l2: bigint } | null>(null);
-  const [balanceError, setBalanceError] = useState("");
   const heading = useRef<HTMLHeadingElement>(null);
   const selectedWallet = useRef(wallet); selectedWallet.current = wallet;
   useEffect(() => {
@@ -74,8 +73,8 @@ export function TreasuryMainnetSetup({ wallet, target, onComplete, onBridgeGas, 
     const poll = async () => {
       try {
         const [l1, l2] = await Promise.all((["l1", "l2"] as const).map(chain => engine.io.rpc<Hex>(chain, "eth_getBalance", [address, "latest"])));
-        if (alive) { setBalances({ address, l1: BigInt(l1!), l2: BigInt(l2!) }); setBalanceError(""); }
-      } catch { if (alive) { setBalances(null); setBalanceError("Wallet gas balances are unavailable. Retrying automatically."); } }
+        if (alive) setBalances({ address, l1: BigInt(l1!), l2: BigInt(l2!) });
+      } catch { if (alive) setBalances(null); }
       finally { if (alive) timer = setTimeout(poll, 5000); }
     };
     void poll(); return () => { alive = false; clearTimeout(timer); };
@@ -174,16 +173,14 @@ export function TreasuryMainnetSetup({ wallet, target, onComplete, onBridgeGas, 
       <p>Create two new Safes, or connect your existing {l1Name} Safe and its EEZ-X mirror.</p>
     </div><span className={styles.badge}>{network.testnet ? "Shared testnet" : "Ethereum + EEZ-X"}</span></div>
     {!state ? <section className={styles.card}><h3>Choose your Safes</h3>
-      <p className={styles.safeExplanation}>EEZ-X verifies each transaction against your {l1Name} Safe’s current owners and approval threshold. Manage owners on {l1Name}, and <strong>both Safes stay in sync automatically.</strong></p>
+      <p className={styles.safeExplanation}>Manage owners on {l1Name}, and <strong>both Safes stay in sync automatically.</strong></p>
       <div className={styles.setupOptions} role="group" aria-label="Safe setup options">
         <button type="button" className={`btn ${createBoth ? "btn-solid" : "btn-outline"}`} aria-pressed={createBoth} disabled={busy} onClick={() => setCreateBoth(true)}>Create new Safes</button>
         <button type="button" className={`btn ${!createBoth ? "btn-solid" : "btn-outline"}`} aria-pressed={!createBoth} disabled={busy} onClick={() => setCreateBoth(false)}>Use an existing Safe</button>
       </div>
       {createBoth ? <div className={styles.stepContext} aria-label="New Safe ownership">
         <p>Both Safes start with your connected wallet as their only owner (1 of 1).</p>
-        {wallet.address && <p>Owner: <code>{wallet.address}</code></p>}
         <p>The first EEZ-X Safe transaction replaces that wallet owner with <strong>L1Owners</strong>, together with its spending setup. Afterward, manage both Safes’ owners from {l1Name}.</p>
-        <p className={styles.hint}>Both Safes will have the same address, with independent balances and transactions on each chain. You can resume setup after closing the dashboard.</p>
       </div> : <div className={styles.safeChoices}>
         <div className={styles.fields}><label className={styles.chainLabel} data-chain="l1" htmlFor="mainnet-safe">{l1Name} Safe address</label>
           <input id="mainnet-safe" aria-describedby="mainnet-safe-hint" value={safeL1} onChange={e => setSafeL1(e.target.value)} placeholder="0x…" disabled={busy}/>
@@ -223,9 +220,6 @@ export function TreasuryMainnetSetup({ wallet, target, onComplete, onBridgeGas, 
       <section className={styles.stepDetails} aria-label="Transaction actions"><h4>What this transaction does</h4><ul>{step.details.map(text => <li key={text}>{text}</li>)}</ul></section>
       {!wallet.address && connect}
       {wrongDeployer && wallet.address && <p className={styles.notice}>Reconnect the recorded deployment wallet <code>{state.deployer}</code> to continue this transaction.</p>}
-      {wallet.address && <details className={styles.disclosure}><summary>Wallet gas balances</summary>
-        {gasKnown ? <><p>{l1Name}: {formatEther(balances!.l1)} {symbol}</p><p>EEZ-X: {formatEther(balances!.l2)} {symbol}</p></> : <p>{balanceError || "Reading wallet gas balances…"}</p>}
-      </details>}
       {noGas && !state.pending && <section className={styles.gasNotice} aria-label="Wallet gas required">
         <span className={styles.gasNoticeIcon} aria-hidden="true"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
           <path d="M3 21V5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v16M2 21h12M3 10h10M13 13h2a2 2 0 0 1 2 2v3a2 2 0 0 0 4 0V9l-3-3M18 6v3h3" />
