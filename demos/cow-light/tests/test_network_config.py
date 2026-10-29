@@ -129,6 +129,20 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual(cfg['L2_RPC'], 'http://shared')
         self.assertEqual(cfg['L2_ROLLUP_ID'], 4)
 
+    def test_public_endpoints_do_not_replace_internal_rpcs(self):
+        path = self.root / '.env'
+        path.write_text('COW_PUBLIC_L1_RPC=https://dashboard.example/rpc/l1\n'
+                        'COW_PUBLIC_L2_FRONT=https://dashboard.example/composer/l2\n')
+        cfg = self.config(COW_ENV_FILE=str(path), L1_RPC='http://127.0.0.1:18645',
+                          L2_FRONT='http://127.0.0.1:18998')
+        self.assertEqual(cfg['L1_RPC'], 'http://127.0.0.1:18645')
+        self.assertEqual(cfg['L2_FRONT'], 'http://127.0.0.1:18998')
+        self.assertEqual(cfg['COW_PUBLIC_L1_RPC'], 'https://dashboard.example/rpc/l1')
+        self.assertEqual(cfg['COW_PUBLIC_L2_FRONT'], 'https://dashboard.example/composer/l2')
+        for value in ('file:///rpc', 'https://user:password@example.com', 'https:///rpc'):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                self.config(COW_PUBLIC_L2_FRONT=value)
+
     def test_env_file_shell_substitution_is_rejected(self):
         path = self.root / '.env'
         for value in ('$(echo secret)', '${OTHER_RPC}', '`echo secret`'):

@@ -34,6 +34,22 @@ test('order history is isolated by profile, chain and settlement', () => {
   assert.notEqual(chiado, b.run('orderStorageKey()'));
 });
 
+test('approval is limited to the fresh quote amount', async () => {
+  const b = browser();
+  let approved;
+  b.context.ethers = { Contract: class {
+    async approve(spender, amount) { approved = { spender, amount }; return { async wait() {} }; }
+  } };
+  b.run("cfg={wethL2:'token',vaultRelayer:'relayer'}; signer={}; account='owner'; quoteData={amountIn:'1000000000000000'}; refreshAllowance=async()=>{}");
+  await b.run("$('approve').onclick()");
+  assert.deepEqual(approved, { spender: 'relayer', amount: 1000000000000000n });
+  approved = undefined;
+  b.run('quoteData=null');
+  await b.run("$('approve').onclick()");
+  assert.equal(approved, undefined);
+  assert.match(b.elements.get('status').textContent, /fresh quote/);
+});
+
 test('activity links use the selected explorers and omit unconfigured links', () => {
   const b = browser();
   b.run("cfg={l1Explorer:'https://chiado.example',l2Explorer:'https://eezx.example/'}; submitted=[{id:'test',status:'settled',symbol:'TEST',sellAmount:'1',buyAmount:'1',solverDebug:{l1Tx:'0x111',txHash:'0x222'}}]; renderOrders()");

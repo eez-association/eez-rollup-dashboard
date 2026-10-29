@@ -130,6 +130,18 @@ settings override shared aliases; shared settings now override saved deployment
 snapshots. Thus a snapshot cannot silently retain an old bridge or rollup ID
 when the shared environment changes. Chiado has no default rollup ID.
 
+When the API uses localhost or container RPCs, set `COW_PUBLIC_L1_RPC` and
+`COW_PUBLIC_L2_FRONT` in that same `.env` to their browser-reachable HTTP(S)
+URLs. These only change the endpoints advertised by `/api/config`; backend
+reads and solver submissions keep using the internal upstreams. Do not put
+credentials in public endpoint URLs. Wallet approval is limited to the current
+quote's sell amount.
+
+The current rollup-4 ROG deployment is recorded in
+[`deployment/records/rog-916969-r4.json`](deployment/records/rog-916969-r4.json),
+with a portable configuration in `config/deployments/rog-916969-r4.json` and
+operations notes in [`deployment/ROG-r4.md`](deployment/ROG-r4.md).
+
 New GPv2 and route manifests retain the L2 genesis and their infrastructure/token
 bindings. The API checks these before providing trading configuration, quotes,
 or accepting orders; the solver checks them before processing orders. Missing

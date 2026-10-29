@@ -210,7 +210,7 @@ class Handler(BaseHTTPRequestHandler):
                         'error':'Deployment required or network verification unavailable. Check the configured RPCs and deployment identity.'},503)
             if p.path in ("/","/index.html"):
                 b=(UI/"index.html").read_bytes();self.send_response(200);self.send_header("content-type","text/html; charset=utf-8");self.send_header("content-length",str(len(b)));self.end_headers();self.wfile.write(b);return
-            if p.path=="/api/config":return self.send_json({"network":CFG['NETWORK'],"l1NativeSymbol":CFG['L1_NATIVE_SYMBOL'],"l2NativeSymbol":CFG['L2_NATIVE_SYMBOL'],"l1Explorer":CFG.get('L1_EXPLORER'),"l2Explorer":CFG.get('L2_EXPLORER'),"l1ChainId":L1_CHAIN,"l2ChainId":L2_CHAIN,"l1Rpc":L1_RPC,"l2Front":L2_FRONT,"settlement":SETTLEMENT,"vaultRelayer":vault_relayer(),"wethL1":WETH,"wethL2":WETH_L2,"nativeWethL2":NATIVE_WETH_L2,"bridgeL2":BRIDGE_L2})
+            if p.path=="/api/config":return self.send_json({"network":CFG['NETWORK'],"l1NativeSymbol":CFG['L1_NATIVE_SYMBOL'],"l2NativeSymbol":CFG['L2_NATIVE_SYMBOL'],"l1Explorer":CFG.get('L1_EXPLORER'),"l2Explorer":CFG.get('L2_EXPLORER'),"l1ChainId":L1_CHAIN,"l2ChainId":L2_CHAIN,"l1Rpc":CFG.get('COW_PUBLIC_L1_RPC',L1_RPC),"l2Front":CFG.get('COW_PUBLIC_L2_FRONT',L2_FRONT),"settlement":SETTLEMENT,"vaultRelayer":vault_relayer(),"wethL1":WETH,"wethL2":WETH_L2,"nativeWethL2":NATIVE_WETH_L2,"bridgeL2":BRIDGE_L2})
             if p.path=="/api/health":
                 # Keep this endpoint read-only and bounded: it is used by the UI
                 # as an operator signal, not as a transaction submission path.

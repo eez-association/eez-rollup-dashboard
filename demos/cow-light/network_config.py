@@ -9,6 +9,7 @@ import re
 import shlex
 from pathlib import Path
 from urllib.request import Request, urlopen
+from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parent
 INTEGER_KEYS = ('L1_CHAIN_ID', 'L2_CHAIN_ID', 'L2_ROLLUP_ID', 'WRAPPER_PREFIX_LEN')
@@ -30,6 +31,7 @@ SHARED_SETTINGS = {
 }
 IDENTITY_KEYS = ('L1_CHAIN_ID', 'L2_CHAIN_ID', 'L2_ROLLUP_ID', 'BRIDGE_L1',
                  'BRIDGE_L2', 'EEZ_MANAGER_L2', 'WETH_L1', 'WETH_L2')
+PUBLIC_ENDPOINT_KEYS = ('COW_PUBLIC_L1_RPC', 'COW_PUBLIC_L2_FRONT')
 
 
 def environment(environ):
@@ -39,7 +41,7 @@ def environment(environ):
     if not path:
         return explicit
     allowed = {'COW_NETWORK', 'COW_DEPLOYMENT_ENV', 'L2_GENESIS_HASH',
-               *INTEGER_KEYS, *PATH_KEYS, *ADDRESS_KEYS, *SHARED_SETTINGS,
+               *INTEGER_KEYS, *PATH_KEYS, *ADDRESS_KEYS, *PUBLIC_ENDPOINT_KEYS, *SHARED_SETTINGS,
                *SHARED_SETTINGS.values()}
     values = {}
     for line in Path(path).expanduser().read_text().splitlines():
@@ -210,6 +212,12 @@ def load_config(environ=None, root=ROOT):
         if not env.get(key) and env.get(shared):
             env[key] = env[shared]
     values['NETWORK'] = network
+    for key in PUBLIC_ENDPOINT_KEYS:
+        if env.get(key):
+            endpoint = urlsplit(env[key])
+            if endpoint.scheme not in ('http','https') or not endpoint.hostname or endpoint.username or endpoint.password:
+                raise ValueError(f'{key}: expected a public HTTP(S) URL without credentials')
+            values[key] = env[key]
     if env.get('L2_GENESIS_HASH'):
         if not re.fullmatch(r'0x[0-9a-fA-F]{64}', env['L2_GENESIS_HASH']):
             raise ValueError('Invalid L2_GENESIS_HASH')

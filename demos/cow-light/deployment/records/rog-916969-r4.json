@@ -1,0 +1,176 @@
+{
+  "version": 1,
+  "observedDate": "2026-10-29",
+  "status": "dashboard-swap-tested",
+  "network": "chiado",
+  "identity": {
+    "L1_CHAIN_ID": 10200,
+    "L2_CHAIN_ID": 916969,
+    "L2_ROLLUP_ID": 4,
+    "BRIDGE_L1": "0x44eAf2768f6BaEe901192a97728a42978bED4eA1",
+    "BRIDGE_L2": "0x61E1aCdCEC0a4993a9C85141187602119AddEB59",
+    "EEZ_MANAGER_L2": "0x4B2760F84B83d6b3829E30A7573B0172B6d6402C",
+    "WETH_L1": "0xc04DF6a3C039c7B9b5097387f052037B171180dB",
+    "WETH_L2": "0x4b19045a60dFC46E125672cFc34741883f4C8B9e",
+    "L2_GENESIS_HASH": "0xbb9e52d97581ec62134cdfd6a4c21330de6002557f66fb8bd49b3e2f800d80ae"
+  },
+  "deployer": "0xbfD6EDf2C306d93334bF0e912A00B22bCFEa1BD9",
+  "officialBridgesReused": true,
+  "l1AssetsReusedFrom": "rog-916969.json",
+  "cowManifest": {
+    "network": "chiado",
+    "l1ChainId": 10200,
+    "chainId": 916969,
+    "rpc": "http://127.0.0.1:18688",
+    "deployer": "0xbfD6EDf2C306d93334bF0e912A00B22bCFEa1BD9",
+    "authenticator": "0x273Ea4A1003c7f2c58372e24987c25A92D2855C3",
+    "settlement": "0x6EE612c09e396fD6374a100B83e0f027408e9ccd",
+    "deploymentIdentity": {
+      "L1_CHAIN_ID": 10200,
+      "L2_CHAIN_ID": 916969,
+      "L2_ROLLUP_ID": 4,
+      "BRIDGE_L1": "0x44eAf2768f6BaEe901192a97728a42978bED4eA1",
+      "BRIDGE_L2": "0x61E1aCdCEC0a4993a9C85141187602119AddEB59",
+      "EEZ_MANAGER_L2": "0x4B2760F84B83d6b3829E30A7573B0172B6d6402C",
+      "WETH_L1": "0xc04DF6a3C039c7B9b5097387f052037B171180dB",
+      "WETH_L2": "0x4b19045a60dFC46E125672cFc34741883f4C8B9e",
+      "L2_GENESIS_HASH": "0xbb9e52d97581ec62134cdfd6a4c21330de6002557f66fb8bd49b3e2f800d80ae"
+    },
+    "vaultRelayer": "0xCFc19D691192d1120293c1D1Ee5F3a859783F093",
+    "deploymentTxs": {
+      "authenticator": "0xe3d62c75e30ece1f9c015d8d658c8fcbcea8bb1b97dabc957057e88ce432495d",
+      "initializeManager": "0xd3792b9ce302b468496479638fdb29025ce3f126513ceeeaabbaa990d43250ff",
+      "addSolver": "0x4ccef272a6e57a9a749039c3d40bf1d85f2359c16f0eb6777ca3d78ee7cf77fe",
+      "settlement": "0x44a16bf491069547f61cca9a4c3c87172604dc0a32c2631704d826c71f72a109"
+    }
+  },
+  "routeManifest": {
+    "network": "chiado",
+    "l1ChainId": 10200,
+    "chainId": 916969,
+    "settlement": "0x6EE612c09e396fD6374a100B83e0f027408e9ccd",
+    "routeL2": "0x5d2278E0FB57c8CAEb62441598ed4e433ACf5871",
+    "l1Helper": "0xC0b1fFa8f36Ec6cF7e43f6f69305Eb89Da05154e",
+    "authorizedL1Caller": "0xadd315c9C218CB4Cd10756a7229f634869EA2303",
+    "l2HelperProxy": "0xBec0AAa0b4428F90a35dB5367E39D4E3EcFe005f",
+    "factoryProxyL2": "0xF412887781a39C67CCf5e5DCEfC9E35030826ceD",
+    "deploymentTx": "0x9a510ef03f4e491bc1305337ba9fe5bb79624f7dbae6e302b2ae1d8ca41c8b6e",
+    "deploymentTxs": {
+      "route": "0x9a510ef03f4e491bc1305337ba9fe5bb79624f7dbae6e302b2ae1d8ca41c8b6e",
+      "factoryProxy": "0x71a1b29f569d20b43db9d6a37a66a98868310ffeef7367d8b1fe6234e3da16b2",
+      "helperProxy": "0xa2e11c3298b7c44a8014490f4698a68d113e27795bd192f251416e183d90ba39",
+      "helper": "0x27a21d28f174bc7a34b8dfc72243629fbf453760ecc13cb769d5c8ff47d70045",
+      "configure": "0x8f853d7254af66d7ed3a0f45382ca50ae4a533c34874527efe3a10c5f6dfe7ec"
+    },
+    "deploymentIdentity": {
+      "L1_CHAIN_ID": 10200,
+      "L2_CHAIN_ID": 916969,
+      "L2_ROLLUP_ID": 4,
+      "BRIDGE_L1": "0x44eAf2768f6BaEe901192a97728a42978bED4eA1",
+      "BRIDGE_L2": "0x61E1aCdCEC0a4993a9C85141187602119AddEB59",
+      "EEZ_MANAGER_L2": "0x4B2760F84B83d6b3829E30A7573B0172B6d6402C",
+      "WETH_L1": "0xc04DF6a3C039c7B9b5097387f052037B171180dB",
+      "WETH_L2": "0x4b19045a60dFC46E125672cFc34741883f4C8B9e",
+      "L2_GENESIS_HASH": "0xbb9e52d97581ec62134cdfd6a4c21330de6002557f66fb8bd49b3e2f800d80ae"
+    }
+  },
+  "wrappers": {
+    "testWethL1": "0x4b19045a60dFC46E125672cFc34741883f4C8B9e",
+    "testUsdL1": "0x42042ccECe40d68f3D4034976615d555DABE8D7F"
+  },
+  "fundingTransactions": {
+    "gas": "0x21e9169475de6b969ffc0ef1db318ac9d081afe160b4b9cc902b6ec6cdd069db",
+    "approve-testWethL1": "0x9419c6b779229f44241f5d907615357ad510c299294d13e8aad6d3444243dd75",
+    "bridge-testWethL1": "0x40b4b7e84d84e7efee3ae0bef52b392898314e3cdcbb20499d99f70d838b12e5",
+    "approve-testUsdL1": "0xdb7292b0922962d5e2034c9ae9138f5b19c6845588e2f87a46c3048b662f9c83",
+    "bridge-testUsdL1": "0x835c330e2a8c1cc908fa1314ac6a29a11499f9e70a1801bb77f135f079266151"
+  },
+  "verification": {
+    "cow": {
+      "GPv2AllowListAuthentication": {
+        "address": "0x273Ea4A1003c7f2c58372e24987c25A92D2855C3",
+        "verified": true
+      },
+      "GPv2Settlement": {
+        "address": "0x6EE612c09e396fD6374a100B83e0f027408e9ccd",
+        "verified": true
+      },
+      "GPv2VaultRelayer": {
+        "address": "0xCFc19D691192d1120293c1D1Ee5F3a859783F093",
+        "verified": true
+      }
+    },
+    "route": {
+      "routeL2": {
+        "address": "0x5d2278E0FB57c8CAEb62441598ed4e433ACf5871",
+        "verified": true
+      },
+      "l1Helper": {
+        "address": "0xC0b1fFa8f36Ec6cF7e43f6f69305Eb89Da05154e",
+        "verified": true
+      },
+      "factoryProxyL2": {
+        "address": "0xF412887781a39C67CCf5e5DCEfC9E35030826ceD",
+        "verified": true
+      },
+      "l2HelperProxy": {
+        "address": "0xBec0AAa0b4428F90a35dB5367E39D4E3EcFe005f",
+        "verified": true
+      },
+      "authorizedL1Caller": {
+        "address": "0xadd315c9C218CB4Cd10756a7229f634869EA2303",
+        "verified": true
+      }
+    },
+    "wrapper": {
+      "testWethL1": {
+        "address": "0x4b19045a60dFC46E125672cFc34741883f4C8B9e",
+        "verified": true
+      },
+      "testUsdL1": {
+        "address": "0x42042ccECe40d68f3D4034976615d555DABE8D7F",
+        "verified": true
+      }
+    }
+  },
+  "browserTest": {
+    "url": "https://eez.asuscomm.com/dashboard/",
+    "wallet": "Controlled EIP-1193 test provider; private key retained in local Node process. Real browser controls, API, solver and chain; no network mocks.",
+    "orderId": "20a3c9679bdc48579787b5632b6e704a",
+    "approval": "0x9d812dc06c58bd844f745e87a307deb427f734f7e6769137a16466f3e7fe9fd7",
+    "sellAmount": "1000000000000000",
+    "minimumBuyAmount": "96708710453928352",
+    "receivedAmount": "99699701498895209",
+    "balancesBefore": {
+      "sell": "1000000000000000000",
+      "buy": "1000000000000000000"
+    },
+    "balancesAfter": {
+      "sell": "999000000000000000",
+      "buy": "1099699701498895209"
+    },
+    "receipts": {
+      "l1": {
+        "hash": "0xaeaacfa86a6996a795d5233b4ce69eeaab8a14d208320acb525270e61eece208",
+        "blockNumber": 23745591,
+        "blockHash": "0x19655a35b73882c8ce099a356ee10f9c20a39bd455eb3a45db29099d7c7dca82",
+        "status": 1
+      },
+      "l2": {
+        "hash": "0xfa4975be7e87a50441a0c66a5d00558981e884a38c39612e06d248934c38be29",
+        "blockNumber": 78540,
+        "blockHash": "0xf3bc53f2e58ad6e645835113b286de392433d3a76cf6cca9d622369e7d42ec8b",
+        "status": 1
+      }
+    },
+    "canonicalSettlementConfirmed": true,
+    "consensusFinalityAsserted": false
+  },
+  "checks": {
+    "preparationL1ReceiptsFinalized": true,
+    "l1FinalizedCheckpoint": {
+      "number": 23745594,
+      "hash": "0x45d46a53be5cc8c4c6732a0e891588738202b437824315f5adb6d969afe39ee0"
+    }
+  }
+}
