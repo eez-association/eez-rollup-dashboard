@@ -117,13 +117,22 @@ function Trading({ cfg, tokens, wallet }: { cfg: CowConfig; tokens: CowToken[]; 
     let timer: ReturnType<typeof setTimeout>;
     setWrapper(null); setAllowance(null); setBuyBalance(null);
     const poll = async () => {
-      try {
-        const w = await api<{ wrapper: string; deployed: boolean }>(`/wrapper?token=${tokenAddress}`);
-        const a = wallet.address ? await api<Allowance>(`/allowance?owner=${wallet.address}`) : null;
-        const b = wallet.address ? await api<{ selected?: { balance: string } }>(`/balances?owner=${wallet.address}&token=${tokenAddress}`) : null;
-        if (active) { setWrapper(w); setAllowance(a); setBuyBalance(b?.selected?.balance ?? null); setReadError(''); }
-      } catch (e) { if (active) { setAllowance(null); setReadError((e as Error).message); } }
-      finally { if (active) timer = setTimeout(poll, 15000); }
+      const results = await Promise.allSettled([
+        api<{ wrapper: string; deployed: boolean }>(`/wrapper?token=${tokenAddress}`)
+          .then(w => { if (active) setWrapper(w); })
+          .catch(e => { if (active) setWrapper(null); throw e; }),
+        (wallet.address ? api<Allowance>(`/allowance?owner=${wallet.address}`) : Promise.resolve(null))
+          .then(a => { if (active) setAllowance(a); })
+          .catch(e => { if (active) setAllowance(null); throw e; }),
+        (wallet.address ? api<{ selected?: { balance: string } }>(`/balances?owner=${wallet.address}&token=${tokenAddress}`) : Promise.resolve(null))
+          .then(b => { if (active) setBuyBalance(b?.selected?.balance ?? null); })
+          .catch(e => { if (active) setBuyBalance(null); throw e; }),
+      ]);
+      if (active) {
+        const failure = results.find(result => result.status === 'rejected');
+        setReadError(failure?.status === 'rejected' ? String(failure.reason?.message || failure.reason) : '');
+        timer = setTimeout(poll, 15000);
+      }
     };
     void poll(); return () => { active = false; clearTimeout(timer); };
   }, [wallet.address, tokenAddress, refresh]);
