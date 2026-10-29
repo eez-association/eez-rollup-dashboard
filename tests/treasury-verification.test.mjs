@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { encodeEventTopics, encodeAbiParameters, parseAbi, parseAbiParameters } from 'viem';
+import { encodeEventTopics, encodeAbiParameters, parseAbi, parseAbiParameters, toFunctionSelector, zeroAddress } from 'viem';
 import { VerificationWorker, creations, loadBuilds, loadAdditionalSources, publicJob } from '../scripts/verification/worker.mjs';
 import { appendSourceRequest, sourceRequests, deliverSourceRequest, retainSourceRequests, dependencySourceRequests } from '../src/lib/treasury/sourceVerification.ts';
 import { blockscoutApiUrl, verificationEndpoint } from '../scripts/verification/network.mjs';
@@ -59,6 +59,30 @@ test('supplemental sources verify factory children without changing the requeste
   assert.equal(job.request.build, build); await worker.tick();
   assert.equal(job.contracts[0].name, 'CrossChainProxy'); assert.equal(job.contracts[0].status, 'pending');
   const submitted = JSON.parse(await state.posts[0].body.get('files[0]').text()); assert.deepEqual(submitted, a.sourceInput);
+});
+test('RollupX source verification accepts the current bridge getter and publishes exact retained inputs on L2', async t => {
+  const sources=loadAdditionalSources('verification/supplemental');
+  const source=sources.find(a=>a.target==='src/periphery/Bridge.sol:Bridge'&&a.sourceInput.sources['src/periphery/Bridge.sol'].content.includes('IEEZ public EEZContract'));
+  assert(source);
+  const {state,config}=fixture(t,{chainId:696991,code:source.runtime});
+  config.networks[696991].peerRollupId=0;
+  const worker=new VerificationWorker({...config,additionalSources:sources}), selectors=[];
+  worker.rpc=async(_network,method,params=[])=>{
+    if(method==='eth_chainId')return '0xaa29f';
+    if(method==='eth_getBlockByNumber')return {number:'0x20',hash:blockHash};
+    if(method==='eth_getCode')return source.runtime;
+    assert.equal(method,'eth_call');selectors.push(params[0].data);
+    // The bare implementation has no configured EEZ binding; verification must
+    // still publish it without requiring the removed manager() getter.
+    assert([toFunctionSelector('EEZContract()'),toFunctionSelector('canonicalBridgeAddress()')].includes(params[0].data));
+    return encodeAbiParameters([{type:'address'}],[zeroAddress]);
+  };
+  const job=await worker.admit({build,chainId:696991,address});
+  await worker.tick();
+  assert(selectors.includes(toFunctionSelector('EEZContract()')));
+  assert.equal(job.request.chainId,696991);
+  assert(state.posts.some(post=>post.url.includes(`/smart-contracts/${address}/verification/via/standard-input`)));
+  assert.equal(job.contracts[0].name,'Bridge');
 });
 test('receipt discovery includes nested creation, Safe factories, aliases, wrapped tokens and claim transfers', () => {
   const abis = parseAbi(['event Created(uint256 indexed index,address indexed target,bytes32 initHash)',

@@ -1,0 +1,91 @@
+{
+  "source": "https://rollupx.eez.dev/dashboard/config.json",
+  "protocolCommit": "84a5b5207880f192a6a5896cbfe0bac5249db47f",
+  "bridgeSourceCommit": "60d60296616a20dbf7dcd72cf95c36da4feecaf9",
+  "registry": "0x4B2760F84B83d6b3829E30A7573B0172B6d6402C",
+  "manager": "0x4B2760F84B83d6b3829E30A7573B0172B6d6402C",
+  "rollupId": 2,
+  "chains": {
+    "l1": {
+      "chainId": 1,
+      "number": "0x191380a",
+      "hash": "0xf7efa432a48a85045dccee9bb6bf9922f30bbbd971fe749e74f8aba240d1159d"
+    },
+    "l2": {
+      "chainId": 696991,
+      "number": "0x0",
+      "hash": "0xb6bd210b7e824a1aabc4c1ae5b64f5643715441b332c7152e641a36ba01835b2"
+    }
+  },
+  "contracts": {
+    "bridgeL1": {
+      "chain": "l1",
+      "address": "0x95273bF880aE09fDeb8c71D5aa37a0bA70835b55",
+      "hash": "0x7903cfc04b9263147102755dba2097e9d22f096236b11984ae60d8300bf5d1f6",
+      "bindings": {
+        "manager": "0x4B2760F84B83d6b3829E30A7573B0172B6d6402C",
+        "counterpart": "0x95273bF880aE09fDeb8c71D5aa37a0bA70835b55",
+        "rollupId": "0"
+      }
+    },
+    "bridgeL2": {
+      "chain": "l2",
+      "address": "0x95273bF880aE09fDeb8c71D5aa37a0bA70835b55",
+      "hash": "0x7903cfc04b9263147102755dba2097e9d22f096236b11984ae60d8300bf5d1f6",
+      "bindings": {
+        "manager": "0x4B2760F84B83d6b3829E30A7573B0172B6d6402C",
+        "counterpart": "0x95273bF880aE09fDeb8c71D5aa37a0bA70835b55",
+        "rollupId": "2"
+      }
+    },
+    "usdcProxy": {
+      "chain": "l1",
+      "address": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+      "hash": "0xd80d4b7c890cb9d6a4893e6b52bc34b56b25335cb13716e0d1d31383e6b41505"
+    },
+    "usdcImplementation": {
+      "chain": "l1",
+      "address": "0x43506849D7C04F9138D1A2050bbF3A0c054402dd",
+      "hash": "0xcdfb7d322961af3acae7a8f7ee8b69c205b36f576cc5b077f170c7eb8ecbe3ea"
+    },
+    "wrappedUSDC": {
+      "chain": "l2",
+      "address": "0xB7b78C5993c2C55f1604Fdc1b57AF14FDC853a56",
+      "hash": "0xd166c8dc2180e16f442196579425447e7f20542fdd5a7e9b3229a6149e95b87e"
+    }
+  },
+  "protocol": [
+    {
+      "chain": "l1",
+      "proxy": "0x4B2760F84B83d6b3829E30A7573B0172B6d6402C",
+      "implementation": "0x228f3fff8061F278B4F9a4745BF1e08B3F491ADA",
+      "proxyHash": "0xf75bd9c201197ef3c8ffd71d80769022b18a10634c1223f8696074d0e594b762",
+      "implementationHash": "0x345cf74d366b15cd6c826b31495d3955c04a95813dcc76a76f627dbbda996a73"
+    },
+    {
+      "chain": "l2",
+      "proxy": "0x4B2760F84B83d6b3829E30A7573B0172B6d6402C",
+      "implementation": "0x4C3D971b1079E58843D0E1af155A2e54b9E54dbA",
+      "proxyHash": "0x88068de4c46d94b72f5d39f17b5407c958ec6920376ff1dd366995f65564372a",
+      "implementationHash": "0x631ed5a184a03c68357552ff7008bb217a1faadb1799af734748c1f1d326b17b"
+    }
+  ],
+  "bridgeImplementations": {
+    "l1": {
+      "kind": "eip1967",
+      "address": "0x36ED356ef314eBc073e50ed9494942FFcdEa7eAF",
+      "hash": "0x0436c9ea514f8ef3e3e5d2837483a3c95a06dfa22be594863ec22043bc078362"
+    },
+    "l2": {
+      "kind": "eip1967",
+      "address": "0x36ED356ef314eBc073e50ed9494942FFcdEa7eAF",
+      "hash": "0x0436c9ea514f8ef3e3e5d2837483a3c95a06dfa22be594863ec22043bc078362"
+    }
+  },
+  "assetProvisioning": {
+    "name": "USD Coin",
+    "symbol": "USDC",
+    "decimals": 6,
+    "description": "Wrapped USDC address and runtime are predicted from the verified bridge CREATE2 deployment on chain 696991; setup requires the actual deployed code and origin bindings to match."
+  }
+}

@@ -18,6 +18,7 @@ import { probeComposer } from "../composerDiscovery.ts";
 import { readBridgeManager } from "../bridgeManager.ts";
 import official from "./official-safe-deployments.json" with { type: "json" };
 import network from "./mainnet-network.json" with { type: "json" };
+import rollupxNetwork from "./rollupx-mainnet-network.json" with { type: "json" };
 import sharedContracts from "./mainnet-shared-contracts.json" with { type: "json" };
 
 const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
@@ -26,7 +27,11 @@ async function readInBatches<T>(items: readonly T[], read: (item: T) => Promise<
   for (let offset = 0; offset < items.length; offset += 4) await Promise.all(items.slice(offset, offset + 4).map(read));
 }
 const digest = (x: unknown): x is Hex => typeof x === "string" && /^0x[\da-f]{64}$/i.test(x);
-export type SetupNetwork = typeof network & { testnet?: boolean };
+export type SetupNetwork = typeof network & {
+  testnet?: boolean;
+  bridgeImplementations?: Record<Chain, { kind: "eip1967"; address: string; hash: string }>;
+  assetProvisioning?: { name: string; symbol: string; decimals: number; description: string };
+};
 export const setupIdentity = (selected: SetupNetwork) => keccak256(toHex(JSON.stringify(selected)));
 const identity = setupIdentity(network);
 export const mainnetSetupKey = `eez:treasury:paired-setup:${identity}`;
@@ -62,10 +67,14 @@ type Pending = DeploymentPending & { outputs: Output[]; actionsHash?: Hex; execu
 export type MainnetSetupState = { build?: string; sourceRequests?: SourceRequest[]; version: 3; creation?: "create-both"; matching?: MatchingSafePlan; identity: Hex; salt: Hex; deployer: Address; addresses: Record<string, Address>; code: TreasuryConfig["code"];
   completed: { hash: Hex; chain: Chain; number: Hex; blockHash: Hex }[]; pending?: Pending; review?: Review };
 export type MainnetTarget = DeploymentTarget & { l1: DeploymentTarget["l1"] & { explorer: string }; l2: DeploymentTarget["l2"] & { explorer: string } };
-export function isMainnetSetupTarget(l1: string, l2: string, registry: string, manager: string, bridgeL1: string, bridgeL2: string) {
-  return BigInt(l1) === BigInt(network.chains.l1.chainId) && BigInt(l2) === BigInt(network.chains.l2.chainId)
-    && same(registry, network.registry) && same(manager, network.manager)
-    && same(bridgeL1, network.contracts.bridgeL1.address) && same(bridgeL2, network.contracts.bridgeL2.address);
+const mainnetNetworks: SetupNetwork[] = [network, rollupxNetwork as SetupNetwork];
+export function selectMainnetSetupNetwork(l1: string, l2: string, registry: string, manager: string, bridgeL1: string, bridgeL2: string): SetupNetwork | null {
+  return mainnetNetworks.find(selected => BigInt(l1) === BigInt(selected.chains.l1.chainId) && BigInt(l2) === BigInt(selected.chains.l2.chainId)
+    && same(registry, selected.registry) && same(manager, selected.manager)
+    && same(bridgeL1, selected.contracts.bridgeL1.address) && same(bridgeL2, selected.contracts.bridgeL2.address)) ?? null;
+}
+export function isMainnetSetupTarget(...args: Parameters<typeof selectMainnetSetupNetwork>) {
+  return selectMainnetSetupNetwork(...args) !== null;
 }
 export function readMainnetSetup(raw: string | null, selected: SetupNetwork = network): MainnetSetupState | null {
   if (!raw) return null;
@@ -121,8 +130,9 @@ export class MainnetSetup {
         { l1ChainId: toHex(this.network.chains.l1.chainId), l2ChainId: toHex(this.network.chains.l2.chainId), registryAddress: this.network.registry, l2Address: this.network.manager });
       check(discovery.status === "detected", discovery.detail);
     }));
-    await readInBatches(Object.values(this.network.contracts), async binding => {
-      check(keccak256(await this.io.rpc<Hex>(binding.chain as Chain, "eth_getCode", [binding.address, "latest"])) === binding.hash, "The reviewed USDC or bridge code changed");
+    await readInBatches(Object.values(this.network.contracts).filter(binding => binding !== this.network.contracts.wrappedUSDC), async binding => {
+      check(keccak256(await this.io.rpc<Hex>(binding.chain as Chain, "eth_getCode", [binding.address, "latest"])) === binding.hash,
+        "The reviewed USDC or bridge code changed");
     });
     const abi: Abi = parseAbi(["function rollupId() view returns(uint64)", "function canonicalBridgeAddress() view returns(address)", "function getWrappedToken(address,uint64) view returns(address)", "function wrappedTokenInfo(address) view returns(address,uint64)", "function BRIDGE() view returns(address)", "function paused() view returns(bool)"]);
     const read = async (chain: Chain, to: string, name: string, args: unknown[] = []) => {
@@ -136,8 +146,16 @@ export class MainnetSetup {
         read(chain, bridge.address, "rollupId"), read(chain, bridge.address, "canonicalBridgeAddress"),
         this.io.rpc<Hex>(chain, "eth_getStorageAt", [bridge.address, EIP1967_IMPLEMENTATION_SLOT, "latest"])]);
       const remote = same(counterpart as string, zeroAddress) ? bridge.address : counterpart as string;
-      check(same(manager as string, bridge.bindings.manager) && rollup === BigInt(bridge.bindings.rollupId) && same(remote, bridge.bindings.counterpart) && BigInt(implementation) === 0n, "The shared bridge connection changed");
+      const pinned = this.network.bridgeImplementations?.[chain];
+      check(same(manager as string, bridge.bindings.manager) && rollup === BigInt(bridge.bindings.rollupId) && same(remote, bridge.bindings.counterpart)
+        && BigInt(implementation) === BigInt(pinned?.address ?? zeroAddress), "The shared bridge connection changed");
+      if (pinned) check(keccak256(await this.io.rpc<Hex>(chain, "eth_getCode", [pinned.address, "latest"])) === pinned.hash,
+        "The reviewed bridge implementation changed");
     }));
+    const wrappedCode = await this.io.rpc<Hex>("l2", "eth_getCode", [this.network.contracts.wrappedUSDC.address, "latest"]);
+    check(wrappedCode !== "0x" || !this.network.assetProvisioning,
+      "USDC has not been provisioned on RollupX. Bridge Ethereum USDC to RollupX, then check again before creating your treasury.");
+    check(keccak256(wrappedCode) === this.network.contracts.wrappedUSDC.hash, "The reviewed wrapped USDC code changed");
     const [wrapped, origin, authority, paused] = await Promise.all([read("l2", this.network.contracts.bridgeL2.address, "getWrappedToken", [this.network.contracts.usdcProxy.address, 0n]),
       read("l2", this.network.contracts.bridgeL2.address, "wrappedTokenInfo", [this.network.contracts.wrappedUSDC.address]), read("l2", this.network.contracts.wrappedUSDC.address, "BRIDGE"), this.network.testnet ? false : read("l1", this.network.contracts.usdcProxy.address, "paused")]);
     check(same(wrapped as string, this.network.contracts.wrappedUSDC.address) && same((origin as [string, bigint])[0], this.network.contracts.usdcProxy.address)
@@ -498,6 +516,10 @@ export class MainnetSetup {
       pair = { version: pairedReleaseVersion(this.artifacts), policyL1: a.policyL1!, peerProxyL2 };
     }
     for (const b of Object.values(this.network.contracts)) code.push({ chain: b.chain as Chain, address: getAddress(b.address), hash: b.hash as Hex });
+    for (const chain of ["l1", "l2"] as const) {
+      const implementation = this.network.bridgeImplementations?.[chain];
+      if (implementation) code.push({ chain, address: getAddress(implementation.address), hash: implementation.hash as Hex });
+    }
     for (const p of this.network.protocol) for (const [address, hash] of [[p.proxy, p.proxyHash], [p.implementation, p.implementationHash]]) code.push({ chain: p.chain as Chain, address: getAddress(address!), hash: hash as Hex });
     const c = parseTreasuryConfig({ version: 1, environment: this.network.testnet ? "dashboard-testnet" : "ethereum-mainnet", instance: keccak256(toHex(`${s.salt}:${a.safeL1}:${a.safeL2}`)),
       l1: { ...this.target.l1, chainId: this.network.chains.l1.chainId, checkpoint: { number: this.network.chains.l1.number, hash: this.network.chains.l1.hash } },
@@ -506,7 +528,9 @@ export class MainnetSetup {
       safeL1: a.safeL1, safeL2: a.safeL2, adapter: a.adapter, safeImplementations: { l1: a.singletonL1, l2: a.singletonL2 }, ownerLabels: {},
       safeAppUrl: `https://app.safe.global/home?safe=${this.network.testnet ? "chiado" : "eth"}:${a.safeL1}`, code: [...new Map(code.map(b => [`${b.chain}:${b.address.toLowerCase()}`, b])).values()],
       protocol: this.network.protocol.map(p => ({ chain: p.chain, proxy: p.proxy, implementation: p.implementation })),
-      mainnet: this.network.testnet ? undefined : { rollupId: this.network.rollupId, usdcImplementation: this.network.contracts.usdcImplementation.address, bridgeImplementations: { l1: { kind: "immutable" }, l2: { kind: "immutable" } } },
+      mainnet: this.network.testnet ? undefined : { rollupId: this.network.rollupId, usdcImplementation: this.network.contracts.usdcImplementation.address,
+        bridgeImplementations: Object.fromEntries((["l1", "l2"] as const).map(chain => [chain, this.network.bridgeImplementations?.[chain]
+          ? { kind: "eip1967", address: this.network.bridgeImplementations[chain].address } : { kind: "immutable" }])) },
       payments: { bridgeKind: "standard", policy: a.policy, alias: a.alias, safeL2Alias: a.safeL2Alias,
         pair,
         moduleL1: a.moduleL1, moduleL2: a.moduleL2, tokenL1: this.network.contracts.usdcProxy.address, tokenL2: this.network.contracts.wrappedUSDC.address,
