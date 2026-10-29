@@ -1,18 +1,21 @@
 // Run against a production preview. Demo API and all RPCs are mocked.
 const assert = require('node:assert/strict');
 const { chromium } = require('playwright');
+const { encodeEventTopics, encodeAbiParameters, parseAbi } = require('viem');
 const origin = (process.env.EEZ_UI_URL || 'http://127.0.0.1:8083/dashboard').replace(/\/$/, '');
 const shortcut = 'Control+Alt+Shift+KeyT';
 
-async function fixture(browser, { mismatch = false, unavailable = false, stale = false, wallet = false, changeDuringSign = false, lostResponse = false, rejectSwitch = false, reverted = false } = {}) {
+async function fixture(browser, { mismatch = false, unavailable = false, stale = false, wallet = false, changeDuringSign = false, lostResponse = false, rejectSwitch = false, reverted = false, faucetDelayed = false } = {}) {
   const context = await browser.newContext();
   const page = await context.newPage();
   const requests = [], errors = [];
   const signed = [], transactions = [], submitted = [];
   let approved = false;
+  let faucetClaimed = false;
+  let faucetChecks = 0;
   if (wallet) {
     await page.exposeFunction('recordWalletRequest', (method, params) => {
-      if (method === 'eth_sendTransaction') { transactions.push(params[0]); approved = true; }
+      if (method === 'eth_sendTransaction') { transactions.push(params[0]); if (params[0].data === '0x4e71d92d') faucetClaimed = true; else approved = true; }
       if (method === 'eth_signTypedData_v4') signed.push(JSON.parse(params[1]));
     });
     await page.addInitScript(({ changeDuringSign, rejectSwitch }) => {
@@ -44,7 +47,7 @@ async function fixture(browser, { mismatch = false, unavailable = false, stale =
     if (path.endsWith('/cowdemo/api/config')) return route.fulfill({
       status: unavailable || stale ? 503 : 200,
       json: stale ? { status: 'deployment_required' }
-        : { network: 'chiado', l1ChainId: mismatch ? 1 : 10200, l2ChainId: mismatch ? 696990 : 6290,
+        : { network: 'chiado', l2NativeSymbol: 'XDAI', l1ChainId: mismatch ? 1 : 10200, l2ChainId: mismatch ? 696990 : 6290,
           settlement: '0x'+'11'.repeat(20), vaultRelayer: '0x'+'22'.repeat(20), wethL2: '0x'+'33'.repeat(20), bridgeL2: '0x'+'44'.repeat(20) },
     });
     if (path.endsWith('/cowdemo/api/tokens')) return route.fulfill({ json: { tokens: [
@@ -53,6 +56,13 @@ async function fixture(browser, { mismatch = false, unavailable = false, stale =
     ] } });
     if (path.endsWith('/cowdemo/api/wrapper')) return route.fulfill({ json: { wrapper: '0x'+'77'.repeat(20), deployed: true } });
     if (path.endsWith('/cowdemo/api/allowance')) return route.fulfill({ json: { balance: '1000000000000000000', allowance: approved ? '1000000000000000' : '0' } });
+    if (path.endsWith('/cowdemo/api/faucet')) {
+      const delivered = faucetClaimed && (!faucetDelayed || ++faucetChecks > 2);
+      return route.fulfill({ json: {
+      address: '0x'+'ef'.repeat(20), owner: '0x'+'88'.repeat(20), tokenAmount: '10000000000000000', gasAmount: '200000000000000',
+      cooldown: 86400, nextClaimAt: faucetClaimed ? Math.floor(Date.now()/1000)+86400 : 0, funded: true, eligible: !faucetClaimed,
+      l2TokenBalance: delivered ? '1010000000000000000' : '1000000000000000000', l2GasBalance: delivered ? '1200000000000000' : '1000000000000000',
+    } }); }
     if (path.endsWith('/cowdemo/api/balances')) return route.fulfill({ json: { selected: { balance: '1000000000000000000' } } });
     if (path.endsWith('/cowdemo/api/quote')) return route.fulfill({ json: { amountIn: new URL(request.url()).searchParams.get('amount'), amountOut: '100000000000000000', tokenDecimals: 18, tokenSymbol: 'ctUSD', priceImpactBps: 30, block: 1234, pair: '0x'+'66'.repeat(20) } });
     if (path.endsWith('/cowdemo/api/orders')) {
@@ -72,8 +82,10 @@ async function fixture(browser, { mismatch = false, unavailable = false, stale =
     const { id, method } = request.postDataJSON();
     assert.ok(!/send|sign/i.test(method), 'never broadcasts or signs');
     const result = method === 'eth_chainId' ? (path.endsWith('l1') ? '0x27d8' : '0x1892')
-      : method === 'eth_getBlockByNumber' ? { number: '0x10', timestamp: '0x65000000', gasUsed: '0x0', gasLimit: '0x1036640', transactions: [] }
-      : method === 'eth_getTransactionReceipt' ? { status: reverted ? '0x0' : '0x1' }
+      : method === 'eth_getBlockByNumber' ? { hash:'0x'+'ee'.repeat(32), number: '0x10', timestamp: '0x65000000', gasUsed: '0x0', gasLimit: '0x1036640', transactions: [] }
+      : method === 'eth_getTransactionReceipt' ? { status: reverted ? '0x0' : '0x1', blockNumber:'0x10',blockHash:'0x'+'ee'.repeat(32),logs:faucetClaimed ? [{address:'0x'+'ef'.repeat(20),
+          topics:encodeEventTopics({abi:parseAbi(['event Claimed(address indexed recipient, uint256 tokenAmount, uint256 gasAmount)']),eventName:'Claimed',args:{recipient:'0x'+'88'.repeat(20)}}),
+          data:encodeAbiParameters([{type:'uint256'},{type:'uint256'}],[10000000000000000n,200000000000000n])}] : [] }
       : method === 'eth_getLogs' ? [] : method === 'eth_getBalance' ? '0x0' : null;
     return route.fulfill({ json: { jsonrpc: '2.0', id, result } });
   });

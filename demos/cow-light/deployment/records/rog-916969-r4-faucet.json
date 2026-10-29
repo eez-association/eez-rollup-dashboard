@@ -1,0 +1,43 @@
+{
+  "address": "0x8EF7E13e73752B24d2af801cBf14BaCc665D4383",
+  "deploymentIdentity": {
+    "L1_CHAIN_ID": 10200,
+    "L2_CHAIN_ID": 916969,
+    "L2_ROLLUP_ID": 4,
+    "BRIDGE_L1": "0x44eAf2768f6BaEe901192a97728a42978bED4eA1",
+    "BRIDGE_L2": "0x61E1aCdCEC0a4993a9C85141187602119AddEB59",
+    "EEZ_MANAGER_L2": "0x4B2760F84B83d6b3829E30A7573B0172B6d6402C",
+    "WETH_L1": "0xc04DF6a3C039c7B9b5097387f052037B171180dB",
+    "WETH_L2": "0x4b19045a60dFC46E125672cFc34741883f4C8B9e",
+    "L2_GENESIS_HASH": "0xbb9e52d97581ec62134cdfd6a4c21330de6002557f66fb8bd49b3e2f800d80ae"
+  },
+  "deployer": "0xbfD6EDf2C306d93334bF0e912A00B22bCFEa1BD9",
+  "funding": {
+    "ctWETH": "0.5",
+    "native": "0.01"
+  },
+  "transactions": {
+    "deploy": "0xcf4f4c837785f26495ed20b07ee0e727df9903443229be696e64f333a72eaca6",
+    "fundTokens": "0x572071fda51afc3b57a1052c636c909bd902582802307d33a284508c94254ab6",
+    "fundGas": "0x949af962c3e6194c3daffa8bafddf056a89acc6431dfb3edadeb32e5273f3edf"
+  },
+  "observedDate": "2026-10-29",
+  "verification": {
+    "address": "0x8EF7E13e73752B24d2af801cBf14BaCc665D4383",
+    "verified": true
+  },
+  "claimTest": {
+    "beforeToken": 999000000000000000,
+    "beforeGas": 7999373378745793,
+    "transaction": "0x8f832c00ab82227d083f4d04ea7d29d72cfeca3878eb6f2ad8a5e683fe261f36",
+    "block": 23746072,
+    "afterToken": 1009000000000000000,
+    "afterGas": 8199373378745793,
+    "cooldown": 1793361745
+  },
+  "limits": {
+    "tokenAmount": "10000000000000000",
+    "gasAmount": "200000000000000",
+    "cooldownSeconds": 86400
+  }
+}

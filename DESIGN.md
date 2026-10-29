@@ -193,6 +193,14 @@ and links to the dashboard execution inspector and configured explorers.
 Preserve pending orders across reloads and show uncertain submissions without
 automatically signing or submitting a replacement.
 
+On Chiado, label the sell token **ctWETH** and offer **Get test tokens** as a
+secondary action beside the token list. Show token amount, destination gas,
+recipient, cooldown and the requirement to pay Chiado gas before signing.
+Reuse the shared wallet and network-switch flow. Keep unresolved requests
+visible across reloads; confirm availability only after checking the canonical
+source receipt and observing the destination balances. Hide this action on
+mainnet.
+
 The dashboard, monitor, and execution visualizer use a 12px minimum for control
 text, data labels, badges, and secondary values. Hashes and table cells use
 13–14px. Long decoder explanations are limited to approximately 75 characters

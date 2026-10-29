@@ -54,5 +54,7 @@
 .selectedToken .tokenSelection { color: var(--text-bright); }
 .tokenMeta { display: grid; gap: 6px; border-top: 1px solid var(--border); padding: 10px 14px; color: var(--text-dim); font: 12px/1.6 var(--mono); overflow-wrap: anywhere; }
 .tokenMeta > span { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; }
+.faucet { display: grid; gap: 12px; padding-top: 16px; border-top: 1px solid var(--border); }
+.faucet h4 { font: 600 16px/1.4 var(--sans); color: var(--text-bright); }
 @media (max-width: 800px) { .layout { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 640px) { .card { padding: 18px; } .heading h2 { font-size: 24px; } }

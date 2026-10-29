@@ -17,7 +17,7 @@ PATH_KEYS = ('TOKEN_CATALOG', 'ORDER_QUEUE', 'SOLVER_LOG', 'ROUTE_MANIFEST',
              'COW_MANIFEST', 'COWSWAP_ARTIFACTS', 'GPV2_ARTIFACT')
 ADDRESS_KEYS = ('WETH_L1', 'WETH_L2', 'BRIDGE_L1', 'BRIDGE_L2',
                 'EEZ_MANAGER_L2', 'SETTLEMENT_L2', 'NATIVE_WETH_L2',
-                'DETERMINISTIC_FACTORY_L1')
+                'DETERMINISTIC_FACTORY_L1', 'COW_FAUCET_L1')
 SHARED_SETTINGS = {
     'L1_RPC': 'EEZ_UI_L1_RPC_UPSTREAM',
     'L2_RPC': 'EEZ_UI_L2_RPC_UPSTREAM',
@@ -212,6 +212,7 @@ def load_config(environ=None, root=ROOT):
         if not env.get(key) and env.get(shared):
             env[key] = env[shared]
     values['NETWORK'] = network
+    values['COW_FAUCET_L1'] = env.get('COW_FAUCET_L1')
     for key in PUBLIC_ENDPOINT_KEYS:
         if env.get(key):
             endpoint = urlsplit(env[key])

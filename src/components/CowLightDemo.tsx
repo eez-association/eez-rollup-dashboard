@@ -5,6 +5,7 @@ import type { useWallet } from '../hooks/useWallet';
 import { rpcCall } from '../rpc';
 import { ExplorerLink } from './ExplorerLink';
 import { CowTokenList } from './CowTokenList';
+import { CowTestTokens } from './CowTestTokens';
 import { cowScope, displayAmount, minimumOutput, orderData, orderTypes, requireFreshQuote, sellAmount,
   type CowConfig, type CowOrder, type CowQuote, type CowToken } from '../lib/cowLight';
 import styles from './CowLightDemo.module.css';
@@ -79,6 +80,7 @@ function Trading({ cfg, tokens, wallet }: { cfg: CowConfig; tokens: CowToken[]; 
   const [refresh, setRefresh] = useState(0);
   const [walletChoice, setWalletChoice] = useState('');
   const [wrapAmount, setWrapAmount] = useState('0.001');
+  const [faucetPending, setFaucetPending] = useState(false);
   const storageKey = `eez:cow:pending:${cowScope(cfg)}:${wallet.address?.toLowerCase()}`;
   const [pending, setPending] = useState<Pending | null>(null);
   const current = useRef({ wallet, amount, tokenAddress, slippage, wrapAmount });
@@ -131,8 +133,8 @@ function Trading({ cfg, tokens, wallet }: { cfg: CowConfig; tokens: CowToken[]; 
   const insufficient = !!allowance && BigInt(allowance.balance) < amountWei;
   const needsApproval = !!allowance && BigInt(allowance.allowance) < amountWei;
   const wrongChain = wallet.isConnected && BigInt(wallet.chainId || '0') !== BigInt(cfg.l2ChainId);
-  const locked = !!busy || !!pending || unresolved;
-  const sellSymbol = 'WETH';
+  const locked = !!busy || !!pending || unresolved || faucetPending;
+  const sellSymbol = cfg.network === 'chiado' && cfg.l1ChainId === 10200 ? 'ctWETH' : 'WETH';
 
   async function action(kind: 'quote' | 'approve' | 'sign' | 'wrap') {
     if (actionLock.current) return;
@@ -254,6 +256,8 @@ function Trading({ cfg, tokens, wallet }: { cfg: CowConfig; tokens: CowToken[]; 
         <CowTokenList tokens={tokens} selected={tokenAddress} locked={locked} onSelect={address => {
           if (address !== tokenAddress) { setTokenAddress(address); setQuote(null); }
         }} />
+        {cfg.network === 'chiado' && cfg.l1ChainId === 10200 && <CowTestTokens cfg={cfg} wallet={wallet}
+          disabled={!!busy || !!pending || unresolved} onPending={setFaucetPending} onDelivered={() => setRefresh(x => x + 1)} />}
         <details><summary>How the swap settles</summary>
         <ol className={styles.route}><li><span>{L2_CHAIN.chainName}</span><p>Approve the sell amount, then sign your swap order.</p></li>
           <li><span>{L1_CHAIN.chainName}</span><p>The solver swaps through the selected liquidity pool.</p></li>

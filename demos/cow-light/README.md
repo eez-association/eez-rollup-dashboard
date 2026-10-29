@@ -53,6 +53,34 @@ token symbols, names or addresses, inspect pair links, and select a token row.
 The list and receive selector share one selection; changing it clears the quote.
 Catalog reserves appear only when supplied and are labeled as catalog data.
 
+### Get test tokens on Chiado
+
+The Chiado tab labels its sell asset **ctWETH** and provides **Get test tokens**.
+Connect the shared dashboard wallet and confirm a transaction on Chiado. The
+wallet needs Chiado native currency for that transaction's gas. The funded
+faucet bridges **0.01 ctWETH + 0.0002 native tokens** to the same address on
+the configured rollup, using its official bridge. Requests have a 24-hour
+per-wallet cooldown. The faucet distributes existing test supply; it cannot
+mint tokens, has no server signing key and is never offered on mainnet.
+
+Configure `COW_FAUCET_L1` in the shared `.env`. The read-only faucet API checks
+its token, bridge and rollup against the active deployment before advertising
+amounts, inventory or eligibility. Pending wallet requests and transaction
+hashes are kept per network and account across reloads. The UI checks a
+canonical successful Chiado receipt with the expected `Claimed` event, then
+waits to observe the requested increase in both destination balances. This
+does not assert consensus finality. Spending from another app while delivery
+is being checked can delay that balance observation.
+
+Operators can deploy for another configured Chiado rollup with
+`python deployment/deploy_faucet.py` using the same environment and protected
+deployer key as other deployment commands, after building the contracts.
+The script funds 0.5 ctWETH and 0.01 native tokens (50 requests), writes durable
+transaction journals beside `COW_MANIFEST`, and safely resumes recorded
+transactions. It never automatically refills the public faucet. To refill,
+explicitly transfer existing ctWETH and native test currency on Chiado to its
+address. The public ROG record is `deployment/records/rog-916969-r4-faucet.json`.
+
 ## Settlement status and recovery
 
 The worker durably saves the signed transaction hash before broadcast, then

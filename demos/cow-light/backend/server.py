@@ -41,6 +41,31 @@ def vault_relayer():
     return l2.eth.contract(Web3.to_checksum_address(SETTLEMENT),abi=SETTLEMENT_VIEW_ABI).functions.vaultRelayer().call()
 
 def catalog(): return CFG.catalog()
+def faucet_status(owner):
+    address=CFG.get('COW_FAUCET_L1')
+    if CFG['NETWORK']!='chiado' or L1_CHAIN!=10200 or not address:
+        raise ValueError('Test-token faucet is not configured for this network')
+    owner=Web3.to_checksum_address(owner)
+    address=Web3.to_checksum_address(address)
+    abi=[{'type':'function','name':name,'stateMutability':'view','inputs':[],
+          'outputs':[{'type':kind}]} for name,kind in [('token','address'),('bridge','address'),('rollupId','uint64'),
+                                                    ('tokenAmount','uint256'),('gasAmount','uint256'),('cooldown','uint256')]]
+    abi.append({'type':'function','name':'nextClaimAt','stateMutability':'view','inputs':[{'type':'address'}],'outputs':[{'type':'uint256'}]})
+    faucet=l1.eth.contract(address,abi=abi)
+    if (faucet.functions.token().call().lower()!=WETH.lower()
+        or faucet.functions.bridge().call().lower()!=CFG['BRIDGE_L1'].lower()
+        or faucet.functions.rollupId().call()!=CFG['L2_ROLLUP_ID']):
+        raise ValueError('Faucet does not match the current token, bridge and rollup')
+    token_abi=[{'type':'function','name':'balanceOf','stateMutability':'view','inputs':[{'type':'address'}],'outputs':[{'type':'uint256'}]}]
+    amount=faucet.functions.tokenAmount().call(); gas=faucet.functions.gasAmount().call()
+    stock=l1.eth.contract(Web3.to_checksum_address(WETH),abi=token_abi).functions.balanceOf(address).call()
+    next_claim=faucet.functions.nextClaimAt(owner).call()
+    return {'address':address,'owner':owner,'tokenAmount':str(amount),'gasAmount':str(gas),
+            'cooldown':faucet.functions.cooldown().call(),'nextClaimAt':next_claim,
+            'funded':stock>=amount and l1.eth.get_balance(address)>=gas,
+            'eligible':l1.eth.get_block('latest')['timestamp']>=next_claim,
+            'l2TokenBalance':str(l2.eth.contract(Web3.to_checksum_address(WETH_L2),abi=token_abi).functions.balanceOf(owner).call()),
+            'l2GasBalance':str(l2.eth.get_balance(owner))}
 def quote(t,amount):
     p=l1.eth.contract(Web3.to_checksum_address(t["pair"]),abi=PAIR_ABI); r0,r1,_=p.functions.getReserves().call(); t0=p.functions.token0().call()
     rin,rout=(r0,r1) if t0.lower()==WETH.lower() else (r1,r0)
@@ -202,7 +227,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         p=urlparse(self.path)
         try:
-            if p.path in ('/api/config', '/api/quote', '/api/wrapper', '/api/allowance', '/api/balances'):
+            if p.path in ('/api/config', '/api/quote', '/api/wrapper', '/api/allowance', '/api/balances', '/api/faucet'):
                 try:
                     CFG.check_deployment(l1=l1,l2=l2)
                 except Exception:
@@ -215,6 +240,8 @@ class Handler(BaseHTTPRequestHandler):
                 # Keep this endpoint read-only and bounded: it is used by the UI
                 # as an operator signal, not as a transaction submission path.
                 return self.send_json({"l1Head":l1.eth.block_number,"l2Head":l2.eth.block_number,"checkedAt":int(time.time())})
+            if p.path=="/api/faucet":
+                return self.send_json(faucet_status(parse_qs(p.query).get('owner',[''])[0]))
             if p.path=="/api/tokens":return self.send_json({"tokens":catalog()})
             if p.path=="/api/orders":
                 rows=[]
