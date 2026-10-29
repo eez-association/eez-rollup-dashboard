@@ -229,6 +229,7 @@ class Handler(BaseHTTPRequestHandler):
             if p.path=="/api/allowance":
                 owner=parse_qs(p.query).get("owner",[""])[0]
                 if not owner: raise ValueError("owner is required")
+                owner=Web3.to_checksum_address(owner)
                 abi=[{"type":"function","name":"balanceOf","stateMutability":"view","inputs":[{"type":"address"}],"outputs":[{"type":"uint256"}]},{"type":"function","name":"allowance","stateMutability":"view","inputs":[{"type":"address"},{"type":"address"}],"outputs":[{"type":"uint256"}]}]
                 c=l2.eth.contract(Web3.to_checksum_address(WETH_L2),abi=abi)
                 return self.send_json({"owner":Web3.to_checksum_address(owner),"balance":str(c.functions.balanceOf(owner).call()),"allowance":str(c.functions.allowance(owner,vault_relayer()).call()),"spender":vault_relayer()})

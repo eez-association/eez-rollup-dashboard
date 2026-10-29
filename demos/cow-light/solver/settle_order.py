@@ -183,7 +183,7 @@ def main():
             record_failure(item,reason); print('failed:',reason,flush=True); return
         sab=json.loads(CFG['GPV2_ARTIFACT'].read_text())['abi']
         st=L2.eth.contract(SETTLEMENT,abi=sab)
-        trade=(0,1,order['receiver'],amount,minimum,int(order['validTo']),bytes.fromhex(order['appData'][2:]),int(order['feeAmount']),0,amount,bytes.fromhex(item['signature'][2:]))
+        trade=(0,1,user,amount,minimum,int(order['validTo']),bytes.fromhex(order['appData'][2:]),int(order['feeAmount']),0,amount,bytes.fromhex(item['signature'][2:]))
         transfer='0x'+(keccak(text='transfer(address,uint256)')[:4]+encode(['address','uint256'],[route.address,amount])).hex()
         held=route.functions.startHeld(amount,token,pair,minimum)._encode_transaction_data()
         interactions=[[],[(WETH_L2,0,transfer),(route.address,0,held)],[]]

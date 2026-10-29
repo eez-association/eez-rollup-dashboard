@@ -175,6 +175,41 @@ class ConfigurationTests(unittest.TestCase):
             self.assertEqual(status,503)
             self.assertEqual(payload['status'],'deployment_required')
 
+    def test_allowance_normalizes_wallet_address_before_contract_calls(self):
+        from urllib.parse import urlparse, parse_qs
+        from web3 import Web3
+        owner = '0xf35960302a07022aba880dffaec2fdd64d5bf1c1'
+        checksum = Web3.to_checksum_address(owner)
+        tree = ast.parse((ROOT / 'backend/server.py').read_text())
+        handler = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == 'Handler')
+        calls = []
+
+        def contract(address, abi):
+            real = Web3().eth.contract(address=address, abi=abi)
+
+            def encoded_call(name, *args):
+                # Real Web3 ABI encoding rejects the unnormalized wallet address.
+                getattr(real.functions, name)(*args)._encode_transaction_data()
+                calls.append((name, args))
+                return SimpleNamespace(call=lambda: 123)
+
+            return SimpleNamespace(functions=SimpleNamespace(
+                balanceOf=lambda owner: encoded_call('balanceOf', owner),
+                allowance=lambda owner, spender: encoded_call('allowance', owner, spender)))
+
+        namespace = {'BaseHTTPRequestHandler':object, 'urlparse':urlparse, 'parse_qs':parse_qs,
+                     'CFG':MagicMock(), 'l1':None, 'l2':SimpleNamespace(eth=SimpleNamespace(contract=contract)),
+                     'Web3':Web3, 'WETH_L2':ADDRESS, 'vault_relayer':lambda: OTHER_ADDRESS}
+        exec(compile(ast.Module(body=[handler],type_ignores=[]), '<api fixture>', 'exec'), namespace)
+        instance = namespace['Handler']()
+        instance.send_json = MagicMock()
+        for value in (owner, checksum):
+            instance.path = '/api/allowance?owner=' + value
+            instance.do_GET()
+            self.assertEqual(instance.send_json.call_args.args, ({
+                'owner':checksum, 'balance':'123', 'allowance':'123', 'spender':OTHER_ADDRESS},))
+        self.assertEqual(calls, [('balanceOf',(checksum,)), ('allowance',(checksum,OTHER_ADDRESS))] * 2)
+
     def test_runtime_requires_complete_matching_identity_and_live_bindings(self):
         cfg = self.config(COW_NETWORK='chiado', L2_CHAIN_ID='916969', L2_ROLLUP_ID='4',
             BRIDGE_L1=ADDRESS, BRIDGE_L2=OTHER_ADDRESS, EEZ_MANAGER_L2=ADDRESS,
