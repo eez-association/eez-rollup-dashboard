@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { L1_CHAIN, L2_CHAIN } from '../config';
-import { displayAmount, type CowToken } from '../lib/cowLight';
-import { ExplorerLink } from './ExplorerLink';
+import { catalogWethReserve, displayAmount, type CowToken } from '../lib/cowLight';
 import styles from './CowLightDemo.module.css';
 
 export function CowTokenList({ tokens, selected, locked, onSelect }: {
@@ -22,7 +21,7 @@ export function CowTokenList({ tokens, selected, locked, onSelect }: {
           controller.signal.addEventListener('abort', abort, { once: true });
           const timeout = setTimeout(abort, 15000);
           try {
-            const response = await fetch(`${import.meta.env.BASE_URL}cowdemo/api/wrapper?token=${encodeURIComponent(token.address)}`, { signal: request.signal });
+            const response = await fetch(`${import.meta.env.BASE_URL}cowdemo/api/wrapper?statusOnly=1&token=${encodeURIComponent(token.address)}`, { signal: request.signal });
             const data = await response.json() as { token: string; wrapper: string; deployed: boolean };
             if (!response.ok || data.token?.toLowerCase() !== token.address.toLowerCase()
               || typeof data.deployed !== 'boolean' || !/^0x[0-9a-fA-F]{40}$/.test(data.wrapper)) throw new Error('Wrapper check unavailable');
@@ -55,23 +54,23 @@ export function CowTokenList({ tokens, selected, locked, onSelect }: {
           <button type="button" className={styles.tokenChoice} aria-label={`Select ${token.symbol}`} aria-pressed={active} disabled={locked}
             onClick={() => onSelect(token.address)}>
             <span className={styles.tokenIcon} aria-hidden="true">{token.symbol.slice(0, 2).toUpperCase()}</span>
-            <span className={styles.tokenName}><strong>{token.symbol}</strong><span>{token.name}</span></span>
-            <span className={styles.tokenSelection}>{active ? 'Selected ✓' : 'Select →'}</span>
-          </button>
-          <div className={styles.tokenMeta}><span>Uniswap V2 pair <ExplorerLink chain="l1" value={token.pair} /></span>
-            <span>{L2_CHAIN.chainName} bridge
-              <span className={`${styles.bridgeBadge} ${bridge?.deployed ? styles.bridgeReady : ''}`}>
+            <span className={styles.tokenName}><strong>{token.symbol}</strong><span>{token.name}</span>
+              <span title="Reserve from the token catalog, not a live balance">{catalogWethReserve(token) === null ? 'WETH reserve unknown' : `Reserve: ${displayAmount(token.wethReserve!)} WETH`}</span>
+            </span>
+            <span className={styles.tokenStatus}>
+              <span className={`${styles.bridgeBadge} ${bridge?.deployed ? styles.bridgeReady : ''}`}
+                title={bridge?.error ? 'Bridge status could not be checked. It will retry automatically.' : bridge?.deployed ? 'Canonical L2 wrapper is deployed.' : 'The first inbound bridge deploys the L2 wrapper.'}>
                 {!bridge ? 'Checking…' : bridge.error ? 'Unavailable' : bridge.deployed ? 'Bridged' : 'Not bridged'}
               </span>
-              {bridge?.deployed && bridge.wrapper && <ExplorerLink chain="l2" value={bridge.wrapper} label="Wrapper" />}
+              {active && <span className={styles.tokenSelection}>Selected ✓</span>}
             </span>
-            {bridge?.deployed === false && <span>The first inbound bridge deploys this token’s L2 wrapper.</span>}
-            {token.wethReserve != null && <span title="Reserve reported by the configured token catalog">Catalog reserve: {displayAmount(token.wethReserve)} WETH</span>}</div>
+          </button>
         </li>;
       })}
     </ul>
     {!visible.length && <p role="status" className={styles.hint}>No tokens match your search. <button onClick={() => setSearch('')}>Clear search</button></p>}
     <p className={styles.hint}>Bridged means the canonical token wrapper is deployed on {L2_CHAIN.chainName}. Status refreshes automatically.</p>
+    <p className={styles.hint}>Catalog reserves shown. Pools below 0.01 WETH are hidden; missing reserves are marked unknown.</p>
     {locked && <p className={styles.hint}>Token selection is locked while your wallet request or order is pending.</p>}
   </section>;
 }

@@ -2,10 +2,11 @@ import sys
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+from web3.exceptions import ContractLogicError
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from deployment.l2_transactions import L2Transactions
-from deployment.route_identity import authorized_l1_caller
+from deployment.route_identity import authorized_l1_caller, bridge_manager
 
 
 class RouteIdentityTests(unittest.TestCase):
@@ -13,12 +14,29 @@ class RouteIdentityTests(unittest.TestCase):
         l1 = MagicMock()
         bridge, manager = MagicMock(), MagicMock()
         l1.eth.contract.side_effect = [bridge, manager]
-        bridge.functions.manager.return_value.call.return_value = 'l1-manager'
+        bridge.functions.EEZContract.return_value.call.return_value = 'l1-manager'
         l1.eth.get_code.return_value = b'code'
         manager.functions.computeCrossChainProxyAddress.return_value.call.return_value = 'l1-source-proxy'
         self.assertEqual(authorized_l1_caller(l1, 'bridge', 'l2-route', 7), 'l1-source-proxy')
         manager.functions.computeCrossChainProxyAddress.assert_called_once_with('l2-route', 7)
         self.assertEqual(l1.eth.contract.call_args.args[0], 'l1-manager')
+        bridge.functions.manager.assert_not_called()
+
+    def test_legacy_bridge_manager_fallback(self):
+        l1 = MagicMock()
+        bridge = l1.eth.contract.return_value
+        bridge.functions.EEZContract.return_value.call.side_effect = ContractLogicError('execution reverted')
+        bridge.functions.manager.return_value.call.return_value = 'legacy-manager'
+        l1.eth.get_code.return_value = b'code'
+        self.assertEqual(bridge_manager(l1, 'bridge'), 'legacy-manager')
+
+    def test_rpc_outage_does_not_trigger_legacy_fallback(self):
+        l1 = MagicMock()
+        bridge = l1.eth.contract.return_value
+        bridge.functions.EEZContract.return_value.call.side_effect = ConnectionError('offline')
+        with self.assertRaises(ConnectionError):
+            bridge_manager(l1, 'bridge')
+        bridge.functions.manager.assert_not_called()
 
     def test_missing_manager_code_stops_deployment(self):
         l1 = MagicMock()

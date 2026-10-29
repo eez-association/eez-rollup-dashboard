@@ -9,7 +9,7 @@ sys.path.insert(0, str(BASE))
 from network_config import load_config
 from deployment.bootstrap_chiado import atomic_json
 from deployment.l2_transactions import L2Transactions
-from deployment.route_identity import authorized_l1_caller
+from deployment.route_identity import authorized_l1_caller, bridge_manager
 from deployment.signers import deployment_signer, check_infrastructure
 CFG=load_config()
 L1=Web3(Web3.HTTPProvider(CFG['L1_RPC']))
@@ -28,6 +28,8 @@ def artifact(name):
 
 def main():
     check_infrastructure(CFG)
+    # Fail before any deployment if this bridge's manager cannot be resolved.
+    bridge_manager(L1, BRIDGE_L1)
     CFG.check_chains(l1=L1,l2=L2)
     deployment_identity=CFG.deployment_identity(L2)
     cow_identity=CFG.read_manifest('COW_MANIFEST').get('deploymentIdentity') or {}
