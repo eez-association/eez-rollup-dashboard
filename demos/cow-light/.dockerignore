@@ -2,6 +2,7 @@
 !requirements.txt
 !network_config.py
 !settlement_state.py
+!wrapper_prediction.py
 !backend/
 !backend/*.py
 !solver/

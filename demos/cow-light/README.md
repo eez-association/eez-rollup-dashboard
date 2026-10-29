@@ -277,10 +277,32 @@ Use the reusable Chiado bootstrap below to deploy test assets and a funded
 Uniswap V2 pool and generate a catalog, or configure an existing test deployment
 in `config/token-catalog.chiado.json` (the same token entry format as the mainnet
 catalog). Deploy GPv2 first, then the route. To
-derive wrappers before their first bridge, supply `WRAPPER_REFERENCE_TX` and
-`WRAPPER_PREFIX_LEN` for that network's bridge creation code. An existing
-wrapper can be resolved without those fields. Chiado never inherits mainnet
-addresses, token liquidity or wrapper traces.
+derive wrappers before their first bridge, configure `COW_WRAPPER_EXPLORER_API`
+with the active L2's Blockscout API v2 base URL, for example
+`https://rollup.example/explorer/api/v2`. The official bridge must already have
+registered the configured `WETH_L2` wrapper. Existing wrappers and bridge-status
+badges do not need explorer access. Chiado never inherits mainnet addresses or
+token liquidity.
+
+Wrapper prediction no longer calls `debug_traceTransaction` or uses
+`WRAPPER_REFERENCE_TX` / `WRAPPER_PREFIX_LEN`. The API reads the reference WETH
+wrapper from the official bridge and fetches its creation and runtime bytecode
+from Blockscout. Before using it, the API verifies the reported runtime against
+live code, the constructor metadata and bridge argument, the CREATE2 address,
+and that the creation-code prefix is embedded in the current bridge code (or its
+EIP-1967 implementation). These checks fail closed for incompatible bridge builds,
+incorrect explorer data, missing wrappers, and unavailable RPC/explorer reads.
+This validates the prediction input; it does not constitute source verification
+or a contract audit.
+
+Validation reads are pinned to one L2 block. The validated prefix is cached in
+memory and reused only while the wrapper metadata/runtime and bridge runtime /
+implementation code remain unchanged. An upgrade triggers revalidation; a
+reference wrapper built with an older incompatible implementation is rejected.
+Selected-token metadata is read from L1, never silently substituted from catalog
+labels. Restart the API after setting the explorer URL. The solver does not
+derive wrappers through this API path; it uses the signed order's buy-token
+address and checks existing canonical registrations before settlement.
 
 The Chiado profile discovers its L2 chain ID with `eth_chainId` from `L2_RPC`;
 it does not assume a particular EEZ testnet ID. An explicit `L2_CHAIN_ID` pins

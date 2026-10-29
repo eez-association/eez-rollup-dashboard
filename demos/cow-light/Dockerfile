@@ -4,7 +4,7 @@ WORKDIR /app
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt \
     && useradd --uid 1000 --create-home cow
-COPY network_config.py settlement_state.py ./
+COPY network_config.py settlement_state.py wrapper_prediction.py ./
 COPY backend/ backend/
 COPY solver/ solver/
 COPY deployment/ deployment/
