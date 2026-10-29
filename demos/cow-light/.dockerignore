@@ -1,0 +1,14 @@
+**
+!requirements.txt
+!network_config.py
+!settlement_state.py
+!backend/
+!backend/*.py
+!solver/
+!solver/*.py
+!deployment/
+!deployment/*.py
+!config/
+!config/**
+!ui/
+!ui/**

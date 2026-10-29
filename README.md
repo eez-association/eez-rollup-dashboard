@@ -160,14 +160,19 @@ session starts hidden; neither `#/treasury-demo` nor `#/cow-demo` enables the ta
 navigation preference, not access control: anyone who knows the shortcut can
 open the example, and its code ships with the application.
 
-CoW Light reuses the standalone UI in `demos/cow-light`, served through
+CoW Light uses the native dashboard tab and the API in `demos/cow-light`, proxied through
 `/dashboard/cowdemo/`. Run its API and solver for the dashboard's network;
 `EEZ_UI_COW_UPSTREAM` selects the API upstream (Vite defaults to
-`http://127.0.0.1:8787`; Compose defaults to `http://host.docker.internal:8787`).
-When using Compose, the API must listen on an interface reachable from the UI
-container. The tab checks both chain IDs before opening the trading UI and
+`http://127.0.0.1:8787`; Compose defaults to `http://cow-api:8787`).
+The default Compose stack starts the API on its internal network. The tab checks both chain IDs before opening the trading UI and
 shows an unavailable state if the API is not running. This proxy does not
 start the API, deploy contracts, or expose the solver's control endpoint.
+
+`docker compose up -d --build` includes the `cow-api` service and automatically
+creates its persistent `cow-runtime` volume. The solver stays disabled unless
+its `cow-solver` profile is enabled.
+See [CoW Docker setup](demos/cow-light/README.md#docker-compose) for runtime
+storage, configuration and solver activation.
 
 The dashboard deploys and operates only the current paired-contract release.
 Both Ethereum and Chiado use the same `PairedTreasuryPolicy` setup engine. It
