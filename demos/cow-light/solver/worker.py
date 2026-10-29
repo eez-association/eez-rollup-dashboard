@@ -13,6 +13,7 @@ BASE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BASE))
 from network_config import load_config
 from settlement_state import is_active
+from solver.retry_policy import due
 CFG = load_config()
 QUEUE = CFG['ORDER_QUEUE']
 SCRIPT = Path(os.getenv("SETTLE_SCRIPT", Path(__file__).with_name("settle_order.py")))
@@ -42,7 +43,7 @@ def run_once():
     global last
     with LOCK:
         rows = [json.loads(x) for x in QUEUE.read_text().splitlines() if x.strip()] if QUEUE.exists() else []
-        item = min((row for row in rows if is_active(row)),
+        item = min((row for row in rows if is_active(row) and due(row)),
                    key=lambda row: row.get('solver', {}).get('checkedAt', 0), default=None)
         if not item:
             last = {"status": "idle", "checkedAt": int(time.time())}

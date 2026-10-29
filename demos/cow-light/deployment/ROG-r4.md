@@ -103,6 +103,17 @@ RPC reads and all submissions used the real network. The deployment directory
 retains the test journal and screenshot. No second swap was submitted when
 capturing the settled activity after reload.
 
-The previously documented clearing-price/slippage limitation is unchanged.
-This successful stable-pool test does not establish execution under changing
-pool prices or production readiness.
+The original stable-pool test did not cover price movement. A later solver-only
+rehearsal deliberately supplied a stale first clearing quote of
+0.100706366969775277 ctUSD against an actual output of 0.099699303300077525.
+Real Composer simulation rejected the payout with ERC20InsufficientBalance;
+the solver scheduled a retry without broadcasting. The same signed order then
+settled at the fresh quote, delivering 0.099699303300077525 ctUSD for 0.001 ctWETH
+(signed minimum 0.096708324201075199). Both canonical L2 and L1 evidence were
+verified; this does not assert consensus finality.
+
+Evidence: `records/rog-916969-r4-solver-retry.json`. The rehearsal used an isolated
+queue and the existing dedicated test wallet; contracts were unchanged. Only the
+first pool-quote read was deliberately stale: Composer execution, fee quoting,
+submission and balance checks used the live network. This does not demonstrate
+recovery of an already-submitted rejected bundle or competing L1 swaps.

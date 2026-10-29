@@ -1,0 +1,47 @@
+{
+  "network": "ROG",
+  "l1ChainId": 10200,
+  "l2ChainId": 916969,
+  "orderId": "rog-solver-retry-1793279364",
+  "owner": "0xbfD6EDf2C306d93334bF0e912A00B22bCFEa1BD9",
+  "test": "Controlled stale first quote; real Composer rejection, fresh quote and live settlement",
+  "contractsChanged": false,
+  "startedAt": 1793279364,
+  "finishedAt": 1793279473,
+  "signedMinimum": "96708324201075199",
+  "sellAmount": "1000000000000000",
+  "actualOutput": "99699303300077525",
+  "staleCalls": [
+    {
+      "actual": 99699303300077525,
+      "quoted": 100706366969775277
+    },
+    {
+      "actual": 99699303300077525,
+      "quoted": 99699303300077525
+    }
+  ],
+  "firstAttempt": {
+    "retryCount": 1,
+    "nextAttemptAt": 1793279457,
+    "error": null,
+    "message": "Pool price moved during simulation; rebuilding settlement with a fresh quote.",
+    "retryReason": "Pool price moved during simulation; rebuilding settlement with a fresh quote.",
+    "checkedAt": 1793279452
+  },
+  "settlement": {
+    "retryCount": 1,
+    "nextAttemptAt": 1793279457,
+    "error": null,
+    "message": "Canonical settlement confirmed. Consensus finality is not asserted.",
+    "retryReason": "Pool price moved during simulation; rebuilding settlement with a fresh quote.",
+    "checkedAt": 1793279468,
+    "txHash": "0x37e0fb3f27989b7259678abfb04b72194adb43ac24ce6b3ffe80ffa1dffae01f",
+    "nonce": 13,
+    "settlement": "0x37e0fb3f27989b7259678abfb04b72194adb43ac24ce6b3ffe80ffa1dffae01f",
+    "canonicalVerified": true,
+    "settlementBlock": 85325,
+    "l1Tx": "0xcd5b7ac66bd59e6fa89068122ae24919e0d54e1f0db3fd556bc5c187a783e639",
+    "l1Block": 23746814
+  }
+}

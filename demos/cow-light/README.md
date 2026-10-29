@@ -130,7 +130,23 @@ operator inspection; the worker intentionally does not create replacement
 transactions automatically, including fee/nonce replacements. Historical orders
 marked settled by the old receipt-only solver are rechecked using their saved
 transaction hashes before being presented as canonically settled.
-Clearing-price slippage remains separate follow-up work.
+Before broadcast, a recognized payout/slippage revert plus a lower fresh pool
+quote keeps the same signed order queued. Composer's matching diagnostic option
+supplies the actual revert when the public option only says unsupported transaction.
+The worker rebuilds clearing prices, calldata and fee quotes on each attempt;
+it checks the signed order owner and GPv2 fill/invalidation state first.
+Retries use 5/10/20/40/60-second backoff, capped at eight retries. Simulation
+availability and fee-preparation errors also use this bounded pre-send policy.
+An output below the signed minimum waits at 60-second intervals until recovery
+or the signed expiry, without sending. Delayed orders do not block other orders.
+Unknown execution reverts remain terminal; a recorded transaction hash always
+takes the reconciliation path and is never cleared for an automatic retry.
+
+This improves recovery from stale quotes; exact execution can still fail when
+prices move after simulation. Automatic replacement after a terminal submitted
+transaction or rejected bundle remains outside this change. Live ROG evidence
+for a deliberately stale first quote followed by successful settlement is in
+`deployment/records/rog-916969-r4-solver-retry.json`. No contracts changed.
 
 ## Network profiles
 

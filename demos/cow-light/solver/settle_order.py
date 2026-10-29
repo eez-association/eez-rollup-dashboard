@@ -18,6 +18,8 @@ BASE=Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BASE))
 from network_config import load_config
 from settlement_state import is_active, reconcile, update_order
+from solver.retry_policy import due, price_failure, retry_fields
+from solver.order_identity import signed_identity
 from deployment.bootstrap_chiado import quote_transaction, validate_fee_quote
 CFG=load_config()
 L1=Web3(Web3.HTTPProvider(CFG['L1_RPC'],request_kwargs={'timeout':60}))
@@ -104,8 +106,8 @@ def queued():
     rows=[json.loads(x) for x in QUEUE.read_text().splitlines() if x.strip()]
     retry=os.getenv('RETRY_ORDER_ID')
     if retry:
-        return next((r for r in reversed(rows) if r.get('id')==retry and is_active(r)),None)
-    return next((r for r in reversed(rows) if is_active(r)),None)
+        return next((r for r in reversed(rows) if r.get('id')==retry and is_active(r) and due(r)),None)
+    return next((r for r in reversed(rows) if is_active(r) and due(r)),None)
 
 def token_route(token):
     t=next((x for x in CFG.catalog() if x.get('address','').lower()==token.lower()),None)
@@ -130,6 +132,11 @@ def record_failure(item, reason):
     """Durably terminalize an order that cannot be filled as signed."""
     update_order(QUEUE,item['id'],'failed',error=reason)
 
+def retry_later(item, reason, waiting_price=False):
+    status, fields = retry_fields(item, reason, waiting_price=waiting_price)
+    update_order(QUEUE, item['id'], status, **fields)
+    debug('order_retry_scheduled', orderId=item['id'], status=status, **fields)
+
 def main():
     CFG.check_deployment(l1=L1,l2=L2)
     item=queued()
@@ -145,7 +152,7 @@ def main():
     token,pair,symbol=order_route(item)
     if int(time.time()) >= int(order['validTo']):
         reason='order expired before solver processing'
-        record_failure(item, reason)
+        update_order(QUEUE,item['id'],'expired',error=reason)
         print('failed:', reason, flush=True)
         return
     c2=L2.eth.contract(WETH_L2,abi=ERC20); user=to_checksum_address(order['receiver']); user_bal=c2.functions.balanceOf(user).call()
@@ -183,17 +190,30 @@ def main():
             record_failure(item,reason); print('failed:',reason,flush=True); return
         sab=json.loads(CFG['GPV2_ARTIFACT'].read_text())['abi']
         st=L2.eth.contract(SETTLEMENT,abi=sab)
+        try:
+            owner, uid = signed_identity(order, item['signature'], L2_CHAIN, SETTLEMENT)
+        except (ValueError, TypeError, KeyError):
+            record_failure(item, 'Invalid signed order; no submission was made.')
+            return
+        if owner.lower() != user.lower() or owner.lower() != item.get('signer', '').lower():
+            record_failure(item, 'Signed order owner does not match the queued signer/receiver.')
+            return
+        if st.functions.filledAmount(uid).call() != 0:
+            record_failure(item, 'Order is already filled or invalidated; no new submission was made.')
+            return
         trade=(0,1,user,amount,minimum,int(order['validTo']),bytes.fromhex(order['appData'][2:]),int(order['feeAmount']),0,amount,bytes.fromhex(item['signature'][2:]))
         transfer='0x'+(keccak(text='transfer(address,uint256)')[:4]+encode(['address','uint256'],[route.address,amount])).hex()
         held=route.functions.startHeld(amount,token,pair,minimum)._encode_transaction_data()
         interactions=[[],[(WETH_L2,0,transfer),(route.address,0,held)],[]]
-        clearing_out=max(minimum,live_route_quote(pair,amount))
+        clearing_out=live_route_quote(pair,amount)
+        if clearing_out < minimum:
+            retry_later(item, 'Pool output is below the signed minimum; waiting for price recovery.', waiting_price=True)
+            return
         clearing_prices=[clearing_out*10**18,amount*10**18]
         settle_gas=500_000; quoted_tip=None; quoted_max=None
         intent={'from':ACCT.address,'to':SETTLEMENT,
-                # Encode the signed limit ratio exactly.  A floor/ceiling
-                # approximation can respectively over-demand one wei or fail
-                # GPv2's limit-price check.
+                # Encode the fresh exact-output ratio without rounding it
+                # below the user's signed minimum.
                 'data':st.functions.settle([WETH_L2,predicted],clearing_prices,[trade],interactions)._encode_transaction_data(),
                 'value':'0x0'}
         try:
@@ -214,12 +234,19 @@ def main():
                 # actionable composer_debug_quote record.
                 debug('composer_debug_quote',orderId=item.get('id'),intent=intent,response=dbg,createdContracts=created,requestedBuyToken=predicted)
             opts=(dbg.get('result') or {}).get('options') or []
+            if dbg.get('error') or not opts:
+                retry_later(item, 'Composer simulation is unavailable; retrying before submission.')
+                return
             if opts and opts[0].get('gas'):
                 settle_gas=int(opts[0]['gas'],16)*110//100
             if opts:
                 quoted_tip=opts[0].get('maxPriorityFeePerGas'); quoted_max=opts[0].get('maxFeePerGas')
             if opts and opts[0].get('error'):
-                err=opts[0]['error']
+                # Public options can contain only a generic rejection. The
+                # matching diagnostic option carries the actual EVM revert.
+                diagnostic=next((o for o in (dbg.get('result',{}).get('diagnostics',{}).get('options') or [])
+                                 if o.get('type') == opts[0].get('type') and o.get('error')), {})
+                err=diagnostic.get('error') or opts[0]['error']
                 detail=err.get('details') or {}
                 # Keep the actionable composer reason in the durable order
                 # record; the top-level unsupported_transaction is only a
@@ -231,9 +258,16 @@ def main():
                     'reason': detail.get('reason'),
                     'revertData': detail.get('revertData'),
                 },sort_keys=True)
-                record_failure(item,reason); print(f'failed: composer debug quote {reason}',flush=True); return
+                current_out=live_route_quote(pair,amount)
+                if price_failure(err, clearing_out, current_out):
+                    retry_later(item, 'Pool price moved during simulation; rebuilding settlement with a fresh quote.')
+                else:
+                    record_failure(item,reason)
+                return
         except Exception as exc:
             debug('composer_debug_quote_error',orderId=item.get('id'),intent=intent,error=str(exc))
+            retry_later(item, 'Simulation unavailable before submission; retrying with fresh state.')
+            return
         try:
             # Use the observed route gas with a safety margin. Composer
             # admission separately accounts for the L1 settlement estimate.
@@ -244,6 +278,12 @@ def main():
             # Errors before submission leave the order queued. Once persisted,
             # the submission hash is retained and the next pass only reconciles.
             debug('order_worker_exception',orderId=item['id'],error=str(exc))
+            # Re-read durable state: send() may have saved a hash before an
+            # exception. Never replace that transaction, even on a timeout.
+            saved=next(json.loads(line) for line in QUEUE.read_text().splitlines()
+                       if line.strip() and json.loads(line).get('id')==item['id'])
+            if not (saved.get('solver',{}).get('txHash') or saved.get('solver',{}).get('settlement')):
+                retry_later(saved, 'Fee preparation failed before submission; retrying with fresh state.')
         return
 
     record_failure(item, 'universal route manifest is missing; deploy the final universal route before settling')
