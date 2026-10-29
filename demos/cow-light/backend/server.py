@@ -102,10 +102,14 @@ def _live_wrapper_prefix():
     _wrapper_prefix=raw[:WRAPPER_PREFIX_LEN]
     return _wrapper_prefix
 
-def wrapper(token):
+def wrapper(token, status_only=False):
     token=Web3.to_checksum_address(token)
     c=l2.eth.contract(Web3.to_checksum_address(BRIDGE_L2),abi=BRIDGE_ABI); x=c.functions.getWrappedToken(token,0).call()
     if int(x,16): return {"address":x,"deployed":True,"deterministic":True}
+    if status_only:
+        # Listing status needs only the canonical registry, not a historical
+        # creation trace or a predicted address for a future swap.
+        return {"address":x,"deployed":False,"deterministic":False}
     t=next((z for z in catalog() if z["address"].lower()==token.lower()),None)
     if not t: raise ValueError("token is not in the L1 catalog")
     # The bridge derives CREATE2 init code from the token's *on-chain* ERC20
@@ -252,7 +256,7 @@ class Handler(BaseHTTPRequestHandler):
             if p.path=="/api/wrapper":
                 a=parse_qs(p.query).get("token",[""])[0]
                 if not a: raise ValueError("token is required")
-                w=wrapper(a); return self.send_json({"token":Web3.to_checksum_address(a),"wrapper":w["address"],"deployed":w["deployed"],"deterministic":w["deterministic"]})
+                w=wrapper(a, status_only=parse_qs(p.query).get("statusOnly")==["1"]); return self.send_json({"token":Web3.to_checksum_address(a),"wrapper":w["address"],"deployed":w["deployed"],"deterministic":w["deterministic"]})
             if p.path=="/api/allowance":
                 owner=parse_qs(p.query).get("owner",[""])[0]
                 if not owner: raise ValueError("owner is required")

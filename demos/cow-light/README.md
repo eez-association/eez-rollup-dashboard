@@ -121,13 +121,14 @@ approval and signing. Changing accounts invalidates the quote; ambiguous
 submissions are retained locally and reconciled against the order queue without
 automatically posting another order. Activity is filtered to the connected
 wallet and labels the signed minimum separately from actual settlement output.
-The original visual liquidity browser is retained beside the swap form: search
-token symbols, names or addresses, inspect pair links, and select a token row.
+The visual liquidity browser uses compact token rows beside the swap form: search
+token symbols, names or addresses and select a token row.
 The list and receive selector share one selection; changing it clears the quote.
-Catalog reserves appear only when supplied and are labeled as catalog data.
+Pair addresses and catalog reserves are omitted from the rows.
 Each token also shows **Bridged**, **Not bridged**, **Checking…**, or
 **Unavailable**, based on the canonical L2 wrapper lookup. Deployed wrappers
-link to the configured L2 explorer. Failed reads are never shown as unbridged.
+are detected directly through the official bridge registry, without predicting
+future wrapper addresses. Failed reads are never shown as unbridged.
 The catalog checks at most three tokens concurrently and refreshes after each
 completed round; the same status is retained while filtering the list.
 
