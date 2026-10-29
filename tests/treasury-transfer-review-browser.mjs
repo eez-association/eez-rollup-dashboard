@@ -78,9 +78,16 @@ try {
       assert(await page.getByRole('button', { name: 'Review transfer', exact: true }).isEnabled());
       assert.deepEqual(await page.evaluate(() => window.ownersTest.submissions), []);
     } else {
-      await page.getByText(quoteFields.gasPrice
-        ? 'Gas price: 2.00 gwei · Max priority fee: Not applicable.'
-        : 'Max gas price: 1.24 gwei · Max priority fee: 0.13 gwei.', { exact: true }).waitFor();
+      const fees = page.getByRole('region', { name: 'Wallet gas fees' });
+      const price = fees.getByLabel(quoteFields.gasPrice ? 'Gas price (gwei)' : 'Max gas price (gwei)', { exact: true });
+      await price.waitFor();
+      assert.equal(await price.inputValue(), quoteFields.gasPrice ? '2' : '1.235');
+      const priority = fees.getByLabel('Max priority fee (gwei)', { exact: true });
+      assert.equal(await priority.inputValue(), quoteFields.gasPrice ? '' : '0.125');
+      if (quoteFields.gasPrice) assert.equal(await priority.getAttribute('placeholder'), 'Not applicable');
+      for (const field of [price, priority]) assert(await field.evaluate(input => input.readOnly));
+      await price.focus();
+      assert.equal(await price.evaluate(input => input.value.slice(input.selectionStart, input.selectionEnd)), await price.inputValue());
       const submission = await page.evaluate(() => window.ownersTest.submissions[0]);
       for (const [key, value] of Object.entries(quoteFields)) assert.equal(submission[key], value, 'formatting must not change submitted fees');
       assert.equal(await page.getByRole('button', { name: 'I cancelled this request in my wallet' }).count(), 0, 'hashed transactions stay tracked');
