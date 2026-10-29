@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { L1_CHAIN, L2_CHAIN } from '../config';
-import { type CowToken } from '../lib/cowLight';
+import { catalogWethReserve, displayAmount, type CowToken } from '../lib/cowLight';
 import styles from './CowLightDemo.module.css';
 
 export function CowTokenList({ tokens, selected, locked, onSelect }: {
@@ -54,7 +54,9 @@ export function CowTokenList({ tokens, selected, locked, onSelect }: {
           <button type="button" className={styles.tokenChoice} aria-label={`Select ${token.symbol}`} aria-pressed={active} disabled={locked}
             onClick={() => onSelect(token.address)}>
             <span className={styles.tokenIcon} aria-hidden="true">{token.symbol.slice(0, 2).toUpperCase()}</span>
-            <span className={styles.tokenName}><strong>{token.symbol}</strong><span>{token.name}</span></span>
+            <span className={styles.tokenName}><strong>{token.symbol}</strong><span>{token.name}</span>
+              <span title="Reserve from the token catalog, not a live balance">{catalogWethReserve(token) === null ? 'WETH reserve unknown' : `Reserve: ${displayAmount(token.wethReserve!)} WETH`}</span>
+            </span>
             <span className={styles.tokenStatus}>
               <span className={`${styles.bridgeBadge} ${bridge?.deployed ? styles.bridgeReady : ''}`}
                 title={bridge?.error ? 'Bridge status could not be checked. It will retry automatically.' : bridge?.deployed ? 'Canonical L2 wrapper is deployed.' : 'The first inbound bridge deploys the L2 wrapper.'}>
@@ -68,6 +70,7 @@ export function CowTokenList({ tokens, selected, locked, onSelect }: {
     </ul>
     {!visible.length && <p role="status" className={styles.hint}>No tokens match your search. <button onClick={() => setSearch('')}>Clear search</button></p>}
     <p className={styles.hint}>Bridged means the canonical token wrapper is deployed on {L2_CHAIN.chainName}. Status refreshes automatically.</p>
+    <p className={styles.hint}>Catalog reserves shown. Pools below 0.01 WETH are hidden; missing reserves are marked unknown.</p>
     {locked && <p className={styles.hint}>Token selection is locked while your wallet request or order is pending.</p>}
   </section>;
 }
