@@ -16,6 +16,10 @@ async function open(browser, options = {}) {
   const tx = f.transactions[0];
   const decoded = decodeFunctionData({ abi: erc20Abi, data: tx.data });
   assert.equal(tx.from, '0x'+'88'.repeat(20));
+  assert.equal(tx.maxFeePerGas, '0x12a05f200');
+  assert.equal(tx.maxPriorityFeePerGas, '0x3b9aca00');
+  assert.equal(await form.getByLabel('Max gas price (gwei)', {exact:true}).inputValue(), '5');
+  assert.equal(await form.getByLabel('Max priority fee (gwei)', {exact:true}).inputValue(), '1');
   assert.equal(decoded.functionName, 'approve'); assert.equal(decoded.args[1], 1000000000000000n);
   return { ...f, form };
 }

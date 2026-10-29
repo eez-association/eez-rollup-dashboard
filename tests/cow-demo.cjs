@@ -86,7 +86,9 @@ async function fixture(browser, { mismatch = false, unavailable = false, stale =
     const { id, method } = request.postDataJSON();
     assert.ok(!/send|sign/i.test(method), 'never broadcasts or signs');
     const result = method === 'eth_chainId' ? (path.endsWith('l1') ? mainnet ? '0x1' : '0x27d8' : '0x1892')
-      : method === 'eth_getBlockByNumber' ? { hash:'0x'+'ee'.repeat(32), number: '0x10', timestamp: '0x65000000', gasUsed: '0x0', gasLimit: '0x1036640', transactions: [] }
+      : method === 'eth_gasPrice' ? '0xb2d05e00'
+      : method === 'eth_maxPriorityFeePerGas' ? '0x3b9aca00'
+      : method === 'eth_getBlockByNumber' ? { baseFeePerGas:'0x77359400', hash:'0x'+'ee'.repeat(32), number: '0x10', timestamp: '0x65000000', gasUsed: '0x0', gasLimit: '0x1036640', transactions: [] }
       : method === 'eth_getTransactionReceipt' ? { status: reverted ? '0x0' : '0x1', blockNumber:'0x10',blockHash:'0x'+'ee'.repeat(32),logs:faucetClaimed ? [{address:'0x'+'ef'.repeat(20),
           topics:encodeEventTopics({abi:parseAbi(['event Claimed(address indexed recipient, uint256 tokenAmount, uint256 gasAmount)']),eventName:'Claimed',args:{recipient:'0x'+'88'.repeat(20)}}),
           data:encodeAbiParameters([{type:'uint256'},{type:'uint256'}],[10000000000000000n,200000000000000n])}] : [] }

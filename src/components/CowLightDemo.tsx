@@ -7,6 +7,8 @@ import { ExplorerLink } from './ExplorerLink';
 import { CowTokenList } from './CowTokenList';
 import { CowTestTokens } from './CowTestTokens';
 import { CowSwapHistory } from './CowSwapHistory';
+import { WalletFeeRates } from './WalletFeeRates';
+import { getEip1559Fees } from '../lib/gasEstimation';
 import { cowScope, displayAmount, minimumOutput, nativeWrapIsSellAsset, orderData, orderTypes, requireFreshQuote, sellAmount,
   type CowConfig, type CowOrder, type CowQuote, type CowToken } from '../lib/cowLight';
 import styles from './CowLightDemo.module.css';
@@ -84,6 +86,20 @@ function Trading({ cfg, tokens, wallet }: { cfg: CowConfig; tokens: CowToken[]; 
   const [walletChoice, setWalletChoice] = useState('');
   const [wrapAmount, setWrapAmount] = useState('0.001');
   const [faucetPending, setFaucetPending] = useState(false);
+  const [gasFees, setGasFees] = useState<Record<string, string> | null>(null);
+  const [gasError, setGasError] = useState('');
+  const [gasRefresh, setGasRefresh] = useState(0);
+  const [gasSent, setGasSent] = useState(false);
+  const gasRequest = useRef(0);
+  useEffect(() => {
+    let active = true;
+    const request = ++gasRequest.current;
+    setGasFees(null); setGasError(''); setGasSent(false);
+    if (wallet.address) void getEip1559Fees(config.l2Rpc).then(fees => {
+      if (active && request === gasRequest.current) setGasFees(fees);
+    }).catch(error => { if (active && request === gasRequest.current) setGasError((error as Error).message); });
+    return () => { active = false; };
+  }, [wallet.address, wallet.provider, gasRefresh]);
   const storageKey = `eez:cow:pending:${cowScope(cfg)}:${wallet.address?.toLowerCase()}`;
   const [pending, setPending] = useState<Pending | null>(null);
   const current = useRef({ wallet, amount, tokenAddress, slippage, wrapAmount });
@@ -181,7 +197,16 @@ function Trading({ cfg, tokens, wallet }: { cfg: CowConfig; tokens: CowToken[]; 
         const tx = kind === 'wrap'
           ? { from: account, to: cfg.nativeWethL2, data: '0xd0e30db0', value: `0x${sellAmount(wrapAmount).toString(16)}` }
           : { from: account, to: cfg.wethL2, data: encodeFunctionData({ abi: erc20Abi, functionName: 'approve', args: [cfg.vaultRelayer as `0x${string}`, BigInt(quote!.amountIn)] }) };
-        const hash = await provider!.request({ method: 'eth_sendTransaction', params: [tx] }) as string;
+        setGasFees(null); setGasSent(false);
+        ++gasRequest.current;
+        const fees = await getEip1559Fees(config.l2Rpc).catch(error => {
+          if (mounted.current) setGasError((error as Error).message);
+          throw error;
+        });
+        await assertWallet();
+        if (kind === 'approve') requireFreshQuote(quote!);
+        setGasFees(fees); setGasError(''); setGasSent(true);
+        const hash = await provider!.request({ method: 'eth_sendTransaction', params: [{ ...tx, ...fees }] }) as string;
         if (mounted.current) { setApproval(hash); setMessage('Transaction submitted. Checking inclusion…'); }
         for (let i = 0; i < 60; i++) {
           const receipt = await rpcCall(config.l2Rpc, 'eth_getTransactionReceipt', [hash]) as { status: string } | null;
@@ -243,6 +268,12 @@ function Trading({ cfg, tokens, wallet }: { cfg: CowConfig; tokens: CowToken[]; 
         {inputError && <p className={styles.warning}>{inputError}</p>}
         {insufficient && <p className={styles.warning}>Insufficient {sellSymbol} balance for this swap.</p>}
         {quote && !fresh && <p role="status" className={styles.hint}>Quote expired. Request a fresh quote.</p>}
+        {wallet.isConnected && <WalletFeeRates fee={gasFees ? { price: gasFees.maxFeePerGas!, priority: gasFees.maxPriorityFeePerGas } : null}
+          disabled={locked} onRefresh={() => setGasRefresh(value => value + 1)}
+          description={gasError ? `Fee estimate unavailable: ${gasError}` : gasSent
+            ? `Fees sent to your wallet for the latest ${L2_CHAIN.chainName} approval or wrap transaction.`
+            : `Estimated ${L2_CHAIN.chainName} approval/wrap fees; refreshed before sending to your wallet.`} />}
+        {wallet.isConnected && <p className={styles.hint}>Signing the swap order costs no gas. The solver submits and pays for settlement; the rates above apply only to your wallet transactions.</p>}
         {!wallet.isConnected ? <>
           {wallet.walletOptions.length > 1 && <select aria-label="Choose wallet" value={walletChoice} onChange={e => setWalletChoice(e.target.value)}><option value="">Choose wallet</option>{wallet.walletOptions.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}</select>}
           <button className={styles.primary} disabled={!wallet.hasProvider || wallet.walletOptions.length > 1 && !walletChoice} onClick={() => void wallet.connect(walletChoice || undefined)}>Connect wallet <span aria-hidden="true">→</span></button>

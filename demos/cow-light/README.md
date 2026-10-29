@@ -67,6 +67,12 @@ until the solver records canonical settlement evidence.
 
 ### Mainnet sell asset
 
+The swap form shows copyable max gas price and priority fee estimates for L2
+approval/wrap transactions. Rates are refreshed before each wallet submission,
+and the displayed values are the exact fee fields passed to the wallet. Failed
+fee reads block sending. Swap order signing costs no gas; solver settlement
+costs are separate and are not represented by these wallet fee rates.
+
 This route sells **bridged Ethereum WETH** on the L2 (`WETH_L2`), which must
 match the official bridge's wrapper for `WETH_L1`. Start with WETH on Ethereum
 (wrap ETH there if necessary), then bridge that ERC20 token to the rollup.
