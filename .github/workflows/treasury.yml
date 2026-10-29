@@ -106,6 +106,7 @@ jobs:
           node tests/cow-history.cjs
           node tests/cow-token-status.cjs
           node tests/cow-fees.cjs
+          node tests/cow-balance-independence.cjs
       - name: Frontend, service images, and service coexistence
         run: |
           npm run build
