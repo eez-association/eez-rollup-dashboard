@@ -52,6 +52,11 @@ The original visual liquidity browser is retained beside the swap form: search
 token symbols, names or addresses, inspect pair links, and select a token row.
 The list and receive selector share one selection; changing it clears the quote.
 Catalog reserves appear only when supplied and are labeled as catalog data.
+Each token also shows **Bridged**, **Not bridged**, **Checking…**, or
+**Unavailable**, based on the canonical L2 wrapper lookup. Deployed wrappers
+link to the configured L2 explorer. Failed reads are never shown as unbridged.
+The catalog checks at most three tokens concurrently and refreshes after each
+completed round; the same status is retained while filtering the list.
 
 **Your swaps** reuses the Treasury payment-history layout: newest-first rows,
 outcome counts and filters, refresh, transaction/block links and expandable

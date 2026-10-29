@@ -54,7 +54,10 @@ async function fixture(browser, { mismatch = false, unavailable = false, stale =
       { address: '0x'+'55'.repeat(20), pair: '0x'+'66'.repeat(20), symbol: 'ctUSD', name: 'Test USD', decimals: 18 },
       { address: '0x'+'12'.repeat(20), pair: '0x'+'34'.repeat(20), symbol: 'TEST', name: 'Second token', decimals: 18, wethReserve: '1000000000000000000' },
     ] } });
-    if (path.endsWith('/cowdemo/api/wrapper')) return route.fulfill({ json: { wrapper: '0x'+'77'.repeat(20), deployed: true } });
+    if (path.endsWith('/cowdemo/api/wrapper')) {
+      const token = new URL(request.url()).searchParams.get('token');
+      return route.fulfill({ json: { token, wrapper: '0x'+'77'.repeat(20), deployed: token === '0x'+'55'.repeat(20) } });
+    }
     if (path.endsWith('/cowdemo/api/allowance')) return route.fulfill({ json: { balance: '1000000000000000000', allowance: approved ? '1000000000000000' : '0' } });
     if (path.endsWith('/cowdemo/api/faucet')) {
       const delivered = faucetClaimed && (!faucetDelayed || ++faucetChecks > 2);
@@ -77,6 +80,7 @@ async function fixture(browser, { mismatch = false, unavailable = false, stale =
     if (path.endsWith('/config.json')) return route.fulfill({ json: {
       networkName: 'EEZ test', l1RpcUrl: '/rpc/l1', l2RpcUrl: '/rpc/l2',
       l1FrontUrl: '/composer/l1', l2FrontUrl: '/composer/l2',
+      l1ExplorerUrl: 'https://chiado.example', l2ExplorerUrl: 'https://rollup.example',
     } });
     if (request.method() !== 'POST') return route.continue();
     const { id, method } = request.postDataJSON();
