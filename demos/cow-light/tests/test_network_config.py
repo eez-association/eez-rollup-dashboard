@@ -1,4 +1,5 @@
 import importlib.util
+import ast
 import json
 import os
 from pathlib import Path
@@ -7,11 +8,11 @@ import sys
 import tempfile
 from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from network_config import load_config
+from network_config import load_config, environment
 
 ADDRESS = '0x' + '12' * 20
 OTHER_ADDRESS = '0x' + '34' * 20
@@ -54,6 +55,7 @@ class ConfigurationTests(unittest.TestCase):
         cfg = self.config(COW_NETWORK='chiado')
         self.assertEqual(cfg['L1_CHAIN_ID'], 10200)
         self.assertIsNone(cfg.get('L2_CHAIN_ID'))
+        self.assertIsNone(cfg.get('L2_ROLLUP_ID'))
         for key in ('L1_RPC', 'L2_RPC', 'L2_FRONT', 'WETH_L1', 'WETH_L2',
                     'SETTLEMENT_L2', 'BRIDGE_L1', 'BRIDGE_L2', 'EEZ_MANAGER_L2',
                     'WRAPPER_REFERENCE_TX', 'WRAPPER_PREFIX_LEN'):
@@ -102,6 +104,102 @@ class ConfigurationTests(unittest.TestCase):
             self.config(**dict(env, EEZ_L2_BRIDGE_RECEIVER='0x123'))
         with self.assertRaisesRegex(ValueError, 'positive'):
             self.config(**dict(env, EEZ_ROLLUP_ID='0'))
+
+    def test_shared_environment_overrides_historical_snapshot(self):
+        cfg = self.config(COW_DEPLOYMENT_ENV='config/deployments/rog-916969.json',
+                          EEZ_L1_BRIDGE_SENDER=ADDRESS, EEZ_ROLLUP_ID='4')
+        self.assertEqual(cfg['BRIDGE_L1'], ADDRESS)
+        self.assertEqual(cfg['L2_ROLLUP_ID'], 4)
+        cfg = self.config(COW_DEPLOYMENT_ENV='config/deployments/rog-916969.json',
+                          EEZ_L1_BRIDGE_SENDER=ADDRESS, BRIDGE_L1=OTHER_ADDRESS)
+        self.assertEqual(cfg['BRIDGE_L1'], OTHER_ADDRESS)
+
+    def test_explicit_env_file_is_allowlisted_and_not_executed(self):
+        path = self.root / '.env'
+        path.write_text('export EEZ_ROLLUP_ID="4" # current rollup\n'
+                        'EEZ_UI_L2_RPC_UPSTREAM=http://shared\n'
+                        'DEPLOYER_PRIVATE_KEY=secret\nUNRELATED=$(touch should-not-exist)\n')
+        env = environment({'COW_ENV_FILE':str(path), 'EEZ_ROLLUP_ID':'5'})
+        self.assertEqual(env['EEZ_ROLLUP_ID'], '5')
+        self.assertEqual(env['EEZ_UI_L2_RPC_UPSTREAM'], 'http://shared')
+        self.assertNotIn('DEPLOYER_PRIVATE_KEY', env)
+        self.assertNotIn('UNRELATED', env)
+        with patch('network_config.rpc_chain_id', return_value=916969):
+            cfg = self.config(COW_ENV_FILE=str(path), COW_NETWORK='chiado')
+        self.assertEqual(cfg['L2_RPC'], 'http://shared')
+        self.assertEqual(cfg['L2_ROLLUP_ID'], 4)
+
+    def test_env_file_shell_substitution_is_rejected(self):
+        path = self.root / '.env'
+        for value in ('$(echo secret)', '${OTHER_RPC}', '`echo secret`'):
+            path.write_text('EEZ_UI_L2_RPC_UPSTREAM=' + value)
+            with self.assertRaises(ValueError):
+                environment({'COW_ENV_FILE':str(path)})
+
+    def test_genesis_pin_detects_reset_with_same_chain_id(self):
+        cfg = self.config(COW_NETWORK='chiado', L2_CHAIN_ID='916969',
+                          L2_GENESIS_HASH='0x'+'11'*32)
+        l2 = SimpleNamespace(eth=SimpleNamespace(chain_id=916969,
+             get_block=lambda _: {'hash':bytes.fromhex('22'*32)}))
+        with self.assertRaisesRegex(ValueError, 'genesis changed'):
+            cfg.check_chains(l2=l2)
+
+    def test_api_blocks_stale_deployment_before_config_or_quotes(self):
+        from urllib.parse import urlparse
+        tree = ast.parse((ROOT / 'backend/server.py').read_text())
+        handler = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == 'Handler')
+        cfg = MagicMock()
+        cfg.check_deployment.side_effect = ValueError('stale deployment')
+        namespace = {'BaseHTTPRequestHandler':object,'urlparse':urlparse,'CFG':cfg,'l1':None,'l2':None}
+        exec(compile(ast.Module(body=[handler],type_ignores=[]), '<api fixture>', 'exec'), namespace)
+        instance = namespace['Handler']()
+        instance.send_json = MagicMock()
+        for path in ('/api/config','/api/quote?amount=1','/api/wrapper?token=x','/api/allowance','/api/balances'):
+            instance.path = path
+            instance.do_GET()
+            payload, status = instance.send_json.call_args.args
+            self.assertEqual(status,503)
+            self.assertEqual(payload['status'],'deployment_required')
+
+    def test_runtime_requires_complete_matching_identity_and_live_bindings(self):
+        cfg = self.config(COW_NETWORK='chiado', L2_CHAIN_ID='916969', L2_ROLLUP_ID='4',
+            BRIDGE_L1=ADDRESS, BRIDGE_L2=OTHER_ADDRESS, EEZ_MANAGER_L2=ADDRESS,
+            WETH_L1=ADDRESS, WETH_L2=OTHER_ADDRESS, SETTLEMENT_L2=ADDRESS)
+        l1, l2 = MagicMock(), MagicMock()
+        for client, chain in ((l1,10200),(l2,916969)):
+            client.eth.chain_id = chain
+            client.eth.get_block.return_value = {'hash': bytes.fromhex('11'*32)}
+            client.eth.get_code.return_value = b'code'
+            client.to_checksum_address.side_effect = lambda a:a
+        identity = cfg.deployment_identity(l2)
+        with self.assertRaisesRegex(ValueError, 'missing or stale'):
+            cfg.check_deployment(l1,l2)
+        cow = {'chainId':916969,'settlement':ADDRESS,'authenticator':ADDRESS,
+               'vaultRelayer':ADDRESS,'deploymentIdentity':identity}
+        route = {'chainId':916969,'settlement':ADDRESS,'routeL2':ADDRESS,
+                 'l1Helper':ADDRESS,'l2HelperProxy':OTHER_ADDRESS,'deploymentIdentity':identity}
+        self.manifest('chiado','cow-deployment.json',cow)
+        self.manifest('chiado','route-deployment.json',route)
+        l1.eth.contract.return_value.functions.canonicalBridgeAddress.return_value.call.return_value = OTHER_ADDRESS
+        l1.eth.contract.return_value.functions.rollupId.return_value.call.return_value = 0
+        funcs = l2.eth.contract.return_value.functions
+        funcs.canonicalBridgeAddress.return_value.call.return_value = ADDRESS
+        funcs.rollupId.return_value.call.return_value = 4
+        funcs.EEZContract.return_value.call.return_value = ADDRESS
+        funcs.getWrappedToken.return_value.call.return_value = OTHER_ADDRESS
+        cfg.check_deployment(l1,l2)
+        funcs.getWrappedToken.return_value.call.return_value = ADDRESS
+        with self.assertRaisesRegex(ValueError, 'current bridge wrapper'):
+            cfg.check_deployment(l1,l2)
+        funcs.getWrappedToken.return_value.call.return_value = OTHER_ADDRESS
+        l2.eth.get_code.return_value = b''
+        with self.assertRaisesRegex(ValueError, 'no code'):
+            cfg.check_deployment(l1,l2)
+        l2.eth.get_code.return_value = b'code'
+        for changed in ({'L2_GENESIS_HASH':'0x'+'22'*32}, {'L2_ROLLUP_ID':1}, {'BRIDGE_L2':ADDRESS}):
+            self.manifest('chiado','cow-deployment.json',dict(cow,deploymentIdentity={**identity,**changed}))
+            with self.assertRaisesRegex(ValueError, 'missing or stale'):
+                cfg.check_deployment(l1,l2)
 
     def test_discovery_failure_is_not_a_fallback(self):
         with patch('network_config.rpc_chain_id', side_effect=ValueError('RPC unavailable')):

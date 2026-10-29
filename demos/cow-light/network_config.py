@@ -6,6 +6,7 @@ Precedence: profile < deployment manifests < explicit environment overrides.
 import json
 import os
 import re
+import shlex
 from pathlib import Path
 from urllib.request import Request, urlopen
 
@@ -27,6 +28,32 @@ SHARED_SETTINGS = {
     'EEZ_MANAGER_L2': 'EEZL2_ADDRESS',
     'L2_ROLLUP_ID': 'EEZ_ROLLUP_ID',
 }
+IDENTITY_KEYS = ('L1_CHAIN_ID', 'L2_CHAIN_ID', 'L2_ROLLUP_ID', 'BRIDGE_L1',
+                 'BRIDGE_L2', 'EEZ_MANAGER_L2', 'WETH_L1', 'WETH_L2')
+
+
+def environment(environ):
+    """Read only explicitly selected public settings; never execute a .env file."""
+    explicit = {k: v for k, v in environ.items() if v != ''}
+    path = explicit.get('COW_ENV_FILE')
+    if not path:
+        return explicit
+    allowed = {'COW_NETWORK', 'COW_DEPLOYMENT_ENV', 'L2_GENESIS_HASH',
+               *INTEGER_KEYS, *PATH_KEYS, *ADDRESS_KEYS, *SHARED_SETTINGS,
+               *SHARED_SETTINGS.values()}
+    values = {}
+    for line in Path(path).expanduser().read_text().splitlines():
+        name, sep, value = line.removeprefix('export ').partition('=')
+        name = name.strip()
+        if not sep or name not in allowed:
+            continue
+        parts = shlex.split(value, comments=True)
+        if not parts:
+            continue
+        if len(parts) != 1 or '$' in parts[0] or '`' in parts[0]:
+            raise ValueError(f'{name}: use a literal .env value; shell expansion is not supported')
+        values[name] = parts[0]
+    return {**values, **explicit}
 
 
 def rpc_chain_id(endpoint):
@@ -74,6 +101,60 @@ class NetworkConfig:
         if l2 is not None and self.get('L2_FRONT'):
             if rpc_chain_id(self['L2_FRONT']) != self['L2_CHAIN_ID']:
                 raise ValueError('L2 Composer chain does not match selected L2')
+        if l2 is not None and self.get('L2_GENESIS_HASH'):
+            if self.genesis(l2) != self['L2_GENESIS_HASH'].lower():
+                raise ValueError('L2 genesis changed: deployment required; use fresh manifests and queue')
+
+    @staticmethod
+    def genesis(l2):
+        value = l2.eth.get_block(0)['hash']
+        return ('0x' + bytes(value).hex()).lower() if not isinstance(value, str) else value.lower()
+
+    def deployment_identity(self, l2):
+        return {**{key: self[key] for key in IDENTITY_KEYS}, 'L2_GENESIS_HASH': self.genesis(l2)}
+
+    def check_deployment(self, l1, l2):
+        """Fail closed for resets, stale configuration and missing demo code."""
+        self.check_chains(l1=l1, l2=l2)
+        identity = self.deployment_identity(l2)
+        for key in ('COW_MANIFEST', 'ROUTE_MANIFEST'):
+            saved = self.read_manifest(key)
+            bound = saved.get('deploymentIdentity')
+            if not bound or {k: str(v).lower() for k, v in bound.items()} != {
+                    k: str(v).lower() for k, v in identity.items()}:
+                raise ValueError('Deployment required: missing or stale network identity; do not reuse old manifests/queue')
+        cow, route = self.read_manifest('COW_MANIFEST'), self.read_manifest('ROUTE_MANIFEST')
+        if cow.get('settlement', '').lower() != self['SETTLEMENT_L2'].lower():
+            raise ValueError('Deployment settlement does not match configuration')
+        for client, addresses in ((l1, [self['BRIDGE_L1'], self['WETH_L1'], route.get('l1Helper')]),
+                                  (l2, [self['BRIDGE_L2'], self['EEZ_MANAGER_L2'], self['WETH_L2'],
+                                        cow.get('settlement'), cow.get('authenticator'), cow.get('vaultRelayer'),
+                                        route.get('routeL2'), route.get('l2HelperProxy')])):
+            for address in addresses:
+                if not address or not client.eth.get_code(client.to_checksum_address(address)):
+                    raise ValueError('Deployment required: configured contract has no code')
+        def read(client, address, name, output='address', inputs=(), args=()):
+            abi = [{'type':'function','name':name,'stateMutability':'view',
+                    'inputs':[{'type':t} for t in inputs], 'outputs':[{'type':output}]}]
+            contract = client.eth.contract(client.to_checksum_address(address), abi=abi)
+            return getattr(contract.functions, name)(*args).call()
+        for client, local, peer, rollup in ((l1, self['BRIDGE_L1'], self['BRIDGE_L2'], 0),
+                                           (l2, self['BRIDGE_L2'], self['BRIDGE_L1'], self['L2_ROLLUP_ID'])):
+            remote = read(client, local, 'canonicalBridgeAddress')
+            if int(remote, 16) == 0:
+                remote = local
+            if remote.lower() != peer.lower() or read(client, local, 'rollupId', 'uint64') != rollup:
+                raise ValueError('Deployment required: bridge peer or rollup binding changed')
+        try:
+            manager = read(l2, self['BRIDGE_L2'], 'EEZContract')
+        except Exception:
+            manager = read(l2, self['BRIDGE_L2'], 'manager')
+        if manager.lower() != self['EEZ_MANAGER_L2'].lower():
+            raise ValueError('Deployment required: bridge manager changed')
+        wrapper = read(l2, self['BRIDGE_L2'], 'getWrappedToken', inputs=('address','uint64'),
+                       args=(l2.to_checksum_address(self['WETH_L1']), 0))
+        if wrapper.lower() != self['WETH_L2'].lower():
+            raise ValueError('Deployment required: configured token is not the current bridge wrapper')
 
     def read_manifest(self, key):
         path = self[key]
@@ -98,18 +179,22 @@ class NetworkConfig:
 
 
 def load_config(environ=None, root=ROOT):
-    env = os.environ if environ is None else environ
+    env = environment(os.environ if environ is None else environ)
+    # Live shared .env settings override historical deployment snapshots.
+    # A non-empty demo-specific setting remains the explicit override.
+    for key, shared in SHARED_SETTINGS.items():
+        if not env.get(key) and env.get(shared):
+            env[key] = env[shared]
     root = Path(root)
     if env.get('COW_DEPLOYMENT_ENV'):
         deployment_env = Path(env['COW_DEPLOYMENT_ENV'])
         if not deployment_env.is_absolute():
             deployment_env = root / deployment_env
         saved = json.loads(deployment_env.read_text())
-        allowed = {'COW_NETWORK', *INTEGER_KEYS, *PATH_KEYS, *ADDRESS_KEYS}
+        allowed = {'COW_NETWORK', 'L2_GENESIS_HASH', *INTEGER_KEYS, *PATH_KEYS, *ADDRESS_KEYS}
         if not isinstance(saved, dict) or set(saved) - allowed or any(not isinstance(v, str) for v in saved.values()):
             raise ValueError('Invalid deployment environment file')
-        # Saved deployment bindings win over shared dashboard aliases; explicit
-        # demo-specific environment values retain their usual precedence.
+        # Snapshots supply application bindings, never override live settings.
         env = {**saved, **env}
     network = env.get('COW_NETWORK', 'mainnet')
     if not re.fullmatch(r'[a-z0-9][a-z0-9_-]*', network):
@@ -125,6 +210,10 @@ def load_config(environ=None, root=ROOT):
         if not env.get(key) and env.get(shared):
             env[key] = env[shared]
     values['NETWORK'] = network
+    if env.get('L2_GENESIS_HASH'):
+        if not re.fullmatch(r'0x[0-9a-fA-F]{64}', env['L2_GENESIS_HASH']):
+            raise ValueError('Invalid L2_GENESIS_HASH')
+        values['L2_GENESIS_HASH'] = env['L2_GENESIS_HASH']
     runtime = f'runtime/{network}'
     values.update(ORDER_QUEUE=f'{runtime}/ui-orders.jsonl',
                   SOLVER_LOG=f'{runtime}/solver-worker.log',

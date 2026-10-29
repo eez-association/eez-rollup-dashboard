@@ -35,6 +35,10 @@ def artifact(name):
 
 def main():
     CFG.check_chains(l1=L1,l2=L2)
+    deployment_identity=CFG.deployment_identity(L2)
+    cow_identity=CFG.read_manifest('COW_MANIFEST').get('deploymentIdentity') or {}
+    if {k:str(v).lower() for k,v in cow_identity.items()} != {k:str(v).lower() for k,v in deployment_identity.items()}:
+        raise ValueError('GPv2 deployment identity is missing or stale; validate the current deployment first')
     a=Account.from_key(key()); mgr=L2.eth.contract(MANAGER,abi=MABI)
     saved=CFG.read_manifest('ROUTE_MANIFEST')
     rabi,rbin=artifact('L2UniversalV2Route'); existing=os.getenv('UNIVERSAL_ROUTE_L2') or saved.get('routeL2')
@@ -85,6 +89,9 @@ def main():
         raise RuntimeError('Existing route helper configuration does not match')
     out={'network':CFG['NETWORK'],'l1ChainId':CFG['L1_CHAIN_ID'],'chainId':CHAIN,'settlement':SETTLEMENT,'routeL2':route.address,'l1Helper':predicted,'authorizedL1Caller':authorized,'l2HelperProxy':hproxy,'factoryProxyL2':fproxy,'deploymentTx':rr['transactionHash'] if rr else saved.get('deploymentTx'),
          'deploymentTxs':{name:row['hash'] for name,row in sender.journal.data['transactions'].items()}}
+    if CFG.deployment_identity(L2)!=deployment_identity:
+        raise ValueError('Network identity changed during deployment; manifest not published')
+    out['deploymentIdentity']=deployment_identity
     path=CFG['ROUTE_MANIFEST']; path.parent.mkdir(parents=True,exist_ok=True); atomic_json(path,out); print(json.dumps(out,indent=2))
 
 if __name__=='__main__': main()

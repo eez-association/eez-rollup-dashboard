@@ -192,6 +192,7 @@ class SettlementTests(unittest.TestCase):
                 def __new__(cls, *_): return w
             class Config(dict):
                 def check_chains(self, **_): pass
+                def check_deployment(self, **_): pass
             f = Fixture(); f.receipt = None
             def quoted_rpc(endpoint, method, params):
                 if method != 'eez_quoteFee':

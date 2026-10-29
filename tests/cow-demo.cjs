@@ -4,7 +4,7 @@ const { chromium } = require('playwright');
 const origin = (process.env.EEZ_UI_URL || 'http://127.0.0.1:8083/dashboard').replace(/\/$/, '');
 const shortcut = 'Control+Alt+Shift+KeyT';
 
-async function fixture(browser, { mismatch = false, unavailable = false } = {}) {
+async function fixture(browser, { mismatch = false, unavailable = false, stale = false } = {}) {
   const context = await browser.newContext();
   const page = await context.newPage();
   const requests = [], errors = [];
@@ -13,8 +13,9 @@ async function fixture(browser, { mismatch = false, unavailable = false } = {}) 
     const request = route.request(), path = new URL(request.url()).pathname;
     if (path.includes('cowdemo') || /CowLightDemo-.*\.js$/.test(path)) requests.push(path);
     if (path.endsWith('/cowdemo/api/config')) return route.fulfill({
-      status: unavailable ? 503 : 200,
-      json: { l1ChainId: mismatch ? 1 : 10200, l2ChainId: mismatch ? 696990 : 6290 },
+      status: unavailable || stale ? 503 : 200,
+      json: stale ? { status: 'deployment_required' }
+        : { l1ChainId: mismatch ? 1 : 10200, l2ChainId: mismatch ? 696990 : 6290 },
     });
     if (path.endsWith('/cowdemo/')) return route.fulfill({ contentType: 'text/html',
       body: '<html><body><h1>Trading fixture</h1><input aria-label="Amount"></body></html>' });
@@ -65,12 +66,13 @@ async function fixture(browser, { mismatch = false, unavailable = false } = {}) 
     assert.deepEqual(f.errors, []);
     await f.context.close();
 
-    for (const options of [{ mismatch: true }, { unavailable: true }]) {
+    for (const options of [{ mismatch: true }, { unavailable: true }, { stale: true }]) {
       const f = await fixture(browser, options);
       await f.page.goto(origin + '/#/cow-demo'); await f.nav.waitFor(); await f.hidden();
       await f.toggle(); await f.cow.click();
       await f.page.getByText(options.mismatch
         ? 'CoW Light is configured for a different network. It cannot be opened on this dashboard.'
+        : options.stale ? 'CoW Light needs a verified deployment for the current network. Trading is disabled.'
         : 'CoW Light is not available for this network yet.', { exact: true }).waitFor();
       assert.equal(await f.page.locator('iframe').count(), 0);
       assert.deepEqual(f.errors, []);

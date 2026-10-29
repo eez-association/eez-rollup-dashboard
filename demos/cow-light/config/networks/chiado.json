@@ -1,7 +1,7 @@
 {
   "L1_CHAIN_ID": 10200,
   "L2_CHAIN_ID": null,
-  "L2_ROLLUP_ID": 1,
+  "L2_ROLLUP_ID": null,
   "L1_NATIVE_SYMBOL": "XDAI",
   "L2_NATIVE_SYMBOL": "XDAI",
   "L1_RPC": null,

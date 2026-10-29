@@ -18,6 +18,13 @@ export function CowLightDemo({ ready }: { ready: boolean }) {
     void (async () => {
       try {
         const response = await fetch(`${demoPath}api/config`, { signal: controller.signal });
+        if (response.status === 503) {
+          const failure = await response.json() as { status?: string };
+          if (active && failure.status === "deployment_required") {
+            setMessage("CoW Light needs a verified deployment for the current network. Trading is disabled.");
+            return;
+          }
+        }
         if (!response.ok) throw new Error("unavailable");
         const demo = await response.json() as { l1ChainId: number; l2ChainId: number };
         if (!active) return;

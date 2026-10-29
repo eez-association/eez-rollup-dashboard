@@ -202,6 +202,12 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         p=urlparse(self.path)
         try:
+            if p.path in ('/api/config', '/api/quote', '/api/wrapper', '/api/allowance', '/api/balances'):
+                try:
+                    CFG.check_deployment(l1=l1,l2=l2)
+                except Exception:
+                    return self.send_json({'status':'deployment_required',
+                        'error':'Deployment required or network verification unavailable. Check the configured RPCs and deployment identity.'},503)
             if p.path in ("/","/index.html"):
                 b=(UI/"index.html").read_bytes();self.send_response(200);self.send_header("content-type","text/html; charset=utf-8");self.send_header("content-length",str(len(b)));self.end_headers();self.wfile.write(b);return
             if p.path=="/api/config":return self.send_json({"network":CFG['NETWORK'],"l1NativeSymbol":CFG['L1_NATIVE_SYMBOL'],"l2NativeSymbol":CFG['L2_NATIVE_SYMBOL'],"l1Explorer":CFG.get('L1_EXPLORER'),"l2Explorer":CFG.get('L2_EXPLORER'),"l1ChainId":L1_CHAIN,"l2ChainId":L2_CHAIN,"l1Rpc":L1_RPC,"l2Front":L2_FRONT,"settlement":SETTLEMENT,"vaultRelayer":vault_relayer(),"wethL1":WETH,"wethL2":WETH_L2,"nativeWethL2":NATIVE_WETH_L2,"bridgeL2":BRIDGE_L2})
@@ -248,6 +254,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         if urlparse(self.path).path!="/api/orders":return self.send_json({"error":"not found"},404)
         try:
+            CFG.check_deployment(l1=l1,l2=l2)
             n=int(self.headers.get("content-length","0"));body=json.loads(self.rfile.read(n));order=body["order"];sig=body["signature"];signer=recover(order,sig)
             l1token=body.get("l1Token","").lower();t=next((x for x in catalog() if x["address"].lower()==l1token),None)
             if not t: raise ValueError("l1Token must identify a catalogued L1 token")
@@ -262,7 +269,8 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as e:return self.send_json({"error":str(e)},400)
 
 if __name__=="__main__":
-    CFG.check_chains(l1=l1,l2=l2)
+    # Keep the status API available after a reset; trading requests and the
+    # solver independently validate the live deployment before proceeding.
     catalog()
     port=int(os.getenv("PORT","8787"));print(f"EEZ CoW Light UI: http://127.0.0.1:{port}",flush=True)
     ThreadingHTTPServer((os.getenv("HOST","127.0.0.1"),port),Handler).serve_forever()

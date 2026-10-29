@@ -288,6 +288,7 @@ def main():
         # JSON is shell-independent, contains no secrets, and is generated only after validation.
         atomic_json(directory / 'environment.json', {
             'COW_NETWORK': 'chiado', 'L1_CHAIN_ID': '10200', 'L2_CHAIN_ID': str(cfg['L2_CHAIN_ID']),
+            'L2_GENESIS_HASH': cfg.genesis(l2),
             'L2_ROLLUP_ID': str(rollup), 'BRIDGE_L1': bridge1, 'BRIDGE_L2': bridge2,
             'EEZ_MANAGER_L2': manager, 'WETH_L1': weth, 'WETH_L2': wrapped[0],
             'TOKEN_CATALOG': str(catalog_path), 'COW_MANIFEST': str(directory / 'cow-deployment.json'),

@@ -33,6 +33,7 @@ def main():
     if OUT.exists():
         raise RuntimeError(f'GPv2 manifest already exists: {OUT}; use that deployment or a new manifest path')
     acct = Account.from_key(key())
+    deployment_identity = CFG.deployment_identity(w3)
     if not w3.is_connected() or w3.eth.chain_id != CHAIN_ID:
         raise RuntimeError(f"unexpected chain: {w3.eth.chain_id}")
     auth_abi, auth_bin = artifact("GPv2AllowListAuthentication.json")
@@ -57,9 +58,12 @@ def main():
     # eventual cross-chain swap must separately prove its canonical L1 posting.
     out = {"network": CFG['NETWORK'], "l1ChainId": CFG['L1_CHAIN_ID'], "chainId": CHAIN_ID, "rpc": RPC, "deployer": acct.address,
            "authenticator": auth, "settlement": settlement,
+           "deploymentIdentity": deployment_identity,
            "vaultRelayer": w3.eth.contract(settlement, abi=set_abi).functions.vaultRelayer().call(),
            "deploymentTxs": {name: row['hash'] for name, row in sender.journal.data['transactions'].items()}}
     OUT.parent.mkdir(parents=True, exist_ok=True)
+    if CFG.deployment_identity(w3) != deployment_identity:
+        raise ValueError('Network identity changed during deployment; manifest not published')
     atomic_json(OUT, out)
     print(json.dumps(out, indent=2))
 

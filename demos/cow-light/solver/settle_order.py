@@ -131,7 +131,7 @@ def record_failure(item, reason):
     update_order(QUEUE,item['id'],'failed',error=reason)
 
 def main():
-    CFG.check_chains(l1=L1,l2=L2)
+    CFG.check_deployment(l1=L1,l2=L2)
     item=queued()
     if not item: print('no queued catalog-token order'); return
     if item.get('solver',{}).get('txHash') or item.get('solver',{}).get('settlement'):

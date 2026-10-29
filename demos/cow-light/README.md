@@ -113,6 +113,33 @@ settings override these; no environment files are implicitly read or executed.
 Use endpoints reachable from the process: a Docker-only hostname is not
 automatically translated when running Python on the host.
 
+Alternatively, select the shared `.env` explicitly, without sourcing it:
+
+```bash
+COW_NETWORK=chiado COW_ENV_FILE=/absolute/path/to/dashboard/.env \
+  COW_DEPLOYMENT_ENV=/absolute/path/to/current-deployment/environment.json \
+  python3 backend/server.py
+```
+
+Use the same settings for the solver and deployment commands. `COW_ENV_FILE`
+reads only allowlisted public network/configuration values, not signing keys.
+It accepts literal values and quotes/comments, but rejects shell expansion
+instead of executing it. Export signing keys and process controls separately.
+Non-empty exported variables override values in the file. Explicit demo-specific
+settings override shared aliases; shared settings now override saved deployment
+snapshots. Thus a snapshot cannot silently retain an old bridge or rollup ID
+when the shared environment changes. Chiado has no default rollup ID.
+
+New GPv2 and route manifests retain the L2 genesis and their infrastructure/token
+bindings. The API checks these before providing trading configuration, quotes,
+or accepting orders; the solver checks them before processing orders. Missing
+identity, a reset with the same chain ID, changed bindings, or missing code
+blocks trading. The dashboard displays a deployment-required state. Old
+manifests without identity are intentionally not trusted; do not add the new
+genesis to an old manifest to bypass the check. Use a fresh deployment directory
+and queue after a reset. The checked-in `rog-916969.json` remains a historical
+snapshot pinned to its original genesis, not a configuration for the current ROG.
+
 Discovery identifies the chain, not its contracts. Bridge, manager, token and
 pool addresses still require configuration and validation for that deployment.
 Never reuse an old manifest or queue for a replacement chain: select fresh
