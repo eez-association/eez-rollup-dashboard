@@ -175,6 +175,18 @@ The 2px gradient top rail is the site's signature accent: cards show it on hover
 
 ## Dashboard data and accessibility
 
+CoW Light is a native dashboard tab and reuses the selected dashboard wallet;
+do not embed the standalone demo page or add an independent wallet session.
+Use the shared neutral surfaces, Geist amount typography and pill actions.
+Group sell and receive assets with their network and balance, and keep one
+primary action for connection, quote, exact-amount approval or order signing.
+Show recipient, minimum received and quote expiry before signing. Keep pool
+and contract identifiers in a disclosure. Order history belongs to the
+connected wallet, distinguishes the signed minimum from received amounts,
+and links to the dashboard execution inspector and configured explorers.
+Preserve pending orders across reloads and show uncertain submissions without
+automatically signing or submitting a replacement.
+
 The dashboard, monitor, and execution visualizer use a 12px minimum for control
 text, data labels, badges, and secondary values. Hashes and table cells use
 13–14px. Long decoder explanations are limited to approximately 75 characters

@@ -567,7 +567,7 @@ export function App() {
 
             {treasuryVisible && dashboardTab === "cow-demo" && (
               <Suspense fallback={<p role="status">Loading CoW Light demo…</p>}>
-                <CowLightDemo ready={configLoaded} />
+                <CowLightDemo ready={configLoaded} wallet={wallet} />
               </Suspense>
             )}
 

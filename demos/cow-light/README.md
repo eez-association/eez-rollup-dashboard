@@ -35,11 +35,19 @@ python3 solver/worker.py                  # separate process
 Open `http://127.0.0.1:8787/`. The browser only signs the EIP-712 order;
 settlement is performed by the worker.
 
-The dashboard also embeds this UI in its hidden **CoW Light Demo** tab. Press
+The dashboard provides a native React swap form in its hidden **CoW Light Demo** tab. Press
 **Ctrl+Alt+Shift+T** (**Cmd+Option+Shift+T** on macOS) outside a text field to
 reveal both Treasury and CoW Light tabs; press again to hide them. Configure
 the dashboard's `EEZ_UI_COW_UPSTREAM` to reach this API. Its chain IDs must match
-the dashboard before the embedded trading UI opens.
+the dashboard before trading opens. The tab reuses the dashboard's selected
+wallet, network configuration, design tokens, explorer links and execution
+inspector. It talks to the same API and solver as the standalone developer UI;
+it does not load that page in an iframe or create another wallet connection.
+Its primary action advances from connection through quote, exact-amount
+approval and signing. Changing accounts invalidates the quote; ambiguous
+submissions are retained locally and reconciled against the order queue without
+automatically posting another order. Activity is filtered to the connected
+wallet and labels the signed minimum separately from actual settlement output.
 
 ## Settlement status and recovery
 

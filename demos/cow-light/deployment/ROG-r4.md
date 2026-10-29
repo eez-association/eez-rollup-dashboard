@@ -67,7 +67,15 @@ journalctl --user -u eez-cow-rog-solver.service -n 50
 systemctl --user restart eez-cow-rog-api.service eez-cow-rog-solver.service
 ```
 
-The UI image is `eez-rollup-ui:cow-r4-20261029`. The deployment overlay
+The native dashboard UI image is `eez-rollup-ui:cow-native-r4-20261029`.
+It replaces the iframe with the dashboard's shared wallet and native React
+controls. Browser regression tests cover approval/signing, account changes,
+quote expiry, cancelled switches, reverted approvals and lost API responses
+with mocked transactions. The original real-chain swap record above was
+captured before this UI replacement. The previous embedded-demo image
+`eez-rollup-ui:cow-r4-20261029` is retained for UI rollback.
+
+The deployment overlay
 `.runtime/rog-r4-dashboard.override.json` sets that image and
 `EEZ_UI_COW_UPSTREAM=http://127.0.0.1:18787`. Apply it together with the
 operator's `data/auxiliary-916969-r4/dashboard.compose.json`, targeting only

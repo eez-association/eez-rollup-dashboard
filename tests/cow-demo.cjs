@@ -4,10 +4,39 @@ const { chromium } = require('playwright');
 const origin = (process.env.EEZ_UI_URL || 'http://127.0.0.1:8083/dashboard').replace(/\/$/, '');
 const shortcut = 'Control+Alt+Shift+KeyT';
 
-async function fixture(browser, { mismatch = false, unavailable = false, stale = false } = {}) {
+async function fixture(browser, { mismatch = false, unavailable = false, stale = false, wallet = false, changeDuringSign = false, lostResponse = false, rejectSwitch = false, reverted = false } = {}) {
   const context = await browser.newContext();
   const page = await context.newPage();
   const requests = [], errors = [];
+  const signed = [], transactions = [], submitted = [];
+  let approved = false;
+  if (wallet) {
+    await page.exposeFunction('recordWalletRequest', (method, params) => {
+      if (method === 'eth_sendTransaction') { transactions.push(params[0]); approved = true; }
+      if (method === 'eth_signTypedData_v4') signed.push(JSON.parse(params[1]));
+    });
+    await page.addInitScript(({ changeDuringSign, rejectSwitch }) => {
+      let account = '0x'+'88'.repeat(20), chain = rejectSwitch ? '0x27d8' : '0x1892';
+      const listeners = {};
+      window.changeTestAccount = () => { account = '0x'+'99'.repeat(20); (listeners.accountsChanged || []).forEach(fn => fn([account])); };
+      window.ethereum = { isMetaMask: true,
+        on(event, fn) { (listeners[event] ||= []).push(fn); },
+        removeListener(event, fn) { listeners[event] = (listeners[event] || []).filter(x => x !== fn); },
+        async request({ method, params }) {
+          await window.recordWalletRequest(method, params);
+          if (method === 'eth_accounts' || method === 'eth_requestAccounts') return [account];
+          if (method === 'eth_chainId') return chain;
+          if (method === 'wallet_switchEthereumChain') { if (rejectSwitch) throw new Error('User rejected switch'); chain = params[0].chainId; (listeners.chainChanged || []).forEach(fn => fn(chain)); return null; }
+          if (method === 'eth_sendTransaction') return '0x'+'aa'.repeat(32);
+          if (method === 'eth_signTypedData_v4') {
+            if (changeDuringSign) { window.changeTestAccount(); await new Promise(resolve => setTimeout(resolve, 100)); }
+            return '0x'+'bb'.repeat(65);
+          }
+          return null;
+        },
+      };
+    }, { changeDuringSign, rejectSwitch });
+  }
   page.on('pageerror', error => errors.push(error.message));
   await page.route('**/*', route => {
     const request = route.request(), path = new URL(request.url()).pathname;
@@ -15,10 +44,23 @@ async function fixture(browser, { mismatch = false, unavailable = false, stale =
     if (path.endsWith('/cowdemo/api/config')) return route.fulfill({
       status: unavailable || stale ? 503 : 200,
       json: stale ? { status: 'deployment_required' }
-        : { l1ChainId: mismatch ? 1 : 10200, l2ChainId: mismatch ? 696990 : 6290 },
+        : { network: 'chiado', l1ChainId: mismatch ? 1 : 10200, l2ChainId: mismatch ? 696990 : 6290,
+          settlement: '0x'+'11'.repeat(20), vaultRelayer: '0x'+'22'.repeat(20), wethL2: '0x'+'33'.repeat(20), bridgeL2: '0x'+'44'.repeat(20) },
     });
-    if (path.endsWith('/cowdemo/')) return route.fulfill({ contentType: 'text/html',
-      body: '<html><body><h1>Trading fixture</h1><input aria-label="Amount"></body></html>' });
+    if (path.endsWith('/cowdemo/api/tokens')) return route.fulfill({ json: { tokens: [{ address: '0x'+'55'.repeat(20), pair: '0x'+'66'.repeat(20), symbol: 'ctUSD', name: 'Test USD', decimals: 18 }] } });
+    if (path.endsWith('/cowdemo/api/wrapper')) return route.fulfill({ json: { wrapper: '0x'+'77'.repeat(20), deployed: true } });
+    if (path.endsWith('/cowdemo/api/allowance')) return route.fulfill({ json: { balance: '1000000000000000000', allowance: approved ? '1000000000000000' : '0' } });
+    if (path.endsWith('/cowdemo/api/balances')) return route.fulfill({ json: { selected: { balance: '1000000000000000000' } } });
+    if (path.endsWith('/cowdemo/api/quote')) return route.fulfill({ json: { amountIn: new URL(request.url()).searchParams.get('amount'), amountOut: '100000000000000000', tokenDecimals: 18, tokenSymbol: 'ctUSD', priceImpactBps: 30, block: 1234, pair: '0x'+'66'.repeat(20) } });
+    if (path.endsWith('/cowdemo/api/orders')) {
+      if (request.method() === 'POST') {
+        const body = request.postDataJSON();
+        const row = { ...body, id: 'test-order', signer: '0x'+'88'.repeat(20), receivedAt: Date.now()/1000, status: 'settled', quote: { tokenSymbol: 'ctUSD', tokenDecimals: 18 }, solverDebug: { state: 'settled', txHash: '0x'+'cc'.repeat(32), l1Tx: '0x'+'dd'.repeat(32), message: 'Canonical settlement confirmed. Consensus finality is not asserted.' } };
+        submitted.push(row);
+        return lostResponse ? route.abort() : route.fulfill({ status: 202, json: row });
+      }
+      return route.fulfill({ json: { orders: submitted } });
+    }
     if (path.endsWith('/config.json')) return route.fulfill({ json: {
       networkName: 'EEZ test', l1RpcUrl: '/rpc/l1', l2RpcUrl: '/rpc/l2',
       l1FrontUrl: '/composer/l1', l2FrontUrl: '/composer/l2',
@@ -28,6 +70,7 @@ async function fixture(browser, { mismatch = false, unavailable = false, stale =
     assert.ok(!/send|sign/i.test(method), 'never broadcasts or signs');
     const result = method === 'eth_chainId' ? (path.endsWith('l1') ? '0x27d8' : '0x1892')
       : method === 'eth_getBlockByNumber' ? { number: '0x10', timestamp: '0x65000000', gasUsed: '0x0', gasLimit: '0x1036640', transactions: [] }
+      : method === 'eth_getTransactionReceipt' ? { status: reverted ? '0x0' : '0x1' }
       : method === 'eth_getLogs' ? [] : method === 'eth_getBalance' ? '0x0' : null;
     return route.fulfill({ json: { jsonrpc: '2.0', id, result } });
   });
@@ -36,10 +79,11 @@ async function fixture(browser, { mismatch = false, unavailable = false, stale =
   const treasury = nav.getByRole('button', { name: 'Treasury Demo', exact: true });
   const toggle = async () => { await page.locator('body').click({ position: { x: 1, y: 1 } }); await page.keyboard.press(shortcut); };
   const hidden = async () => { assert.equal(await cow.count(), 0); assert.equal(await treasury.count(), 0); };
-  return { context, page, nav, cow, treasury, requests, errors, toggle, hidden };
+  return { context, page, nav, cow, treasury, requests, errors, toggle, hidden, signed, transactions, submitted };
 }
 
-(async () => {
+module.exports = { fixture, origin };
+if (require.main === module) (async () => {
   const browser = await chromium.launch({ headless: true, chromiumSandbox: true });
   try {
     const f = await fixture(browser);
@@ -48,16 +92,16 @@ async function fixture(browser, { mismatch = false, unavailable = false, stale =
     assert.deepEqual(f.requests, [], 'hidden deep link does not load demo code or API');
     await f.toggle(); await f.treasury.waitFor(); await f.cow.waitFor();
     await f.cow.click();
-    const frame = f.page.frameLocator('iframe[title="CoW Light trading"]');
-    await frame.getByRole('heading', { name: 'Trading fixture' }).waitFor();
+    await f.page.getByRole('region', { name: 'Swap form' }).waitFor();
+    assert.equal(await f.page.locator('iframe').count(), 0);
     assert.equal(await f.page.getByRole('region', { name: 'Transaction history', exact: true }).count(), 0);
     await f.page.reload();
-    await frame.getByRole('heading', { name: 'Trading fixture' }).waitFor();
-    await frame.getByRole('textbox', { name: 'Amount' }).focus();
+    await f.page.getByRole('region', { name: 'Swap form' }).waitFor();
+    await f.page.getByLabel(/You sell/).focus();
     await f.page.keyboard.press(shortcut);
     await f.cow.waitFor(); // Shortcut must not toggle while entering text.
-    await frame.locator('body').click({ position: { x: 1, y: 1 } });
-    await f.page.keyboard.press(shortcut); // Works from inside the embedded UI.
+    await f.page.getByRole('heading', { name: 'CoW Light', exact: true }).click();
+    await f.page.keyboard.press(shortcut);
     await f.page.getByRole('region', { name: 'Counter demo', exact: true }).waitFor();
     await f.hidden();
     await f.page.evaluate(() => { location.hash = '#/cow-demo'; });
@@ -79,6 +123,6 @@ async function fixture(browser, { mismatch = false, unavailable = false, stale =
       await f.context.close();
     }
     console.log(JSON.stringify({ passed: true, hiddenTogether: true, guardedDeepLinks: true,
-      sessionReload: true, iframeShortcut: true, wrongNetworkBlocked: true, unavailableHandled: true }));
+      sessionReload: true, nativeUI: true, wrongNetworkBlocked: true, unavailableHandled: true }));
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });
