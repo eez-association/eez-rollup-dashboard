@@ -229,7 +229,7 @@ function Trading({ cfg, tokens, wallet }: { cfg: CowConfig; tokens: CowToken[]; 
             <input id="cow-slippage" className={styles.slippage} inputMode="decimal" value={slippage} onChange={e => setSlippage(e.target.value)} /></div>
         </fieldset>
         {fresh && <dl className={styles.metrics}><div><dt>Minimum received</dt><dd>{minimum ? displayAmount(minimum, selected.decimals) : '—'} {selected.symbol}</dd></div>
-          <div><dt>Price impact</dt><dd>{quote!.priceImpactBps / 100}%</dd></div><div><dt>Quote expires in</dt><dd>{Math.max(0, Math.ceil((60000 - (now - quote!.fetchedAt)) / 1000))}s</dd></div></dl>}
+          <div><dt>Price impact</dt><dd>{(quote!.priceImpactBps / 100).toFixed(2)}%</dd></div><div><dt>Quote expires in</dt><dd>{Math.max(0, Math.ceil((60000 - (now - quote!.fetchedAt)) / 1000))}s</dd></div></dl>}
         <p className={styles.hint}>Recipient: {wallet.address ? <ExplorerLink value={wallet.address} /> : 'Your connected wallet'}</p>
         {wrongChain && <p className={styles.hint}>Your wallet will ask to switch to {L2_CHAIN.chainName} before approval or signing.</p>}
         {inputError && <p className={styles.warning}>{inputError}</p>}
