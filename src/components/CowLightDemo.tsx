@@ -4,6 +4,7 @@ import { config, DISCOVERED_CHAIN_IDS, L1_CHAIN, L2_CHAIN } from '../config';
 import type { useWallet } from '../hooks/useWallet';
 import { rpcCall } from '../rpc';
 import { ExplorerLink } from './ExplorerLink';
+import { CowTokenList } from './CowTokenList';
 import { cowScope, displayAmount, minimumOutput, orderData, orderTypes, requireFreshQuote, sellAmount,
   type CowConfig, type CowOrder, type CowQuote, type CowToken } from '../lib/cowLight';
 import styles from './CowLightDemo.module.css';
@@ -249,10 +250,14 @@ function Trading({ cfg, tokens, wallet }: { cfg: CowConfig; tokens: CowToken[]; 
         {pending && <p role="status" className={styles.hint}>A signed order is being checked. Do not sign another while its submission is uncertain.
           {now > pending.validTo * 1000 && <button onClick={() => { localStorage.removeItem(storageKey); setPending(null); }}>Dismiss expired submission</button>}</p>}
       </section>
-      <aside className={styles.card} aria-label="Swap route"><span className={styles.eyebrow}>[ HOW IT SETTLES ]</span><h3>One order, both networks</h3>
+      <aside className={styles.card} aria-label="Tokens and swap route">
+        <CowTokenList tokens={tokens} selected={tokenAddress} locked={locked} onSelect={address => {
+          if (address !== tokenAddress) { setTokenAddress(address); setQuote(null); }
+        }} />
+        <details><summary>How the swap settles</summary>
         <ol className={styles.route}><li><span>{L2_CHAIN.chainName}</span><p>Approve the sell amount, then sign your swap order.</p></li>
           <li><span>{L1_CHAIN.chainName}</span><p>The solver swaps through the selected liquidity pool.</p></li>
-          <li><span>{L2_CHAIN.chainName}</span><p>Receive {selected.symbol} in your connected wallet when settlement succeeds.</p></li></ol>
+          <li><span>{L2_CHAIN.chainName}</span><p>Receive {selected.symbol} in your connected wallet when settlement succeeds.</p></li></ol></details>
         <details><summary>Liquidity and contracts</summary><dl className={styles.metrics}>
           <div><dt>Liquidity pool</dt><dd><ExplorerLink chain="l1" value={selected.pair} /></dd></div>
           <div><dt>Sell token</dt><dd><ExplorerLink value={cfg.wethL2} /></dd></div>

@@ -179,6 +179,12 @@ CoW Light is a native dashboard tab and reuses the selected dashboard wallet;
 do not embed the standalone demo page or add an independent wallet session.
 Use the shared neutral surfaces, Geist amount typography and pill actions.
 Group sell and receive assets with their network and balance, and keep one
+searchable visual token list beside the swap form, preserving the original
+demo's liquidity browser. Show token symbols and names, pair links and a clear
+selected state; synchronize list selection with the receive control. Keep
+selection locked during pending wallet requests and orders. Only show reserves
+when provided, with their catalog provenance rather than implying live data.
+Keep one
 primary action for connection, quote, exact-amount approval or order signing.
 Show recipient, minimum received and quote expiry before signing. Keep pool
 and contract identifiers in a disclosure. Order history belongs to the

@@ -48,6 +48,10 @@ approval and signing. Changing accounts invalidates the quote; ambiguous
 submissions are retained locally and reconciled against the order queue without
 automatically posting another order. Activity is filtered to the connected
 wallet and labels the signed minimum separately from actual settlement output.
+The original visual liquidity browser is retained beside the swap form: search
+token symbols, names or addresses, inspect pair links, and select a token row.
+The list and receive selector share one selection; changing it clears the quote.
+Catalog reserves appear only when supplied and are labeled as catalog data.
 
 ## Settlement status and recovery
 

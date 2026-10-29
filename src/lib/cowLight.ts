@@ -3,7 +3,7 @@ export interface CowConfig {
   network: string; l1ChainId: number; l2ChainId: number; settlement: string; vaultRelayer: string;
   wethL1: string; wethL2: string; bridgeL2: string; nativeWethL2: string | null; l2NativeSymbol: string;
 }
-export interface CowToken { address: string; symbol: string; name: string; decimals: number; pair: string }
+export interface CowToken { address: string; symbol: string; name: string; decimals: number; pair: string; wethReserve?: string | null }
 export interface CowQuote { amountIn: string; amountOut: string; tokenDecimals: number; tokenSymbol: string; priceImpactBps: number; block: number; pair: string; fetchedAt: number }
 export interface CowOrder {
   id: string; signer: string; status: string; signature?: string; receivedAt: number;

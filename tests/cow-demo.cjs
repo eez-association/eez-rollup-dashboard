@@ -47,7 +47,10 @@ async function fixture(browser, { mismatch = false, unavailable = false, stale =
         : { network: 'chiado', l1ChainId: mismatch ? 1 : 10200, l2ChainId: mismatch ? 696990 : 6290,
           settlement: '0x'+'11'.repeat(20), vaultRelayer: '0x'+'22'.repeat(20), wethL2: '0x'+'33'.repeat(20), bridgeL2: '0x'+'44'.repeat(20) },
     });
-    if (path.endsWith('/cowdemo/api/tokens')) return route.fulfill({ json: { tokens: [{ address: '0x'+'55'.repeat(20), pair: '0x'+'66'.repeat(20), symbol: 'ctUSD', name: 'Test USD', decimals: 18 }] } });
+    if (path.endsWith('/cowdemo/api/tokens')) return route.fulfill({ json: { tokens: [
+      { address: '0x'+'55'.repeat(20), pair: '0x'+'66'.repeat(20), symbol: 'ctUSD', name: 'Test USD', decimals: 18 },
+      { address: '0x'+'12'.repeat(20), pair: '0x'+'34'.repeat(20), symbol: 'TEST', name: 'Second token', decimals: 18, wethReserve: '1000000000000000000' },
+    ] } });
     if (path.endsWith('/cowdemo/api/wrapper')) return route.fulfill({ json: { wrapper: '0x'+'77'.repeat(20), deployed: true } });
     if (path.endsWith('/cowdemo/api/allowance')) return route.fulfill({ json: { balance: '1000000000000000000', allowance: approved ? '1000000000000000' : '0' } });
     if (path.endsWith('/cowdemo/api/balances')) return route.fulfill({ json: { selected: { balance: '1000000000000000000' } } });

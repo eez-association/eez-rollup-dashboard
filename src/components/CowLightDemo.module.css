@@ -39,5 +39,20 @@
 .order { display: grid; gap: 12px; padding-top: 16px; border-top: 1px solid var(--border); min-width: 0; }
 .links { display: flex; flex-wrap: wrap; gap: 12px; font: 13px/1.6 var(--mono); }
 .links a { color: var(--text); text-decoration: underline; }
+.tokenCatalog { display: grid; gap: 12px; min-width: 0; }
+.tokenList { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; max-height: 520px; overflow-y: auto; scrollbar-gutter: stable; }
+.tokenItem { border: 1px solid var(--border); border-radius: 12px; background: var(--bg-inset); min-width: 0; }
+.selectedToken { border-color: var(--text-dim); }
+.demo .tokenChoice { display: flex; align-items: center; gap: 12px; width: 100%; border: 0; border-radius: 12px; padding: 14px; text-align: left; }
+.tokenChoice:hover:not(:disabled) { background: var(--bg-card); }
+.tokenChoice:focus-visible { outline-offset: -3px !important; }
+.tokenIcon { display: grid; place-items: center; flex-shrink: 0; width: 40px; height: 40px; border: 1px solid var(--border); border-radius: 50%; font: 500 13px/1 var(--mono); color: var(--text-bright); background: var(--bg-card); }
+.tokenName { display: grid; gap: 4px; min-width: 0; flex: 1; overflow-wrap: anywhere; }
+.tokenName strong { font: 600 16px/1.4 var(--sans); color: var(--text-bright); }
+.tokenName > span { color: var(--text-dim); font: 12px/1.5 var(--sans); }
+.tokenSelection { flex-shrink: 0; color: var(--text-dim); font: 12px/1.5 var(--mono); }
+.selectedToken .tokenSelection { color: var(--text-bright); }
+.tokenMeta { display: grid; gap: 6px; border-top: 1px solid var(--border); padding: 10px 14px; color: var(--text-dim); font: 12px/1.6 var(--mono); overflow-wrap: anywhere; }
+.tokenMeta > span { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; }
 @media (max-width: 800px) { .layout { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 640px) { .card { padding: 18px; } .heading h2 { font-size: 24px; } }

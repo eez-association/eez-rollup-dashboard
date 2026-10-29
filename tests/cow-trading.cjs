@@ -23,6 +23,20 @@ async function open(browser, options = {}) {
   const browser = await chromium.launch({ headless: true, chromiumSandbox: true });
   try {
     const f = await open(browser);
+    const catalog = f.page.getByRole('region', { name: 'Available tokens' });
+    await catalog.getByLabel('Search tokens').fill('second');
+    assert.equal(await catalog.getByRole('button', { name: 'Select ctUSD' }).count(), 0);
+    await catalog.getByRole('button', { name: 'Select TEST', exact: true }).focus();
+    await f.page.keyboard.press('Enter');
+    assert.equal(await f.page.getByLabel(/You receive/).inputValue(), '0x'+'12'.repeat(20));
+    await f.form.getByRole('button', { name: 'Get quote' }).waitFor();
+    assert.equal(await f.form.getByText('Minimum received', { exact: true }).count(), 0, 'token change clears the previous quote');
+    await catalog.getByLabel('Search tokens').fill('no-matches');
+    await catalog.getByRole('button', { name: 'Clear search' }).click();
+    await f.page.getByLabel(/You receive/).selectOption('0x'+'55'.repeat(20));
+    assert.equal(await catalog.getByRole('button', { name: 'Select ctUSD', exact: true }).getAttribute('aria-pressed'), 'true');
+    await f.form.getByRole('button', { name: 'Get quote' }).click();
+    await f.form.getByRole('button', { name: 'Sign order' }).waitFor();
     await f.page.getByLabel('Maximum slippage (%)').fill('1');
     await f.page.getByLabel('Maximum slippage (%)').fill('3');
     await f.form.getByRole('button', { name: 'Sign order' }).click();
