@@ -19,6 +19,15 @@ OTHER_ADDRESS = '0x' + '34' * 20
 
 
 class ConfigurationTests(unittest.TestCase):
+    def test_wrapper_explorer_endpoint_from_shared_environment_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / '.env'
+            path.write_text('COW_WRAPPER_EXPLORER_API=https://rollup.example/explorer/api/v2\n')
+            cfg = load_config({'COW_ENV_FILE':str(path)})
+            self.assertEqual(cfg['COW_WRAPPER_EXPLORER_API'], 'https://rollup.example/explorer/api/v2')
+        with self.assertRaises(ValueError):
+            load_config({'COW_WRAPPER_EXPLORER_API':'file:///tmp/bytecode'})
+
     def setUp(self):
         # Keep fixtures on the workspace filesystem (some hosts quota /tmp).
         self.temp = tempfile.TemporaryDirectory(dir=Path(__file__).parent)

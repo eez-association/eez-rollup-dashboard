@@ -17,6 +17,7 @@ from eth_utils import keccak, to_checksum_address
 
 ROOT=Path(__file__).resolve().parents[1]; UI=ROOT/"ui"
 sys.path.insert(0, str(ROOT))
+from wrapper_prediction import WrapperPredictor, metadata
 from network_config import load_config
 CFG=load_config()
 CATALOG=CFG['TOKEN_CATALOG']; QUEUE=CFG['ORDER_QUEUE']; QUEUE_LOCK=QUEUE.with_suffix(QUEUE.suffix+'.lock')
@@ -36,7 +37,7 @@ TOKEN_META_ABI=[
 MANAGER_ABI=[{"type":"function","name":"computeCrossChainProxyAddress","stateMutability":"view","inputs":[{"type":"address"},{"type":"uint64"}],"outputs":[{"type":"address"}]}]
 SETTLEMENT_VIEW_ABI=[{"type":"function","name":"vaultRelayer","stateMutability":"view","inputs":[],"outputs":[{"type":"address"}]}]
 l1=Web3(Web3.HTTPProvider(L1_RPC,request_kwargs={"timeout":30})); l2=Web3(Web3.HTTPProvider(L2_RPC,request_kwargs={"timeout":30})); lock=threading.Lock()
-_wrapper_prefix=None
+_wrapper_predictor=WrapperPredictor()
 def vault_relayer():
     return l2.eth.contract(Web3.to_checksum_address(SETTLEMENT),abi=SETTLEMENT_VIEW_ABI).functions.vaultRelayer().call()
 
@@ -77,30 +78,7 @@ def quote(t,amount):
             "tokenSymbol":t.get("symbol",""),"tokenDecimals":t.get("decimals",18),
             "tokenReserve":t.get("tokenReserve"),"wethReserve":t.get("wethReserve")}
 def _live_wrapper_prefix():
-    """Recover the creation-code prefix used by the deployed BridgeLive.
-
-    A canonical first WETH deployment trace supplies the exact CREATE2
-    init-code prefix used by the configured bridge. The result is cached.
-    """
-    global _wrapper_prefix
-    if _wrapper_prefix is not None: return _wrapper_prefix
-    WRAPPER_REFERENCE_TX=CFG['WRAPPER_REFERENCE_TX']; WRAPPER_PREFIX_LEN=CFG['WRAPPER_PREFIX_LEN']
-    r=requests.post(L2_RPC,json={"jsonrpc":"2.0","id":1,"method":"debug_traceTransaction",
-        "params":[WRAPPER_REFERENCE_TX,{"tracer":"callTracer"}]},timeout=45)
-    payload=r.json()
-    if "error" in payload: raise ValueError("cannot inspect canonical wrapper deployment: "+str(payload["error"]))
-    def find(x):
-        if x.get("type")=="CREATE2" and x.get("input"): return x
-        for child in x.get("calls",[]) or []:
-            y=find(child)
-            if y: return y
-        return None
-    create=find(payload.get("result",{}))
-    if not create: raise ValueError("canonical wrapper deployment trace has no CREATE2")
-    raw=bytes.fromhex(create["input"][2:])
-    if len(raw)<=WRAPPER_PREFIX_LEN: raise ValueError("invalid wrapper creation trace")
-    _wrapper_prefix=raw[:WRAPPER_PREFIX_LEN]
-    return _wrapper_prefix
+    return _wrapper_predictor.prefix(CFG, l2)
 
 def wrapper(token, status_only=False):
     token=Web3.to_checksum_address(token)
@@ -114,12 +92,7 @@ def wrapper(token, status_only=False):
     if not t: raise ValueError("token is not in the L1 catalog")
     # The bridge derives CREATE2 init code from the token's *on-chain* ERC20
     # metadata. Catalog labels are display-only.
-    name=t.get("name") or t.get("symbol") or "Token"; symbol=t.get("symbol") or "TOK"; decimals=int(t.get("decimals",18))
-    try:
-        meta=l1.eth.contract(address=token,abi=TOKEN_META_ABI)
-        name=meta.functions.name().call(); symbol=meta.functions.symbol().call(); decimals=int(meta.functions.decimals().call())
-    except Exception:
-        pass
+    name, symbol, decimals = metadata(l1, token)
     init=_live_wrapper_prefix()+abi_encode(["string","string","uint8","address"],[name,symbol,decimals,Web3.to_checksum_address(BRIDGE_L2)])
     # The deployed BridgeLive ABI uses uint64 for originalRollupId, so
     # _wrappedSalt is abi.encodePacked(address,uint64): 20 + 8 bytes.  The
