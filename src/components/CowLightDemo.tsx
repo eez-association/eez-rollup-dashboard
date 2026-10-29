@@ -8,7 +8,7 @@ import { CowTokenList } from './CowTokenList';
 import { CowTestTokens } from './CowTestTokens';
 import { CowSwapHistory } from './CowSwapHistory';
 import { getEip1559Fees } from '../lib/gasEstimation';
-import { cowScope, displayAmount, minimumOutput, nativeWrapIsSellAsset, orderData, orderTypes, requireFreshQuote, sellAmount,
+import { cowScope, displayAmount, hasMinimumWethReserve, minimumOutput, nativeWrapIsSellAsset, orderData, orderTypes, requireFreshQuote, sellAmount,
   type CowConfig, type CowOrder, type CowQuote, type CowToken } from '../lib/cowLight';
 import styles from './CowLightDemo.module.css';
 
@@ -45,8 +45,9 @@ export function CowLightDemo({ ready, wallet }: { ready: boolean; wallet: Wallet
           throw new Error('CoW Light is configured for a different network. It cannot be opened on this dashboard.');
         }
         const catalog = await api<{ tokens: CowToken[] }>('/tokens', { signal: controller.signal });
-        if (!catalog.tokens.length) throw new Error('No swap tokens are configured for this network.');
-        if (active && !controller.signal.aborted) { setTokens(catalog.tokens); setCfg(demo); }
+        const eligible = catalog.tokens.filter(hasMinimumWethReserve);
+        if (!eligible.length) throw new Error('No swap tokens meet the minimum catalog reserve of 0.01 WETH.');
+        if (active && !controller.signal.aborted) { setTokens(eligible); setCfg(demo); }
       } catch (e) { if (active && !controller.signal.aborted) setLoadError((e as Error).message); }
       finally { clearTimeout(timer); }
     })();
