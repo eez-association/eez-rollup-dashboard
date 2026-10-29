@@ -53,6 +53,27 @@ token symbols, names or addresses, inspect pair links, and select a token row.
 The list and receive selector share one selection; changing it clears the quote.
 Catalog reserves appear only when supplied and are labeled as catalog data.
 
+**Your swaps** reuses the Treasury payment-history layout: newest-first rows,
+outcome counts and filters, refresh, transaction/block links and expandable
+rollup → L1 liquidity → rollup details. The most recent order opens by default.
+The output amount shown is explicitly the signed minimum; the API does not
+currently report measured trade output. A submitted transaction remains pending
+until the solver records canonical settlement evidence.
+
+### Mainnet sell asset
+
+This route sells **bridged Ethereum WETH** on the L2 (`WETH_L2`), which must
+match the official bridge's wrapper for `WETH_L1`. Start with WETH on Ethereum
+(wrap ETH there if necessary), then bridge that ERC20 token to the rollup.
+The route bridges it back to Ethereum for the V2 pool swap.
+
+`NATIVE_WETH_L2` is a separate locally wrapped native-ETH token. Bridging native
+ETH and wrapping it on the L2 does not produce this route's sell asset. The
+dashboard labels the mainnet sell asset **Bridged WETH**, explains the
+distinction and hides native wrapping unless its configured contract equals
+the configured sell token. Supporting native L2 WETH would require an explicit
+conversion route and separate validation; the current route is unchanged.
+
 ### Get test tokens on Chiado
 
 The Chiado tab labels its sell asset **ctWETH** and provides **Get test tokens**.

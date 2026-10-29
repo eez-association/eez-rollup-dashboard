@@ -7,8 +7,16 @@ export interface CowToken { address: string; symbol: string; name: string; decim
 export interface CowQuote { amountIn: string; amountOut: string; tokenDecimals: number; tokenSymbol: string; priceImpactBps: number; block: number; pair: string; fetchedAt: number }
 export interface CowOrder {
   id: string; signer: string; status: string; signature?: string; receivedAt: number;
-  order: { sellAmount: string; buyAmount: string }; quote?: { tokenSymbol: string; tokenDecimals: number };
-  solverDebug?: { state?: string; txHash?: string; settlement?: string; l1Tx?: string; message?: string; error?: unknown };
+  order: { sellAmount: string; buyAmount: string; receiver?: string }; quote?: { tokenSymbol: string; tokenDecimals: number };
+  solverDebug?: { state?: string; txHash?: string; settlement?: string; l1Tx?: string; message?: string; error?: unknown; settlementBlock?: number; l1Block?: number };
+}
+export function swapOutcome(order: CowOrder): 'settled' | 'pending' | 'failed' | 'expired' {
+  const state = order.solverDebug?.state || order.status;
+  return state === 'settled' ? 'settled' : state === 'expired' ? 'expired'
+    : ['failed', 'reverted', 'rejected'].includes(state) ? 'failed' : 'pending';
+}
+export function nativeWrapIsSellAsset(cfg: CowConfig) {
+  return cfg.l2NativeSymbol === 'ETH' && !!cfg.nativeWethL2 && cfg.nativeWethL2.toLowerCase() === cfg.wethL2.toLowerCase();
 }
 export const orderTypes = { Order: [
   { name: 'sellToken', type: 'address' }, { name: 'buyToken', type: 'address' },

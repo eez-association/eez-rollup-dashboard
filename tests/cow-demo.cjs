@@ -5,7 +5,7 @@ const { encodeEventTopics, encodeAbiParameters, parseAbi } = require('viem');
 const origin = (process.env.EEZ_UI_URL || 'http://127.0.0.1:8083/dashboard').replace(/\/$/, '');
 const shortcut = 'Control+Alt+Shift+KeyT';
 
-async function fixture(browser, { mismatch = false, unavailable = false, stale = false, wallet = false, changeDuringSign = false, lostResponse = false, rejectSwitch = false, reverted = false, faucetDelayed = false } = {}) {
+async function fixture(browser, { mismatch = false, unavailable = false, stale = false, wallet = false, changeDuringSign = false, lostResponse = false, rejectSwitch = false, reverted = false, faucetDelayed = false, mainnet = false } = {}) {
   const context = await browser.newContext();
   const page = await context.newPage();
   const requests = [], errors = [];
@@ -47,8 +47,8 @@ async function fixture(browser, { mismatch = false, unavailable = false, stale =
     if (path.endsWith('/cowdemo/api/config')) return route.fulfill({
       status: unavailable || stale ? 503 : 200,
       json: stale ? { status: 'deployment_required' }
-        : { network: 'chiado', l2NativeSymbol: 'XDAI', l1ChainId: mismatch ? 1 : 10200, l2ChainId: mismatch ? 696990 : 6290,
-          settlement: '0x'+'11'.repeat(20), vaultRelayer: '0x'+'22'.repeat(20), wethL2: '0x'+'33'.repeat(20), bridgeL2: '0x'+'44'.repeat(20) },
+        : { network: mainnet ? 'mainnet' : 'chiado', l2NativeSymbol: mainnet ? 'ETH' : 'XDAI', l1ChainId: mismatch || mainnet ? 1 : 10200, l2ChainId: mismatch ? 696990 : 6290,
+          settlement: '0x'+'11'.repeat(20), vaultRelayer: '0x'+'22'.repeat(20), wethL2: '0x'+'33'.repeat(20), nativeWethL2: mainnet ? '0x'+'aa'.repeat(20) : null, bridgeL2: '0x'+'44'.repeat(20) },
     });
     if (path.endsWith('/cowdemo/api/tokens')) return route.fulfill({ json: { tokens: [
       { address: '0x'+'55'.repeat(20), pair: '0x'+'66'.repeat(20), symbol: 'ctUSD', name: 'Test USD', decimals: 18 },
@@ -81,7 +81,7 @@ async function fixture(browser, { mismatch = false, unavailable = false, stale =
     if (request.method() !== 'POST') return route.continue();
     const { id, method } = request.postDataJSON();
     assert.ok(!/send|sign/i.test(method), 'never broadcasts or signs');
-    const result = method === 'eth_chainId' ? (path.endsWith('l1') ? '0x27d8' : '0x1892')
+    const result = method === 'eth_chainId' ? (path.endsWith('l1') ? mainnet ? '0x1' : '0x27d8' : '0x1892')
       : method === 'eth_getBlockByNumber' ? { hash:'0x'+'ee'.repeat(32), number: '0x10', timestamp: '0x65000000', gasUsed: '0x0', gasLimit: '0x1036640', transactions: [] }
       : method === 'eth_getTransactionReceipt' ? { status: reverted ? '0x0' : '0x1', blockNumber:'0x10',blockHash:'0x'+'ee'.repeat(32),logs:faucetClaimed ? [{address:'0x'+'ef'.repeat(20),
           topics:encodeEventTopics({abi:parseAbi(['event Claimed(address indexed recipient, uint256 tokenAmount, uint256 gasAmount)']),eventName:'Claimed',args:{recipient:'0x'+'88'.repeat(20)}}),

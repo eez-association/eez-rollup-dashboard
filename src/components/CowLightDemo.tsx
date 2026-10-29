@@ -6,7 +6,8 @@ import { rpcCall } from '../rpc';
 import { ExplorerLink } from './ExplorerLink';
 import { CowTokenList } from './CowTokenList';
 import { CowTestTokens } from './CowTestTokens';
-import { cowScope, displayAmount, minimumOutput, orderData, orderTypes, requireFreshQuote, sellAmount,
+import { CowSwapHistory } from './CowSwapHistory';
+import { cowScope, displayAmount, minimumOutput, nativeWrapIsSellAsset, orderData, orderTypes, requireFreshQuote, sellAmount,
   type CowConfig, type CowOrder, type CowQuote, type CowToken } from '../lib/cowLight';
 import styles from './CowLightDemo.module.css';
 
@@ -72,6 +73,8 @@ function Trading({ cfg, tokens, wallet }: { cfg: CowConfig; tokens: CowToken[]; 
   const [orders, setOrders] = useState<CowOrder[]>([]);
   const [readError, setReadError] = useState('');
   const [ordersError, setOrdersError] = useState('');
+  const [historyRefresh, setHistoryRefresh] = useState(0);
+  const [historyChecking, setHistoryChecking] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState('');
@@ -113,6 +116,7 @@ function Trading({ cfg, tokens, wallet }: { cfg: CowConfig; tokens: CowToken[]; 
     let timer: ReturnType<typeof setTimeout>;
     const poll = async () => {
       try {
+        setHistoryChecking(true);
         const data = await api<{ orders: CowOrder[] }>('/orders');
         if (active) {
           setOrders(data.orders); setOrdersError('');
@@ -121,10 +125,10 @@ function Trading({ cfg, tokens, wallet }: { cfg: CowConfig; tokens: CowToken[]; 
           }
         }
       } catch (e) { if (active) setOrdersError((e as Error).message); }
-      finally { if (active) timer = setTimeout(poll, 5000); }
+      finally { if (active) { setHistoryChecking(false); timer = setTimeout(poll, 5000); } }
     };
     void poll(); return () => { active = false; clearTimeout(timer); };
-  }, [pending, storageKey]);
+  }, [pending, storageKey, historyRefresh]);
   const ownOrders = orders.filter(o => o.signer?.toLowerCase() === wallet.address?.toLowerCase()).sort((a, b) => b.receivedAt - a.receivedAt);
   const unresolved = ownOrders.some(o => !['settled', 'failed', 'expired', 'rejected', 'reverted'].includes(o.solverDebug?.state || o.status));
   const fresh = !!quote && now - quote.fetchedAt < 60000;
@@ -134,7 +138,7 @@ function Trading({ cfg, tokens, wallet }: { cfg: CowConfig; tokens: CowToken[]; 
   const needsApproval = !!allowance && BigInt(allowance.allowance) < amountWei;
   const wrongChain = wallet.isConnected && BigInt(wallet.chainId || '0') !== BigInt(cfg.l2ChainId);
   const locked = !!busy || !!pending || unresolved || faucetPending;
-  const sellSymbol = cfg.network === 'chiado' && cfg.l1ChainId === 10200 ? 'ctWETH' : 'WETH';
+  const sellSymbol = cfg.network === 'chiado' && cfg.l1ChainId === 10200 ? 'ctWETH' : 'Bridged WETH';
 
   async function action(kind: 'quote' | 'approve' | 'sign' | 'wrap') {
     if (actionLock.current) return;
@@ -173,7 +177,7 @@ function Trading({ cfg, tokens, wallet }: { cfg: CowConfig; tokens: CowToken[]; 
       await assertWallet();
       if (kind !== 'wrap') requireFreshQuote(quote!);
       if (kind === 'approve' || kind === 'wrap') {
-        if (kind === 'wrap' && (!cfg.nativeWethL2 || cfg.nativeWethL2 !== live.nativeWethL2 || cfg.l2NativeSymbol !== 'ETH')) throw new Error('Native wrapping is not configured.');
+        if (kind === 'wrap' && (!nativeWrapIsSellAsset(cfg) || cfg.nativeWethL2 !== live.nativeWethL2)) throw new Error('Native WETH is not the sell asset for this route.');
         const tx = kind === 'wrap'
           ? { from: account, to: cfg.nativeWethL2, data: '0xd0e30db0', value: `0x${sellAmount(wrapAmount).toString(16)}` }
           : { from: account, to: cfg.wethL2, data: encodeFunctionData({ abi: erc20Abi, functionName: 'approve', args: [cfg.vaultRelayer as `0x${string}`, BigInt(quote!.amountIn)] }) };
@@ -222,6 +226,7 @@ function Trading({ cfg, tokens, wallet }: { cfg: CowConfig; tokens: CowToken[]; 
           <div className={styles.asset}><div className={styles.row}><label htmlFor="cow-amount">You sell · {L2_CHAIN.chainName}</label><span>{sellSymbol}</span></div>
             <input id="cow-amount" className={styles.amount} inputMode="decimal" value={amount} onChange={e => { setAmount(e.target.value); setQuote(null); }} />
             <span className={styles.hint}>Balance: {allowance ? displayAmount(allowance.balance) : '—'}</span></div>
+          {cfg.l1ChainId === 1 && <p className={styles.hint}>Use Ethereum WETH bridged to {L2_CHAIN.chainName}. Native WETH created by wrapping ETH on the rollup is a different token.</p>}
           <div className={styles.direction} aria-hidden="true">↓</div>
           <div className={styles.asset}><label htmlFor="cow-token">You receive · {L2_CHAIN.chainName}</label>
             <div className={styles.row}><strong className={styles.amount}>{fresh ? displayAmount(quote!.amountOut, selected.decimals) : '—'}</strong>
@@ -269,26 +274,14 @@ function Trading({ cfg, tokens, wallet }: { cfg: CowConfig; tokens: CowToken[]; 
           <div><dt>Settlement</dt><dd><ExplorerLink value={cfg.settlement} /></dd></div></dl>
           {wrapper && !wrapper.deployed && <p className={styles.hint}>The receive token wrapper will be deployed by the first inbound bridge.</p>}
           {quote && <p className={styles.hint}>Quoted at {L1_CHAIN.chainName} block {quote.block.toLocaleString()}.</p>}</details>
-        {cfg.nativeWethL2 && cfg.l2NativeSymbol === 'ETH' && <details><summary>Wrap native ETH</summary>
+        {nativeWrapIsSellAsset(cfg) && <details><summary>Wrap native ETH</summary>
           <p className={styles.hint}>Wrap native ETH on {L2_CHAIN.chainName}. This is a separate wallet transaction.</p>
           <label htmlFor="cow-wrap">ETH amount</label><input id="cow-wrap" inputMode="decimal" value={wrapAmount} disabled={locked} onChange={e => setWrapAmount(e.target.value)} />
           <button disabled={locked || !wallet.isConnected} onClick={() => void action('wrap')}>Wrap ETH</button>
-          <p><ExplorerLink value={cfg.nativeWethL2} label="Native WETH contract" /></p></details>}
+          <p><ExplorerLink value={cfg.nativeWethL2!} label="Native WETH contract" /></p></details>}
       </aside>
     </div>
-    <section className={styles.card} aria-label="Swap activity"><h3>Your swaps</h3>
-      {ordersError && <p role="alert" className={styles.error}>Activity could not refresh: {ordersError}</p>}
-      {!wallet.address ? <p className={styles.hint}>Connect your wallet to see its swaps.</p> : !ownOrders.length ? <p className={styles.hint}>No orders submitted by this wallet yet.</p> : ownOrders.slice(0, 25).map(o => {
-        const d = o.solverDebug, state = d?.state || o.status, tx = d?.settlement || d?.txHash;
-        return <article className={styles.order} key={o.id}><div className={styles.row}><strong>{displayAmount(o.order.sellAmount)} {sellSymbol} → {o.quote?.tokenSymbol || 'Token'}</strong>
-          <span className={state === 'settled' ? styles.success : styles.badge}>{state.replace(/_/g, ' ')}</span></div>
-          <p className={styles.hint}>Signed minimum: {displayAmount(o.order.buyAmount, o.quote?.tokenDecimals ?? 18)} {o.quote?.tokenSymbol} · {new Date(o.receivedAt * 1000).toLocaleString()}</p>
-          <div className={styles.links}>{tx && <><ExplorerLink value={tx} type="tx" label={`${L2_CHAIN.chainName} execution`} /><a href={`#/visualizer?mode=trace&chain=l2&tx=${tx}`}>Inspect execution</a></>}
-            {d?.l1Tx && <ExplorerLink value={d.l1Tx} chain="l1" type="tx" label={`${L1_CHAIN.chainName} settlement`} />}</div>
-          <details><summary>Settlement details</summary><p className={styles.hint}>{d?.message || 'Waiting for the solver.'}</p>
-            {d?.error != null && <p className={styles.error}>{typeof d.error === 'string' ? d.error : JSON.stringify(d.error)}</p>}<p className={styles.hint}>Order {o.id}</p></details>
-        </article>;
-      })}
-    </section>
+    <CowSwapHistory key={wallet.address || 'disconnected'} orders={ownOrders} connected={wallet.isConnected} sellSymbol={sellSymbol}
+      error={ordersError} checking={historyChecking} onRefresh={() => setHistoryRefresh(value => value + 1)} />
   </>;
 }

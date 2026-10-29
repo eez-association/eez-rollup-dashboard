@@ -201,6 +201,16 @@ visible across reloads; confirm availability only after checking the canonical
 source receipt and observing the destination balances. Hide this action on
 mainnet.
 
+Use the Treasury payment-history row layout for **Your swaps**, including
+outcome filters/counts, manual refresh, network labels, transaction and block
+links, and expand/collapse controls. Expanded details show the connected
+rollup → L1 liquidity → rollup route, the signed sell amount, recipient and
+minimum output. Do not label the minimum as actual received funds or treat
+source submission as settlement. Open the newest order by default and retain
+the user's expansion choices through polling. On mainnet, label the current
+route's sell token **Bridged WETH**; do not offer wrapping into a different
+native L2 WETH contract as a way to fund this route.
+
 The dashboard, monitor, and execution visualizer use a 12px minimum for control
 text, data labels, badges, and secondary values. Hashes and table cells use
 13–14px. Long decoder explanations are limited to approximately 75 characters

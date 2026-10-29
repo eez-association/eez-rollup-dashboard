@@ -40,12 +40,12 @@ async function open(browser, options = {}) {
     await f.page.getByLabel('Maximum slippage (%)').fill('1');
     await f.page.getByLabel('Maximum slippage (%)').fill('3');
     await f.form.getByRole('button', { name: 'Sign order' }).click();
-    await f.page.getByText('settled', { exact: true }).waitFor();
+    await f.page.getByText('Settled', { exact: true }).waitFor();
     assert.equal(f.signed.length, 1); assert.equal(f.submitted.length, 1);
     assert.equal(f.signed[0].message.buyAmount, '97000000000000000');
     assert.equal(f.signed[0].message.receiver, '0x'+'88'.repeat(20));
     assert.equal(f.signed[0].domain.chainId, 6290);
-    await f.page.reload(); await f.page.getByText('settled', { exact: true }).waitFor();
+    await f.page.reload(); await f.page.getByText('Settled', { exact: true }).waitFor();
     assert.equal(f.submitted.length, 1, 'reload does not submit another order');
     await f.page.screenshot({ path: '.runtime/cow-native-desktop.png', fullPage: true });
     await f.page.setViewportSize({ width: 390, height: 844 });
@@ -61,8 +61,8 @@ async function open(browser, options = {}) {
 
     const lost = await open(browser, { lostResponse: true });
     await lost.form.getByRole('button', { name: 'Sign order' }).click();
-    await lost.page.getByText('settled', { exact: true }).waitFor();
-    await lost.page.reload(); await lost.page.getByText('settled', { exact: true }).waitFor();
+    await lost.page.getByText('Settled', { exact: true }).waitFor();
+    await lost.page.reload(); await lost.page.getByText('Settled', { exact: true }).waitFor();
     assert.equal(lost.submitted.length, 1, 'lost submission response is reconciled without reposting');
     await lost.context.close();
 

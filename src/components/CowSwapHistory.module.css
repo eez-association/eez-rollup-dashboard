@@ -1,0 +1,9 @@
+.history { min-width: 0; }
+.wrap { white-space: normal; overflow-wrap: anywhere; }
+.history .blocks { white-space: normal; overflow-wrap: anywhere; }
+.failure { font-size: 12px; line-height: 1.5; }
+.history .toggle { padding: 6px 8px; min-width: 30px; }
+.details { padding-bottom: 20px; }
+.details a { color: var(--text); text-decoration: underline; }
+.detailFooter { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: 8px; }
+.detailFooter code { overflow-wrap: anywhere; }
