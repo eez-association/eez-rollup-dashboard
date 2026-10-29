@@ -124,7 +124,10 @@ wallet and labels the signed minimum separately from actual settlement output.
 The visual liquidity browser uses compact token rows beside the swap form: search
 token symbols, names or addresses and select a token row.
 The list and receive selector share one selection; changing it clears the quote.
-Pair addresses and catalog reserves are omitted from the rows.
+Pair addresses are omitted. Rows show a compact catalog WETH reserve; pools
+below 0.01 WETH are excluded from both the list and receive selector. Missing
+reserve data is labeled unknown and is not treated as zero. These are catalog
+snapshots, not live liquidity readings.
 Each token also shows **Bridged**, **Not bridged**, **Checking…**, or
 **Unavailable**, based on the canonical L2 wrapper lookup. Deployed wrappers
 are detected directly through the official bridge registry, without predicting
