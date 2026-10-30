@@ -151,14 +151,20 @@ the selected wallet, and the shared collapsed gas controls and transaction popup
 Missing source proxies can be created from the demo; existing proxies are
 verified before use. Cross-chain history records the actual call direction.
 
-The experimental **Treasury Demo** and **CoW Light Demo** are hidden from the normal dashboard. Press
+The experimental **Treasury Demo**, **CoW Light Demo** and **Falcon Safe Demo** are hidden from the normal dashboard. Press
 **Ctrl+Alt+Shift+T** (or **Cmd+Option+Shift+T** on macOS), outside an editable field,
-to reveal both tabs beside Counter Demo and open Treasury. Press the same shortcut again
-to hide both; either open demo returns to Counter Demo. Visibility is kept in
+to reveal the tabs beside Counter Demo and open Treasury. Falcon follows CoW Light. Press the same shortcut again
+to hide all three; any open hidden demo returns to Counter Demo. Visibility is kept in
 `sessionStorage` for this browser tab's session and survives reloads. A fresh
-session starts hidden; neither `#/treasury-demo` nor `#/cow-demo` enables the tabs. This is a
+session starts hidden; `#/treasury-demo`, `#/cow-demo` and `#/falcon-demo` do not enable the tabs. This is a
 navigation preference, not access control: anyone who knows the shortcut can
 open the example, and its code ships with the application.
+
+[Falcon Safe](docs/runbooks/falcon-safe-demo.md) integrates browser Falcon-512 signing,
+encrypted key backups/storage, L2 verification and L1 Safe control. It reuses the
+header wallet and compact fee SDK. Its cryptography loads only when the tab opens;
+leaving the tab clears the unlocked key. Contract actions require the pinned
+916969/Chiado deployment; browser signing works on other dashboard networks too.
 
 CoW Light uses the native dashboard tab and the API in `demos/cow-light`, proxied through
 `/dashboard/cowdemo/`. Run its API and solver for the dashboard's network;

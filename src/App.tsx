@@ -27,6 +27,7 @@ import styles from "./App.module.css";
 const VisualizerView = lazy(() => import("./components/VisualizerView").then(module => ({ default: module.VisualizerView })));
 const TreasuryDemo = lazy(() => import("./components/TreasuryDemo").then(module => ({ default: module.TreasuryDemo })));
 const CowLightDemo = lazy(() => import("./components/CowLightDemo").then(module => ({ default: module.CowLightDemo })));
+const FalconDemo = lazy(() => import("./components/FalconDemo").then(module => ({ default: module.FalconDemo })));
 
 const TREASURY_VISIBILITY_KEY = "eez:treasury-demo:visible";
 
@@ -36,14 +37,15 @@ function treasuryVisibleForSession(): boolean {
 }
 
 // Flash-loan and aggregator views are retained but are not enabled on this network.
-type DashboardTab = "dashboard" | "counter-demo" | "treasury-demo" | "cow-demo";
-const isHiddenDemo = (tab: DashboardTab) => tab === "treasury-demo" || tab === "cow-demo";
+type DashboardTab = "dashboard" | "counter-demo" | "treasury-demo" | "cow-demo" | "falcon-demo";
+const isHiddenDemo = (tab: DashboardTab) => tab === "treasury-demo" || tab === "cow-demo" || tab === "falcon-demo";
 
 /** Dashboard sub-tabs that can be deep-linked via hash */
 const HASH_TO_TAB: Record<string, DashboardTab> = {
   "counter-demo": "counter-demo",
   "treasury-demo": "treasury-demo",
   "cow-demo": "cow-demo",
+  "falcon-demo": "falcon-demo",
   // Keep saved bridge links opening the combined dashboard.
   "bridge": "dashboard",
 };
@@ -79,6 +81,7 @@ const DASHBOARD_TABS: { id: DashboardTab; label: string }[] = [
   { id: "counter-demo", label: "Counter Demo" },
   { id: "treasury-demo", label: "Treasury Demo" },
   { id: "cow-demo", label: "CoW Light Demo" },
+  { id: "falcon-demo", label: "Falcon Safe Demo" },
 ];
 
 export function App() {
@@ -130,7 +133,7 @@ export function App() {
   const [dashboardTab, setDashboardTab] = useState<DashboardTab>(() => getInitialTab(treasuryVisible));
   const [returnToTreasury, setReturnToTreasury] = useState(false);
   useEffect(() => {
-    document.title = `${view === "debug" ? "Quote Debugger" : view === "visualizer" ? "Execution Visualizer" : view === "monitor" ? "Network Monitor" : dashboardTab === "counter-demo" ? "Counter Demo" : dashboardTab === "treasury-demo" ? "Treasury Demo" : dashboardTab === "cow-demo" ? "CoW Light Demo" : "Dashboard"} — ${config.rollupName}`;
+    document.title = `${view === "debug" ? "Quote Debugger" : view === "visualizer" ? "Execution Visualizer" : view === "monitor" ? "Network Monitor" : dashboardTab === "counter-demo" ? "Counter Demo" : dashboardTab === "treasury-demo" ? "Treasury Demo" : dashboardTab === "cow-demo" ? "CoW Light Demo" : dashboardTab === "falcon-demo" ? "Falcon Safe Demo" : "Dashboard"} — ${config.rollupName}`;
   }, [view, dashboardTab, configLoaded]);
 
   /** Switch dashboard sub-tab and update hash for deep linking */
@@ -568,6 +571,12 @@ export function App() {
             {treasuryVisible && dashboardTab === "cow-demo" && (
               <Suspense fallback={<p role="status">Loading CoW Light demo…</p>}>
                 <CowLightDemo ready={configLoaded} wallet={wallet} />
+              </Suspense>
+            )}
+
+            {treasuryVisible && dashboardTab === "falcon-demo" && (
+              <Suspense fallback={<p role="status">Loading Falcon Safe demo…</p>}>
+                <FalconDemo ready={configLoaded} wallet={wallet} />
               </Suspense>
             )}
 

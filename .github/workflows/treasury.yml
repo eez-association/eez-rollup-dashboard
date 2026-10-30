@@ -85,7 +85,7 @@ jobs:
           node tests/integration/treasury-paired-setup.mjs --browser
           node tests/treasury-verification-browser.mjs
           node tests/trace-details.cjs
-      - name: CoW dashboard regressions
+      - name: Hidden demo dashboard regressions
         env:
           CHROME_DEVEL_SANDBOX: /usr/local/sbin/eez-chromium-sandbox
           EEZ_UI_URL: http://127.0.0.1:8083/dashboard
@@ -100,6 +100,8 @@ jobs:
             sleep 1
           done
           curl --fail --silent "$EEZ_UI_URL/" > /dev/null
+          node tests/treasury-demo.cjs
+          npm run test:falcon:browser
           node tests/cow-demo.cjs
           node tests/cow-trading.cjs
           node tests/cow-faucet.cjs
