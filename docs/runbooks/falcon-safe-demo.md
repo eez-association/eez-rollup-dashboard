@@ -103,6 +103,9 @@ Safe discovery uses the Falcon public key, so another gas wallet can pay for
 the same Safe. Recovery checks the exact nonce as well as
 the transaction contents, so an older identical transfer is not accepted.
 Confirmation clears the pending record after verifying the canonical outcome.
+Recovery remains available when the original hash was recorded: expand
+**Funding recovery** or **Earlier setup needs attention** to provide a speed-up
+or cancellation hash. A known hash cannot use the unsent-request clearing path.
 The same recovery input accepts a mined cancellation or replacement with the
 recorded sender and nonce. A different confirmed payload closes the original
 request without reporting that original funding or setup succeeded; pending or

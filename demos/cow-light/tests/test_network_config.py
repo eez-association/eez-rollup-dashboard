@@ -280,7 +280,8 @@ class ConfigurationTests(unittest.TestCase):
         catalog = MagicMock(return_value=tokens)
         namespace = {'BaseHTTPRequestHandler':object, 'urlparse':urlparse, 'CFG':cfg,
                      'l1':None, 'l2':None, 'L1_CHAIN':10200, 'L2_CHAIN':699169,
-                     'L1_RPC':'/rpc/l1', 'L2_FRONT':'/composer/l2', 'SETTLEMENT':ADDRESS,
+                     'L1_RPC':'https://user:fixture-password@example.invalid/private-l1?key=fixture-api-key',
+                     'L2_FRONT':'https://private-composer.invalid/private-l2', 'SETTLEMENT':ADDRESS,
                      'WETH':ADDRESS, 'WETH_L2':OTHER_ADDRESS, 'NATIVE_WETH_L2':None,
                      'BRIDGE_L2':ADDRESS, 'vault_relayer':lambda: ADDRESS, 'catalog':catalog}
         exec(compile(ast.Module(body=[handler],type_ignores=[]), '<api fixture>', 'exec'), namespace)
@@ -291,11 +292,33 @@ class ConfigurationTests(unittest.TestCase):
         cfg.check_deployment.assert_called_once_with(l1=None, l2=None)
         catalog.assert_called_once()
         self.assertEqual(instance.send_json.call_args.args[0]['tokens'], tokens)
+        self.assertEqual(instance.send_json.call_args.args[0]['l1Rpc'], '/rpc/l1')
+        self.assertEqual(instance.send_json.call_args.args[0]['l2Front'], '/composer/l2')
+        self.assertNotIn('fixture-password', json.dumps(instance.send_json.call_args.args[0]))
+        values.update(COW_PUBLIC_L1_RPC='https://public.example/rpc/l1', COW_PUBLIC_L2_FRONT='/public/composer/l2')
+        instance.do_GET()
+        self.assertEqual(instance.send_json.call_args.args[0]['l1Rpc'], values['COW_PUBLIC_L1_RPC'])
+        self.assertEqual(instance.send_json.call_args.args[0]['l2Front'], values['COW_PUBLIC_L2_FRONT'])
         # A later request must revalidate; this optimization is not a stale cache.
         cfg.check_deployment.side_effect = ValueError('network reset')
         instance.do_GET()
         self.assertEqual(instance.send_json.call_args.args[1], 503)
-        self.assertEqual(catalog.call_count, 1)
+        self.assertEqual(catalog.call_count, 2)
+
+    def test_api_errors_do_not_expose_upstream_credentials(self):
+        from urllib.parse import urlparse, parse_qs
+        tree = ast.parse((ROOT / 'backend/server.py').read_text())
+        handler = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == 'Handler')
+        endpoint = 'https://user:fixture-password@example.invalid/private-rpc?key=fixture-api-key'
+        namespace = {'BaseHTTPRequestHandler':object, 'urlparse':urlparse, 'parse_qs':parse_qs, 'L1_RPC':endpoint}
+        exec(compile(ast.Module(body=[handler], type_ignores=[]), '<api fixture>', 'exec'), namespace)
+        instance = namespace['Handler']()
+        for message in (endpoint, '/private-rpc?key=fixture-api-key', 'fixture-password', 'fixture-api-key'):
+            for error in (ValueError(message), RuntimeError(message)):
+                self.assertNotIn(message, instance.error_message(error))
+        self.assertEqual(instance.error_message(ValueError('Token amount must be positive')), 'Token amount must be positive')
+        namespace['L1_RPC'] = 'https://user:fixture%2Dpassword@example.invalid/private-rpc'
+        self.assertNotIn('fixture-password', instance.error_message(ValueError('Authentication failed: fixture-password')))
 
     def test_allowance_normalizes_wallet_address_before_contract_calls(self):
         from urllib.parse import urlparse, parse_qs

@@ -1,9 +1,13 @@
 import assert from 'node:assert/strict';
 import { chromium } from 'playwright';
-import { toHex } from 'viem';
+import { readFileSync } from 'node:fs';
+import { decodeFunctionData, encodeFunctionResult, toHex, zeroAddress } from 'viem';
 import { fixture, origin } from './falcon/fixture.mjs';
 import { crossChainDeployment as deployment } from '../src/lib/falcon/crossChainDeployment.ts';
 import { createL1ControllerData } from '../src/lib/falcon/l1Controller.ts';
+import { managerAbi } from '../src/lib/falcon/l1Controller.ts';
+import { l1ControllerFactoryAbi } from '../src/lib/falcon/l1Action.ts';
+import { COMPOSER_DISCOVERY_ABI, COMPOSER_DISCOVERY_ADDRESS, COMPOSER_DISCOVERY_MARKER } from '../src/lib/composerDiscovery.ts';
 import { recoveryKey, scopedRecoveryKey } from '../src/lib/falcon/recoveryJournal.ts';
 
 import { createKeyPair } from '../src/lib/falcon/falcon.ts';
@@ -13,6 +17,7 @@ const account = '0x1111111111111111111111111111111111111111';
 const safe = '0x2222222222222222222222222222222222222222';
 const keys = createKeyPair(), password = 'recovery-browser-test';
 const backup = Buffer.from(JSON.stringify(await encryptKeystore(keys, password)));
+const deployedCode = JSON.parse(readFileSync(new URL('./falcon/fixtures/deployed-code.json', import.meta.url), 'utf8'));
 const publicKey = `0x${Buffer.from(keys.publicKey).toString('hex')}`, blockHash = `0x${'cd'.repeat(32)}`, cancellationHash = `0x${'ef'.repeat(32)}`;
 
 async function installWallet(f) {
@@ -59,6 +64,24 @@ try {
     const f = await fixture(browser, { rpc: async ({ method, params, chain }) => {
       const side = BigInt(chain) === BigInt(deployment.l1.chainId) ? deployment.l1 : deployment.l2;
       if (method === 'eth_chainId') return chain;
+      if (method === 'eth_blockNumber') return toHex(side.anchor.blockNumber + 10n);
+      if (method === 'eth_getCode') return Object.values(deployedCode).find(item => item.address.toLowerCase() === params[0].toLowerCase())?.code ?? '0x';
+      if (method === 'eth_call') {
+        const { to, data } = params[0];
+        if (to.toLowerCase() === COMPOSER_DISCOVERY_ADDRESS.toLowerCase()) {
+          const { args } = decodeFunctionData({ abi: COMPOSER_DISCOVERY_ABI, data });
+          return encodeFunctionResult({ abi: COMPOSER_DISCOVERY_ABI, functionName: 'composerInfo', result: [
+            COMPOSER_DISCOVERY_MARKER, 1n, args[0], BigInt(chain), toHex(JSON.stringify({ version: 'recovery fixture',
+              supportedNetworks: { eezL1: deployment.l1.chainId, eezL2: deployment.l2.chainId },
+              eezContracts: { eezRegistryAddress: deployment.l1.registry, eezL2Address: deployment.l2.manager } })),
+          ] });
+        }
+        const abi = to.toLowerCase() === deployment.l2.factory.address.toLowerCase() ? l1ControllerFactoryAbi : managerAbi;
+        const { functionName } = decodeFunctionData({ abi, data });
+        const values = { verifier: deployment.l2.verifier.address, eezL2: deployment.l2.manager,
+          l1ChainId: BigInt(deployment.l1.chainId), ROLLUP_ID: deployment.l2.rollupId, USE_GAS_LEFT: false, controllers: zeroAddress };
+        return encodeFunctionResult({ abi, functionName, result: values[functionName] });
+      }
       if (method === 'eth_getBlockByNumber') {
         const number = params[0] === 'latest' ? side.anchor.blockNumber + 10n : BigInt(params[0]);
         return { number: toHex(number), hash: number === side.anchor.blockNumber ? side.anchor.blockHash : blockHash,
@@ -117,6 +140,21 @@ try {
       await f.page.getByText(/it was not marked as funded/).waitFor();
       assert.equal(await f.page.evaluate(key => localStorage.getItem(key), key), null);
     }
+    // Wallet replacements must remain recoverable even when the original hash
+    // was saved successfully. Merely polling that dropped hash cannot finish.
+    await f.page.evaluate(({ key, attempt }) => localStorage.setItem(key, JSON.stringify({
+      ...attempt, id: `known-${attempt.kind}`, hash: '0x' + 'aa'.repeat(32),
+    })), { key, attempt });
+    await f.page.reload(); await restore(f);
+    if (kind === 'funding') await f.page.getByText('Funding recovery', { exact: true }).click();
+    else await showRecovery(f, kind);
+    await recovery.waitFor();
+    assert.equal(await recovery.getByRole('button', { name: 'Check and clear unsent request', exact: true }).count(), 0,
+      'a recorded hash cannot be cleared as an unsent transaction');
+    await f.page.locator(kind === 'funding' ? '#funding-recovery-hash' : '#controller-recovery-hash').fill(cancellationHash);
+    await recovery.getByRole('button', { name: kind === 'funding' ? 'Recover funding' : 'Recover controller setup', exact: true }).click();
+    await f.page.waitForFunction(key => localStorage.getItem(key) === null, key);
+    await recovery.waitFor({ state: 'hidden' });
     assert.equal(await f.page.evaluate(() => window.recoveryWallet.calls.filter(method => /eth_send|eth_sign/.test(method)).length), 0);
     await f.close();
   }

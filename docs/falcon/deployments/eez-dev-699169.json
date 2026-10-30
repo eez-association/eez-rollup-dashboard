@@ -2,7 +2,6 @@
   "network": "EEZ-X Testnet",
   "chainId": 699169,
   "rollupId": 2,
-  "rpc": "https://eez.dev/composer/l2",
   "deployer": "0x94c9Fe37A19d262A31B89a2763bBea023b99cd4E",
   "contracts": {
     "verifier": {

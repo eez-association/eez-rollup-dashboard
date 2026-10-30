@@ -200,6 +200,30 @@ def order_debug(row, events):
             "error":solver.get("error") or (msg if state in ('failed','quote_rejected','worker_error') else None)}
 
 class Handler(BaseHTTPRequestHandler):
+    def error_message(self, error):
+        from urllib.parse import unquote
+        # Transport errors may include credentials or API keys, even when a
+        # library prints only the upstream path rather than its complete URL.
+        unavailable = 'CoW Light request failed. Check the service configuration and try again.'
+        if not isinstance(error, ValueError):
+            return unavailable
+        message = str(error)
+        for key in ('L1_RPC', 'L2_RPC', 'L2_FRONT'):
+            endpoint = globals().get(key)
+            if not isinstance(endpoint, str) or not endpoint:
+                continue
+            try:
+                parsed = urlparse(endpoint)
+                private = [endpoint, parsed.username, parsed.password,
+                           parsed.path if parsed.path != '/' else None,
+                           *(value for values in parse_qs(parsed.query).values() for value in values)]
+                private += [unquote(value) for value in private if value]
+            except ValueError:
+                return unavailable
+            if any(value and value in message for value in private):
+                return unavailable
+        return message
+
     def send_json(self,obj,code=200):
         b=json.dumps(obj).encode();self.send_response(code);self.send_header("content-type","application/json");self.send_header("content-length",str(len(b)));self.send_header("cache-control","no-store");self.send_header("access-control-allow-origin","*");self.end_headers();self.wfile.write(b)
     def do_OPTIONS(self):self.send_response(204);self.send_header("access-control-allow-origin","*");self.send_header("access-control-allow-headers","content-type");self.end_headers()
@@ -220,7 +244,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json({"network":CFG['NETWORK'],"l1NativeSymbol":CFG['L1_NATIVE_SYMBOL'],
                     "l2NativeSymbol":CFG['L2_NATIVE_SYMBOL'],"l1Explorer":CFG.get('L1_EXPLORER'),
                     "l2Explorer":CFG.get('L2_EXPLORER'),"l1ChainId":L1_CHAIN,"l2ChainId":L2_CHAIN,
-                    "l1Rpc":CFG.get('COW_PUBLIC_L1_RPC',L1_RPC),"l2Front":CFG.get('COW_PUBLIC_L2_FRONT',L2_FRONT),
+                    "l1Rpc":CFG.get('COW_PUBLIC_L1_RPC','/rpc/l1'),"l2Front":CFG.get('COW_PUBLIC_L2_FRONT','/composer/l2'),
                     "settlement":SETTLEMENT,"vaultRelayer":vault_relayer(),"wethL1":WETH,"wethL2":WETH_L2,
                     "nativeWethL2":NATIVE_WETH_L2,"bridgeL2":BRIDGE_L2,"tokens":catalog()})
             if p.path=="/api/health":
@@ -265,7 +289,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not t:return self.send_json({"error":"unknown token"},404)
                 return self.send_json(quote(t,int(a.get("amount",["0"])[0])))
             return self.send_json({"error":"not found"},404)
-        except Exception as e:return self.send_json({"error":str(e)},500)
+        except Exception as e:return self.send_json({"error":self.error_message(e)},500)
     def do_POST(self):
         if urlparse(self.path).path!="/api/orders":return self.send_json({"error":"not found"},404)
         try:
@@ -281,7 +305,7 @@ class Handler(BaseHTTPRequestHandler):
             expected=wrapper(l1token)["address"]
             if order["buyToken"].lower()!=expected.lower(): raise ValueError("buyToken is not the deterministic wrapper for l1Token")
             return self.send_json(queue(order,sig,signer,q),202)
-        except Exception as e:return self.send_json({"error":str(e)},400)
+        except Exception as e:return self.send_json({"error":self.error_message(e)},400)
 
 if __name__=="__main__":
     # Keep the status API available after a reset; trading requests and the

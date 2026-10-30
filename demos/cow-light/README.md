@@ -382,7 +382,9 @@ when the shared environment changes. Chiado has no default rollup ID.
 With `EEZ_UI_RUNTIME_CONFIG`, browser-facing RPC routes are taken from the
 dashboard's `browser.l1RpcUrl` and `browser.l2FrontUrl`; backend connections use
 its `proxy` endpoints. Without that file, set `COW_PUBLIC_L1_RPC` and
-`COW_PUBLIC_L2_FRONT` when the backend uses private or container RPCs. Public
+`COW_PUBLIC_L2_FRONT` when public browser routes differ from `/rpc/l1` and
+`/composer/l2`. These same-origin paths are the safe defaults; internal upstream
+URLs are never used as public fallbacks. Public
 endpoints can be HTTP(S) URLs or paths relative to the dashboard origin.
 These only change the endpoints advertised by `/api/config`; backend
 reads and solver submissions keep using the internal upstreams. Do not put

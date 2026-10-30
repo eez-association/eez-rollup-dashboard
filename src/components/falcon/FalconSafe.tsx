@@ -752,18 +752,25 @@ export function FalconSafe({ signer, wallet, deployment, fees }: { signer: Signe
     {!signer.publicKeyHex && <p role="status" className={`${styles.status} ${styles.unlockNotice}`}><strong>Unlock your Falcon key</strong><br />Your Safe account will load automatically.</p>}
     {(fundingJournal.error || controllerJournal.error) && <p role="alert">{fundingJournal.error || controllerJournal.error}</p>}
     {fundingNotice && <p role="status" className={styles.status} data-result={fundingNotice.kind}>{fundingNotice.text}</p>}
-    {fundingJournal.attempt && !fundingJournal.attempt.hash && !busy && <div className={styles.transaction} role="group" aria-label="Recover funding transaction">
-      <p className={styles.hint}>The wallet did not return a funding hash. It may still have sent the transaction, so check wallet activity before sending again.</p>
+    {fundingJournal.attempt && !busy && <details className={styles.details} open={!fundingJournal.attempt.hash}>
+      <summary>Funding recovery</summary>
+      <div className={styles.transaction} role="group" aria-label="Recover funding transaction">
+      <p className={styles.hint}>{fundingJournal.attempt.hash
+        ? 'If you sped up or cancelled this funding transaction, enter the replacement hash from wallet activity.'
+        : 'The wallet did not return a funding hash. It may still have sent the transaction, so check wallet activity before sending again.'}</p>
       <p className={styles.hint}>From {fundingJournal.attempt.account} · To {fundingJournal.attempt.to} · {formatUnits(BigInt(fundingJournal.attempt.value), 18)} {symbol}.</p>
       <label className={styles.label}>Funding transaction hash<input id="funding-recovery-hash" className={styles.input} value={fundingRecoveryHash} onChange={event => setFundingRecoveryHash(event.target.value)} /></label>
       <p className={styles.hint}>Use the original hash, a speed-up replacement, or a mined cancellation from your wallet activity.</p>
       <button className={`btn btn-outline ${styles.action}`} disabled={busy} onClick={() => void recoverFunding()}>Recover funding</button>
       {unsentControls(fundingJournal.attempt)}
-    </div>}
-    {controllerJournal.attempt && !controllerJournal.attempt.hash && !busy && !signer.busy && <details className={styles.details}>
+      </div>
+    </details>}
+    {controllerJournal.attempt && !busy && !signer.busy && <details className={styles.details}>
       <summary>Earlier setup needs attention</summary>
       <div className={styles.transaction} role="group" aria-label="Recover controller setup">
-      <p className={styles.hint}>The wallet did not return a setup hash, but it may still have sent the transaction. We check it automatically before allowing another request to avoid paying twice. If it cannot be found, use wallet activity here.</p>
+      <p className={styles.hint}>{controllerJournal.attempt.hash
+        ? 'If you sped up or cancelled this setup transaction, enter the replacement hash from wallet activity.'
+        : 'The wallet did not return a setup hash, but it may still have sent the transaction. We check it automatically before allowing another request to avoid paying twice. If it cannot be found, use wallet activity here.'}</p>
       <p className={styles.hint}>Sender: {controllerJournal.attempt.account}</p>
       {controllerJournal.attempt.hash && <a href={`${deployment.l2.explorer}/tx/${controllerJournal.attempt.hash}`} target="_blank" rel="noreferrer">Controller setup transaction</a>}
       <label className={styles.label}>Controller setup transaction hash<input id="controller-recovery-hash" className={styles.input} value={controllerRecoveryHash} onChange={event => setControllerRecoveryHash(event.target.value)} /></label>
