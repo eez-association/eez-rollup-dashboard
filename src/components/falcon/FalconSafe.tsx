@@ -20,14 +20,18 @@ import styles from './FalconPanel.module.css';
 
 type Signer = Pick<ReturnType<typeof useFalcon>, 'publicKeyHex' | 'busy' | 'captureKeyGuard' | 'signActionDigest'>;
 type Prepared = { signed: SignedL1Action; operation: SafeOperation; isCurrent: () => boolean };
-type Submitted = { hash: Hex; account: Address; publicKey: Hex } & ({ kind: 'controller' } | { kind: 'call'; prepared: Prepared });
+type Submitted = { scope: string | null; hash: Hex; account: Address; publicKey: Hex } & ({ kind: 'controller' } | { kind: 'call'; prepared: Prepared });
 type Funding = { hash: Hex; account: Address; safe: Address; controller: Address; value: bigint; publicKey: string; nonce: bigint; journalId: string };
 const initial: Notice = { kind: 'neutral', text: 'Unlock your Falcon key and connect your wallet to find your controller and Safe.' };
 
 /** Shared factories and network bindings come from the host; user addresses are discovered on chain. */
 export function FalconSafe({ signer, wallet, deployment, fees }: { signer: Signer; wallet: FalconWallet; deployment: CrossChainDeployment; fees: FeeConfig }) {
-  const fundingJournal = useFalconRecovery(recoveryKey(deployment, 'funding'));
-  const controllerJournal = useFalconRecovery(recoveryKey(deployment, 'controller'));
+  const recoveryOwner = wallet.address && signer.publicKeyHex
+    ? { account: wallet.address, publicKey: `0x${signer.publicKeyHex}` as Hex } : null;
+  const fundingJournal = useFalconRecovery(recoveryKey(deployment, 'funding'), recoveryOwner);
+  const controllerJournal = useFalconRecovery(recoveryKey(deployment, 'controller'), recoveryOwner);
+  const recoveryScope = controllerJournal.key;
+  const currentScope = useRef(recoveryScope); currentScope.current = recoveryScope;
   const [controller, setController] = useState<ControllerState | null>(null);
   const [remote, setRemote] = useState<RemoteSafe | null>(null);
   const [lookedUp, setLookedUp] = useState(false);
@@ -56,9 +60,13 @@ export function FalconSafe({ signer, wallet, deployment, fees }: { signer: Signe
   const [submitted, setSubmitted] = useState<Submitted | null>(null);
   const [confirmedHash, setConfirmedHash] = useState<Hex | null>(null);
   const [revertedSourceHash, setRevertedSourceHash] = useState<Hex | null>(null);
-  const confirming = submitted?.kind === 'call' && submitted.hash !== confirmedHash;
+  const activeSubmission = recoveryScope !== null && submitted?.scope === recoveryScope && wallet.address
+    && sameAddress(submitted.account, wallet.address) && submitted.publicKey.slice(2) === signer.publicKeyHex ? submitted : null;
+  const confirming = activeSubmission?.kind === 'call' && activeSubmission.hash !== confirmedHash;
   const [l1Hash, setL1Hash] = useState<Hex | null>(null);
   const [costs, setCosts] = useState<SafeCostEvidence | null>(null);
+  const [l1GasEstimate, setL1GasEstimate] = useState<{ sourceHash: Hex; gasPrice: bigint | null; failed: boolean } | null>(null);
+  const l1PriceSnapshots = useRef(new Map<string, bigint>());
   const [checkingCosts, setCheckingCosts] = useState(false);
   const [notice, setNotice] = useState<Notice>(initial);
   const [observation, setObservation] = useState('L1 read');
@@ -106,13 +114,42 @@ export function FalconSafe({ signer, wallet, deployment, fees }: { signer: Signe
       } catch { /* Key changes and unmount cancel read-only discovery. */ }
     })();
     return () => abort.abort();
-  }, [signer.publicKeyHex, deployment]);
+  }, [signer.publicKeyHex, deployment, wallet.address]);
   useEffect(() => {
+    request.current?.abort(); request.current = null;
+    running.current = false; setBusy(false);
     completedFunding.current = null;
-    setCosts(null); setFunding(null); setFundedHash(null); setFundingNotice(null);
+    setFunding(null); setFundedHash(null); setFundingNotice(null);
     setFundingRecoveryHash(''); setControllerRecoveryHash('');
     setUnsentAcknowledgement(null);
-  }, [deployment]);
+  }, [deployment, recoveryScope]);
+  useEffect(() => { setCosts(null); }, [deployment]);
+  const compareCosts = activeSubmission?.kind === 'call' && activeSubmission.prepared.operation.kind === 'transfer';
+  const costSourceHash = compareCosts && costs?.receiptFee ? costs.sourceHash : null;
+  useEffect(() => {
+    setL1GasEstimate(null);
+    if (!costSourceHash) return;
+    const snapshotKey = `${recoveryKey(deployment, 'controller')}:${costSourceHash}`;
+    const savedPrice = l1PriceSnapshots.current.get(snapshotKey);
+    if (savedPrice !== undefined) {
+      setL1GasEstimate({ sourceHash: costSourceHash, gasPrice: savedPrice, failed: false });
+      return;
+    }
+    const abort = new AbortController();
+    void (async () => {
+      try {
+        const client = l1ReadClient(abort.signal);
+        await checkChain(client, deployment.l1);
+        const gasPrice = await client.getGasPrice();
+        abort.signal.throwIfAborted();
+        l1PriceSnapshots.current.set(snapshotKey, gasPrice);
+        setL1GasEstimate({ sourceHash: costSourceHash, gasPrice, failed: false });
+      } catch {
+        if (!abort.signal.aborted) setL1GasEstimate({ sourceHash: costSourceHash, gasPrice: null, failed: true });
+      }
+    })();
+    return () => abort.abort();
+  }, [costSourceHash, deployment]);
   useEffect(() => {
     const attempt = fundingJournal.attempt;
     if (attempt?.hash && attempt.kind === 'funding' && attempt.chainId === deployment.l1.chainId) {
@@ -126,33 +163,41 @@ export function FalconSafe({ signer, wallet, deployment, fees }: { signer: Signe
     }
   }, [fundingJournal.attempt, fundingJournal.error, deployment]);
   useEffect(() => {
-    const attempt = controllerJournal.attempt;
-    if (!attempt || attempt.hash || busy) return;
+    if (busy) return;
     const abort = new AbortController();
-    void (async () => {
-      try {
-        while (!abort.signal.aborted) {
-          try {
-            assertRecoveryDeployment(attempt);
-            const provider = falconReadProvider(config.l2ProxyRpc, abort.signal, deployment.l2.chainName);
-            const client = await controllerClient(provider, deployment, abort.signal);
-            const found = await findRecoveryByNonce(client, provider, attempt, abort.signal);
-            abort.signal.throwIfAborted();
-            if (found) {
-              if (found.outcome === 'matching') await controllerJournal.selectHash(attempt, found.hash);
-              else {
-                await controllerJournal.resolve(attempt);
-                if (mounted.current) setNotice({ kind: 'neutral', text: 'The earlier setup was replaced or cancelled. Its saved request is now closed.' });
+    for (const journal of [controllerJournal, fundingJournal]) {
+      const attempt = journal.attempt;
+      if (!attempt || attempt.hash) continue;
+      void (async () => {
+        try {
+          while (!abort.signal.aborted) {
+            try {
+              assertRecoveryDeployment(attempt);
+              const network = attempt.kind === 'controller' ? deployment.l2 : deployment.l1;
+              const provider = falconReadProvider(attempt.kind === 'controller' ? config.l2ProxyRpc : config.l1ProxyRpc, abort.signal, network.chainName);
+              const client = eezClient(provider);
+              await checkChain(client, network);
+              const found = await findRecoveryByNonce(client, provider, attempt, abort.signal);
+              abort.signal.throwIfAborted();
+              if (found) {
+                if (found.outcome === 'matching') await journal.selectHash(attempt, found.hash);
+                else {
+                  await journal.resolve(attempt);
+                  if (!abort.signal.aborted && mounted.current) {
+                    const message: Notice = { kind: 'neutral', text: `The earlier ${attempt.kind === 'controller' ? 'setup' : 'funding'} was replaced or cancelled. Its saved request is now closed.` };
+                    if (attempt.kind === 'funding') setFundingNotice(message); else setNotice(message);
+                  }
+                }
+                return;
               }
-              return;
-            }
-          } catch { if (abort.signal.aborted) return; /* Keep the journal when lookup cannot establish an outcome. */ }
-          await confirmationDelay(abort.signal, 10_000);
-        }
-      } catch { /* Navigation cancels observation, never the transaction. */ }
-    })();
+            } catch { if (abort.signal.aborted) return; /* Keep the journal when lookup cannot establish an outcome. */ }
+            await confirmationDelay(abort.signal, 10_000);
+          }
+        } catch { /* Navigation cancels observation, never the transaction. */ }
+      })();
+    }
     return () => abort.abort();
-  }, [controllerJournal.attempt, deployment, busy]);
+  }, [controllerJournal.attempt, fundingJournal.attempt, deployment, busy]);
   useEffect(() => {
     const attempt = controllerJournal.attempt;
     if (!attempt?.hash || busy) return;
@@ -168,17 +213,17 @@ export function FalconSafe({ signer, wallet, deployment, fees }: { signer: Signe
           const safe = await readRemote(state.controller, abort.signal);
           abort.signal.throwIfAborted();
           await controllerJournal.finish(attempt.id);
-          if (!mounted.current || currentDeployment.current !== deployment) return;
-          setSubmitted({ kind: 'controller', hash: attempt.hash!, account: attempt.account, publicKey: attempt.publicKey });
+          if (abort.signal.aborted || !mounted.current || currentDeployment.current !== deployment) return;
+          setSubmitted({ scope: recoveryScope, kind: 'controller', hash: attempt.hash!, account: attempt.account, publicKey: attempt.publicKey });
           if (sameKey(attempt.publicKey)) { setController(state); setRemote(safe); setLookedUp(true); }
-          setNotice({ kind: 'valid', text: 'Safe setup confirmed. Continue creating your Safe.' });
+          setNotice({ kind: 'valid', text: safe.target ? 'Safe loaded. Ready to send a transaction.' : 'Safe setup confirmed. Continue creating your Safe.' });
           return;
         } catch (error) {
           if (abort.signal.aborted) return;
           if (error instanceof FalconTransactionReverted) {
             await controllerJournal.finish(attempt.id);
-            if (mounted.current && currentDeployment.current === deployment) {
-              setSubmitted({ kind: 'controller', hash: attempt.hash!, account: attempt.account, publicKey: attempt.publicKey });
+            if (!abort.signal.aborted && mounted.current && currentDeployment.current === deployment) {
+              setSubmitted({ scope: recoveryScope, kind: 'controller', hash: attempt.hash!, account: attempt.account, publicKey: attempt.publicKey });
               setNotice({ kind: 'error', text: error.message });
             }
             return;
@@ -222,7 +267,8 @@ export function FalconSafe({ signer, wallet, deployment, fees }: { signer: Signe
     return () => abort.abort();
   }, [submitted, deployment]);
   useEffect(() => {
-    if (!funding) return;
+    if (!funding || !recoveryOwner || !sameAddress(funding.account, recoveryOwner.account)
+      || funding.publicKey !== signer.publicKeyHex) return;
     const tx = funding, abort = new AbortController();
     void (async () => {
       try {
@@ -275,7 +321,7 @@ export function FalconSafe({ signer, wallet, deployment, fees }: { signer: Signe
       } catch { /* Unmount cancels reads only, never the funding transaction. */ }
     })();
     return () => abort.abort();
-  }, [funding, deployment]);
+  }, [funding, deployment, recoveryScope]);
 
   async function run(action: (signal: AbortSignal) => Promise<void>) {
     if (running.current) return;
@@ -283,21 +329,23 @@ export function FalconSafe({ signer, wallet, deployment, fees }: { signer: Signe
     const abort = new AbortController(); request.current = abort;
     try { await action(abort.signal); }
     catch (error) {
-      if (mounted.current) {
+      if (mounted.current && request.current === abort && !abort.signal.aborted) {
         const cause = error instanceof BaseError ? error.walk(e => e instanceof WalletConnectionError) : error;
         setNotice({ kind: 'error', text: (error as { code?: number }).code === 4001 ? 'Request rejected in the wallet. Check wallet activity before retrying.'
           : feeErrorMessage(error) ?? (cause instanceof WalletConnectionError ? cause.message : error instanceof Error ? error.message.split('\n')[0]! : 'Cross-chain request failed.') });
       }
     } finally {
-      running.current = false;
-      if (mounted.current) { setBusy(false); setCheckingCosts(false); }
-      if (request.current === abort) request.current = null;
+      if (request.current === abort) {
+        running.current = false;
+        if (mounted.current) { setBusy(false); setCheckingCosts(false); }
+        request.current = null;
+      }
     }
   }
   function keySnapshot() {
     if (!signer.publicKeyHex) throw new Error('Unlock your Falcon key first.');
-    const publicKey = `0x${signer.publicKeyHex}` as Hex, guard = signer.captureKeyGuard();
-    const isCurrent = () => mounted.current && guard() && currentKey.current === publicKey.slice(2);
+    const publicKey = `0x${signer.publicKeyHex}` as Hex, guard = signer.captureKeyGuard(), scope = recoveryScope;
+    const isCurrent = () => mounted.current && guard() && currentKey.current === publicKey.slice(2) && currentScope.current === scope;
     return { publicKey, isCurrent, assertCurrent: () => { if (!isCurrent()) throw new Error('Falcon key changed. Review and try again.'); } };
   }
   const sameKey = (publicKey: Hex) => mounted.current && currentKey.current === publicKey.slice(2);
@@ -347,10 +395,11 @@ export function FalconSafe({ signer, wallet, deployment, fees }: { signer: Signe
         throw error;
       }
       const tracked = await controllerJournal.recordHash(attempt, hash);
+      signal.throwIfAborted(); key.assertCurrent();
       if (!tracked?.hash) throw new Error('Controller setup was resolved in another tab. Load your Safe to continue.');
       hash = tracked.hash;
       if (!mounted.current) throw new Error('Safe setup was closed.');
-      setSubmitted({ kind: 'controller', hash, account: session.account, publicKey: key.publicKey });
+      setSubmitted({ scope: recoveryScope, kind: 'controller', hash, account: session.account, publicKey: key.publicKey });
       setL1Hash(null); setCosts(null);
       const reads = await controllerClient(falconReadProvider(config.l2ProxyRpc, signal, deployment.l2.chainName), deployment, signal);
       await checkRecoveryTransaction(reads, attempt, hash);
@@ -398,7 +447,7 @@ export function FalconSafe({ signer, wallet, deployment, fees }: { signer: Signe
   }
 
   async function sourceReceipt(tx: Submitted, signal: AbortSignal) {
-    setCheckingCosts(true);
+    setCheckingCosts(tx.kind === 'call' && tx.prepared.operation.kind === 'transfer');
     // Keep the last verified paid fee visible while the L1 settlement is retried.
     setCosts(before => before?.sourceHash === tx.hash ? before : null);
     const provider = falconReadProvider(config.l2ProxyRpc, signal, deployment.l2.chainName);
@@ -419,8 +468,8 @@ export function FalconSafe({ signer, wallet, deployment, fees }: { signer: Signe
       setRemote(before => before && (tx.prepared.operation.kind === 'create' ? { ...before, target: decoded as Address, nonce: null, balance: null } : { ...before, nonce: tx.prepared.operation.safeNonce + 1n, balance: null }));
     }
     signal.throwIfAborted();
-    setCosts({ sourceHash: tx.hash, source: null, settlement: null,
-      receiptFee: { gasUsed: receipt.gasUsed, gasPrice: receipt.effectiveGasPrice, l1GasPrice: null } });
+    setCosts(tx.prepared.operation.kind === 'transfer' ? { sourceHash: tx.hash, source: null, settlement: null,
+      receiptFee: { gasUsed: receipt.gasUsed, gasPrice: receipt.effectiveGasPrice, l1GasPrice: null } } : null);
     signal.throwIfAborted();
     setNotice({ kind: 'pending', text: `L2 call confirmed. Waiting for execution on ${deployment.l1.chainName}…` });
     return { provider, receipt, result, controller: state.controller };
@@ -488,11 +537,11 @@ export function FalconSafe({ signer, wallet, deployment, fees }: { signer: Signe
       const hash = await session.sendTransaction({ to: safe.target, data: '0x', value: toHex(value), gas: toHex(gas), nonce: toHex(nonce) }, isCurrent);
       hashReturned = true;
       const tracked = await fundingJournal.recordHash(attempted, hash);
-      if (!mounted.current || !tracked) return;
+      if (!isCurrent() || !tracked) return;
       setFundingNotice({ kind: 'pending', text: `Funding submitted on ${deployment.l1.chainName}. Waiting for confirmation…` });
       } catch (error) {
         if (attempted && journalStarted && !hashReturned && !(error instanceof UnknownFeeSubmission)) await fundingJournal.reject(attempted);
-        if (mounted.current) setFundingNotice({ kind: 'error', text: (error as { code?: number }).code === 4001
+        if (mounted.current && currentScope.current === recoveryScope && !signal.aborted) setFundingNotice({ kind: 'error', text: (error as { code?: number }).code === 4001
           ? 'Funding cancelled in your wallet.'
           : error instanceof Error ? error.message.split('\n')[0]! : 'Funding did not return a transaction hash. Check wallet activity before retrying.' });
         throw error;
@@ -601,7 +650,7 @@ export function FalconSafe({ signer, wallet, deployment, fees }: { signer: Signe
     }
     if (!hash) throw new Error('Could not obtain a current fee quote. Try estimating again.');
     if (!mounted.current) return;
-    const tx: Submitted = { kind: 'call', hash, account: session.account, publicKey: prepared.signed.publicKey, prepared };
+    const tx: Submitted = { scope: recoveryScope, kind: 'call', hash, account: session.account, publicKey: prepared.signed.publicKey, prepared };
     setSubmitted(tx); setPrepared(null); setL1Hash(null); setCosts(null);
     setNotice({ kind: 'pending', text: 'Submitted through EEZ. Waiting for the L2 call result…' });
   }
@@ -611,7 +660,7 @@ export function FalconSafe({ signer, wallet, deployment, fees }: { signer: Signe
       if (!uncertain) return;
       const { session } = await sourceSession(signal);
       const hash = await recoverFeeTransaction(session.provider, recoveryHash.trim(), uncertain.intent);
-      const tx: Submitted = { kind: 'call', hash, account: uncertain.intent.from, publicKey: uncertain.prepared.signed.publicKey, prepared: uncertain.prepared };
+      const tx: Submitted = { scope: recoveryScope, kind: 'call', hash, account: uncertain.intent.from, publicKey: uncertain.prepared.signed.publicKey, prepared: uncertain.prepared };
       setSubmitted(tx); setL1Hash(null); setCosts(null); setUncertain(null); setRecoveryHash('');
     });
   }
@@ -665,10 +714,15 @@ export function FalconSafe({ signer, wallet, deployment, fees }: { signer: Signe
   const unavailable = loadingSafe || busy || confirming || fundingPending || !!controllerJournal.attempt || !!fundingJournal.error || !!controllerJournal.error
     || wallet.networkSetup?.status === 'connecting' || !!uncertain || signer.busy || !signer.publicKeyHex || !wallet.address || !deployment.l1.safe;
   const safeReady = !!remote?.target && remote.balance !== null && remote.nonce !== null && !confirming;
+  const creatingSafe = activeSubmission?.kind === 'call' && activeSubmission.prepared.operation.kind === 'create' && confirming;
+  const setupRunning = busy || creatingSafe || !!controllerJournal.attempt?.hash;
+  const showSetup = !!recoveryOwner && lookedUp && (!remote?.target || creatingSafe);
+  const preparationComplete = !!controller && !controllerJournal.attempt;
+  const showAccount = !!remote?.target && !creatingSafe;
   return <section className={styles.card} aria-labelledby="safe-heading">
     <header className={styles.header}>
-      <div className={styles.titleRow}><h2 id="safe-heading">{remote?.target ? 'Your Safe account' : 'Your Falcon Safe'}</h2><span className={styles.badge}>{deployment.l1.chainName} · L1</span></div>
-      {remote?.target ? <>
+      <div className={styles.titleRow}><h2 id="safe-heading">{showAccount ? 'Your Safe account' : 'Your Falcon Safe'}</h2><span className={styles.badge}>{deployment.l1.chainName} · L1</span></div>
+      {showAccount && remote?.target ? <>
         <div className={styles.accountIdentity}>
           <a id="safe-address" className={styles.accountAddress} href={`${deployment.l1.explorer}/address/${remote.target}`} title={remote.target}
             aria-label={`Safe address ${remote.target}`} target="_blank" rel="noreferrer">{remote.target.slice(0, 12)}…{remote.target.slice(-10)}</a>
@@ -677,11 +731,29 @@ export function FalconSafe({ signer, wallet, deployment, fees }: { signer: Signe
         {copyNotice && <p role="status" className={styles.copyNotice}>{copyNotice}</p>}
       </> : <p>Create a Safe account on {deployment.l1.chainName} controlled by your Falcon key.</p>}
     </header>
+    {showSetup && <div className={styles.setupProgress}>
+      <ol id="safe-setup-progress" className={styles.setupSteps} aria-label="Safe setup progress" aria-live="polite">
+        <li data-state={preparationComplete ? 'complete' : 'active'} aria-current={!preparationComplete ? 'step' : undefined}>
+          <span className={styles.setupNumber} aria-hidden="true">1</span>
+          <div><strong>Create Falcon controller</strong><p>Deploy a controller contract on {deployment.l2.chainName}, bound to your Falcon public key.</p></div>
+          {preparationComplete && <span className={styles.setupComplete} aria-label="Complete">✓</span>}
+        </li>
+        <li data-state={preparationComplete ? 'active' : 'pending'} aria-current={preparationComplete ? 'step' : undefined}>
+          <span className={styles.setupNumber} aria-hidden="true">2</span>
+          <div><strong>Create Safe</strong><p>Create your Safe on {deployment.l1.chainName}, controlled by that contract.</p></div>
+        </li>
+      </ol>
+      <button id="safe-create" className={`btn btn-solid ${styles.action} ${setupRunning ? styles.setupRunning : ''}`}
+        disabled={unavailable} aria-busy={setupRunning} onClick={() => void createSafe()}>
+        {setupRunning ? 'Creating Falcon Safe…' : 'Create Safe'}
+      </button>
+      {controller && <SafeFeeQuote fee={fee} config={fees} />}
+    </div>}
     {!signer.publicKeyHex && <p role="status" className={`${styles.status} ${styles.unlockNotice}`}><strong>Unlock your Falcon key</strong><br />Your Safe account will load automatically.</p>}
     {(fundingJournal.error || controllerJournal.error) && <p role="alert">{fundingJournal.error || controllerJournal.error}</p>}
     {fundingNotice && <p role="status" className={styles.status} data-result={fundingNotice.kind}>{fundingNotice.text}</p>}
     {fundingJournal.attempt && !fundingJournal.attempt.hash && !busy && <div className={styles.transaction} role="group" aria-label="Recover funding transaction">
-      <p className={styles.hint}>{fundingJournal.attempt.hash ? 'Funding is being checked automatically.' : 'A funding request is unresolved. Check wallet activity before sending again.'} Recovery also works with a locked Falcon key.</p>
+      <p className={styles.hint}>The wallet did not return a funding hash. It may still have sent the transaction, so check wallet activity before sending again.</p>
       <p className={styles.hint}>From {fundingJournal.attempt.account} · To {fundingJournal.attempt.to} · {formatUnits(BigInt(fundingJournal.attempt.value), 18)} {symbol}.</p>
       <label className={styles.label}>Funding transaction hash<input id="funding-recovery-hash" className={styles.input} value={fundingRecoveryHash} onChange={event => setFundingRecoveryHash(event.target.value)} /></label>
       <p className={styles.hint}>Use the original hash, a speed-up replacement, or a mined cancellation from your wallet activity.</p>
@@ -691,7 +763,7 @@ export function FalconSafe({ signer, wallet, deployment, fees }: { signer: Signe
     {controllerJournal.attempt && !controllerJournal.attempt.hash && !busy && !signer.busy && <details className={styles.details}>
       <summary>Earlier setup needs attention</summary>
       <div className={styles.transaction} role="group" aria-label="Recover controller setup">
-      <p className={styles.hint}>We are checking the earlier setup automatically. If it was interrupted and cannot be found, you can recover it from wallet activity here.</p>
+      <p className={styles.hint}>The wallet did not return a setup hash, but it may still have sent the transaction. We check it automatically before allowing another request to avoid paying twice. If it cannot be found, use wallet activity here.</p>
       <p className={styles.hint}>Sender: {controllerJournal.attempt.account}</p>
       {controllerJournal.attempt.hash && <a href={`${deployment.l2.explorer}/tx/${controllerJournal.attempt.hash}`} target="_blank" rel="noreferrer">Controller setup transaction</a>}
       <label className={styles.label}>Controller setup transaction hash<input id="controller-recovery-hash" className={styles.input} value={controllerRecoveryHash} onChange={event => setControllerRecoveryHash(event.target.value)} /></label>
@@ -706,12 +778,6 @@ export function FalconSafe({ signer, wallet, deployment, fees }: { signer: Signe
       <a className="btn btn-sm btn-outline" href={`#/visualizer?mode=trace&chain=l1&tx=${funding.hash}`}
         aria-label="See funding transaction in trace decoder" target="_blank" rel="noreferrer">See trace</a>
     </div>}
-    {lookedUp && !controller && <>
-      <p className={styles.hint}>Create a Safe on {deployment.l1.chainName} controlled by your Falcon key. First-time setup may need two wallet confirmations.</p>
-      <button id="safe-create" className={`btn btn-solid ${styles.action}`} disabled={unavailable} onClick={() => void createSafe()}>
-        {busy ? 'Creating Safe…' : 'Create Safe'}
-      </button>
-    </>}
     {deployment.l1.safe && !remote?.target && <details id="safe-manual-instructions" className={styles.details}>
       <summary>Manual instructions</summary>
       <ol className={`${styles.manualSteps} ${styles.hint}`}>
@@ -739,13 +805,7 @@ export function FalconSafe({ signer, wallet, deployment, fees }: { signer: Signe
           </div>
         </div>
       </div>}
-      {!remote.target ? <>
-        <p className={styles.hint}>Create a Safe on {deployment.l1.chainName} controlled by your Falcon key. Your gas wallet will ask you to approve the transaction.</p>
-        <button id="safe-create" className={`btn btn-solid ${styles.action}`} disabled={unavailable} onClick={() => void createSafe()}>
-          {busy || confirming ? 'Creating Safe…' : 'Create Safe'}
-        </button>
-        <SafeFeeQuote fee={fee} config={fees} />
-      </> : safeReady ? <section className={styles.sendBox} aria-labelledby="safe-send-heading">
+      {safeReady ? <section className={styles.sendBox} aria-labelledby="safe-send-heading">
         <h3 id="safe-send-heading">Send transaction</h3>
         <p className={styles.hint}>Send from your Safe on {deployment.l1.chainName}.</p>
         <div className={styles.fields}>
@@ -779,19 +839,21 @@ export function FalconSafe({ signer, wallet, deployment, fees }: { signer: Signe
         <p className={styles.contractDetails}><a href={`${deployment.l1.explorer}/address/${remote.owner}`} target="_blank" rel="noreferrer">L1 owner proxy · {remote.owner}</a></p>
       </details>
     </>}
-    <p id="safe-status" className={styles.status} data-result={notice.kind} role="status" aria-live="polite" hidden={!signer.publicKeyHex && notice.text === initial.text}>{notice.text}</p>
+    <p id="safe-status" className={styles.status} data-result={notice.kind} role="status" aria-live="polite" hidden={showSetup && notice.kind !== 'error' || !signer.publicKeyHex && notice.text === initial.text}>{notice.text}</p>
     {uncertain && <div className={styles.transaction}>
       <label className={styles.label}>Transaction hash from wallet activity<input id="safe-recovery-hash" className={styles.input} value={recoveryHash} onChange={event => setRecoveryHash(event.target.value)} /></label>
       <button id="safe-recover" className={`btn btn-outline ${styles.action}`} disabled={busy || !wallet.address} onClick={() => void recover()}>Recover transaction</button>
     </div>}
-    {submitted && <div className={styles.transaction}>
+    {activeSubmission && <div className={styles.transaction}>
       <div className={styles.transactionHashes}>
-        <a id="safe-source-tx" className={styles.contractDetails} href={`${deployment.l2.explorer}/tx/${submitted.hash}`} title={submitted.hash} target="_blank" rel="noreferrer">L2 · {submitted.hash.slice(0, 10)}…{submitted.hash.slice(-8)}</a>
+        <a id="safe-source-tx" className={styles.contractDetails} href={`${deployment.l2.explorer}/tx/${activeSubmission.hash}`} title={activeSubmission.hash} target="_blank" rel="noreferrer">L2 · {activeSubmission.hash.slice(0, 10)}…{activeSubmission.hash.slice(-8)}</a>
         {l1Hash && <a id="safe-settlement-tx" className={styles.contractDetails} href={`${deployment.l1.explorer}/tx/${l1Hash}`} title={l1Hash} target="_blank" rel="noreferrer">L1 · {l1Hash.slice(0, 10)}…{l1Hash.slice(-8)}</a>}
       </div>
-      <a id="safe-trace" className={`btn btn-outline ${styles.action} ${styles.traceAction}`} href={`#/visualizer?mode=trace&chain=l2&tx=${submitted.hash}`} target="_blank" rel="noreferrer">See in trace decoder</a>
+      <a id="safe-trace" className={`btn btn-outline ${styles.action} ${styles.traceAction}`} href={`#/visualizer?mode=trace&chain=l2&tx=${activeSubmission.hash}`} target="_blank" rel="noreferrer">See in trace decoder</a>
     </div>}
-    {costs && submitted?.hash === costs.sourceHash && <SafeCostComparison evidence={costs} l1ChainId={deployment.l1.chainId} l1Name={deployment.l1.chainName} l1Symbol={symbol} l2Symbol={fees.nativeSymbol}
+    {compareCosts && costs && activeSubmission?.hash === costs.sourceHash && <SafeCostComparison evidence={costs} l1ChainId={deployment.l1.chainId} l1Name={deployment.l1.chainName} l1Symbol={symbol} l2Symbol={fees.nativeSymbol}
+      estimatedL1GasPrice={l1GasEstimate?.sourceHash === costs.sourceHash ? l1GasEstimate.gasPrice : null}
+      estimateFailed={l1GasEstimate?.sourceHash === costs.sourceHash && l1GasEstimate.failed}
       checking={checkingCosts} />}
   </section>;
 }

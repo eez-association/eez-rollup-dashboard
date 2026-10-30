@@ -36,6 +36,15 @@ const { fixture, origin } = require('./cow-demo.cjs');
       assert.ok(modes.length > 0 && modes.every(mode => mode === 'no-store'), 'availability checks bypass cached HTML responses');
       await f.context.close();
     }
-    console.log('HTML API fallback recovers via Retry, automatically, and on focus without wallet transactions or signatures.');
+    const bundled = await fixture(browser, { bundledCatalog: true });
+    await bundled.page.goto(origin + '/');
+    await bundled.nav.waitFor(); await bundled.toggle(); await bundled.cow.click();
+    await bundled.page.getByRole('region', { name: 'Swap form' }).waitFor();
+    assert.equal(bundled.requests.filter(path => path.endsWith('/cowdemo/api/tokens')).length, 0,
+      'bundled availability must not repeat deployment validation for a separate catalog request');
+    assert.deepEqual(bundled.errors, []);
+    assert.equal(bundled.transactions.length, 0); assert.equal(bundled.signed.length, 0);
+    await bundled.context.close();
+    console.log('Availability uses the bundled catalog, supports older APIs, and recovers without wallet transactions or signatures.');
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

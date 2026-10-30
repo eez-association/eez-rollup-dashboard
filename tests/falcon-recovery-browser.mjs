@@ -4,11 +4,52 @@ import { toHex } from 'viem';
 import { fixture, origin } from './falcon/fixture.mjs';
 import { crossChainDeployment as deployment } from '../src/lib/falcon/crossChainDeployment.ts';
 import { createL1ControllerData } from '../src/lib/falcon/l1Controller.ts';
-import { recoveryKey } from '../src/lib/falcon/recoveryJournal.ts';
+import { recoveryKey, scopedRecoveryKey } from '../src/lib/falcon/recoveryJournal.ts';
+
+import { createKeyPair } from '../src/lib/falcon/falcon.ts';
+import { encryptKeystore } from '../src/lib/falcon/keystore.ts';
 
 const account = '0x1111111111111111111111111111111111111111';
 const safe = '0x2222222222222222222222222222222222222222';
-const publicKey = `0x${'ab'.repeat(897)}`, blockHash = `0x${'cd'.repeat(32)}`, cancellationHash = `0x${'ef'.repeat(32)}`;
+const keys = createKeyPair(), password = 'recovery-browser-test';
+const backup = Buffer.from(JSON.stringify(await encryptKeystore(keys, password)));
+const publicKey = `0x${Buffer.from(keys.publicKey).toString('hex')}`, blockHash = `0x${'cd'.repeat(32)}`, cancellationHash = `0x${'ef'.repeat(32)}`;
+
+async function installWallet(f) {
+  await f.page.addInitScript(({ account, chain }) => {
+    const listeners = new Map();
+    const mock = window.recoveryWallet = { account, calls: [] };
+    mock.switchAccount = account => { mock.account = account; for (const fn of listeners.get('accountsChanged') ?? []) fn([account]); };
+    const provider = { isMetaMask: true,
+      on: (event, fn) => listeners.set(event, [...(listeners.get(event) ?? []), fn]),
+      removeListener: (event, fn) => listeners.set(event, (listeners.get(event) ?? []).filter(item => item !== fn)),
+      request: async ({ method }) => {
+        mock.calls.push(method);
+        if (method === 'eth_accounts' || method === 'eth_requestAccounts') return [mock.account];
+        if (method === 'eth_chainId') return chain;
+        if (method === 'eth_getBalance') return '0x0';
+        throw new Error(`Unexpected wallet request: ${method}`);
+      },
+    };
+    const detail = { info: { uuid: 'recovery-test', name: 'MetaMask', rdns: 'io.metamask' }, provider };
+    window.addEventListener('eip6963:requestProvider', () => window.dispatchEvent(new CustomEvent('eip6963:announceProvider', { detail })));
+  }, { account, chain: toHex(deployment.l2.chainId) });
+}
+async function connect(f) {
+  await f.page.getByRole('button', { name: 'Connect Wallet', exact: true }).click();
+  await f.page.getByRole('button', { name: 'MetaMask', exact: true }).click();
+}
+async function restore(f) {
+  await f.page.getByLabel('Encrypted key file', { exact: true }).setInputFiles({ name: 'test.json', mimeType: 'application/json', buffer: backup });
+  await f.page.getByLabel('Remember this key in this browser', { exact: true }).uncheck();
+  await f.page.getByLabel('Backup password', { exact: true }).fill(password);
+  await f.page.locator('#restore').click();
+  await f.page.waitForFunction(() => document.querySelector('#key-status')?.textContent.includes('Key restored'));
+}
+async function showRecovery(f, kind) {
+  if (kind === 'controller') await f.page.getByText('Earlier setup needs attention', { exact: true }).click();
+}
+
 const browser = await chromium.launch({ headless: true, chromiumSandbox: true,
   ...(process.env.PLAYWRIGHT_CHANNEL ? { channel: process.env.PLAYWRIGHT_CHANNEL } : {}) });
 try {
@@ -30,16 +71,31 @@ try {
       if (method === 'eth_getTransactionReceipt') return { transactionHash: cancellationHash, from: account, to: account, status: '0x1', blockHash,
         blockNumber: toHex(network.anchor.blockNumber + 10n), transactionIndex: '0x0', type: '0x0', gasUsed: '0x5208', effectiveGasPrice: '0x1', cumulativeGasUsed: '0x5208', logs: [] };
     } });
-    const key = recoveryKey(deployment, kind);
+    const legacyKey = recoveryKey(deployment, kind);
+    const key = scopedRecoveryKey(legacyKey, { account, publicKey });
     const attempt = { version: 1, id: `unsent-${kind}`, kind, chainId: network.chainId, account, nonce: '7', publicKey,
       to: kind === 'funding' ? safe : deployment.l2.factory.address, value: kind === 'funding' ? '10' : '0',
       data: kind === 'funding' ? '0x' : createL1ControllerData(publicKey), ...(kind === 'funding' ? { controller: safe } : {}) };
-    await f.open();
-    await f.page.evaluate(({ key, attempt }) => localStorage.setItem(key, JSON.stringify(attempt)), { key, attempt });
+    await installWallet(f); await f.open(); await connect(f);
+    await f.page.evaluate(({ key, attempt }) => localStorage.setItem(key, JSON.stringify(attempt)), { key: legacyKey, attempt });
     await f.page.reload();
-    if (kind === 'controller') await f.page.getByText('Earlier setup needs attention', { exact: true }).click();
+    assert.equal(await f.page.locator('#funding-recovery-hash, #controller-recovery-hash').count(), 0, 'locked key hides recovery');
+    await restore(f); await showRecovery(f, kind);
     const recovery = f.page.getByRole('group', { name: kind === 'funding' ? 'Recover funding transaction' : 'Recover controller setup', exact: true });
     await recovery.waitFor();
+    assert.equal(await f.page.evaluate(key => localStorage.getItem(key), legacyKey), null, 'legacy record migrated');
+    await f.page.evaluate(account => window.recoveryWallet.switchAccount(account), safe);
+    await recovery.waitFor({ state: 'hidden' });
+    assert(await f.page.evaluate(key => localStorage.getItem(key) !== null, key), 'other wallet preserves pending request');
+    await f.page.evaluate(account => window.recoveryWallet.switchAccount(account), account);
+    await showRecovery(f, kind); await recovery.waitFor();
+    await f.page.locator('#lock').click();
+    await recovery.waitFor({ state: 'hidden' });
+    await f.page.locator('#generate').click();
+    await f.page.waitForFunction(() => document.querySelector('#key-status')?.textContent.includes('Key generated'));
+    assert.equal(await f.page.locator('#funding-recovery-hash, #controller-recovery-hash').count(), 0, 'other key hides recovery');
+    await f.page.locator('#lock').click();
+    await restore(f); await showRecovery(f, kind); await recovery.waitFor();
     const clear = recovery.getByRole('button', { name: 'Check and clear unsent request', exact: true });
     assert(await clear.isDisabled(), 'clearing requires explicit acknowledgement');
     await recovery.getByRole('checkbox').check();
@@ -54,24 +110,25 @@ try {
     assert.equal(await f.page.evaluate(key => localStorage.getItem(key), key), null);
     if (kind === 'funding') {
       await f.page.evaluate(({ key, attempt }) => localStorage.setItem(key, JSON.stringify({ ...attempt, id: 'cancelled-funding' })), { key, attempt });
-      await f.page.reload(); await recovery.waitFor();
+      await f.page.reload(); await restore(f); await recovery.waitFor();
       await f.page.locator('#funding-recovery-hash').fill(cancellationHash);
       await recovery.getByRole('button', { name: 'Recover funding', exact: true }).click();
       await recovery.waitFor({ state: 'hidden' });
       await f.page.getByText(/it was not marked as funded/).waitFor();
       assert.equal(await f.page.evaluate(key => localStorage.getItem(key), key), null);
     }
+    assert.equal(await f.page.evaluate(() => window.recoveryWallet.calls.filter(method => /eth_send|eth_sign/.test(method)).length), 0);
     await f.close();
   }
   // A different tab can retire a cancelled/replaced request while this tab is
   // still observing its original hash. Its local busy state must follow storage.
   const f = await fixture(browser, { rpc: async ({ method }) => method === 'eth_getTransactionByHash' ? null : undefined });
-  const key = recoveryKey(deployment, 'funding');
+  const key = scopedRecoveryKey(recoveryKey(deployment, 'funding'), { account, publicKey });
   const attempt = { version: 1, id: 'other-tab-funding', kind: 'funding', chainId: deployment.l1.chainId,
     account, to: safe, controller: safe, nonce: '7', value: '10', data: '0x', publicKey, hash: cancellationHash };
-  await f.open();
+  await installWallet(f); await f.open(); await connect(f);
   await f.page.evaluate(({ key, attempt }) => localStorage.setItem(key, JSON.stringify(attempt)), { key, attempt });
-  await f.page.reload();
+  await f.page.reload(); await restore(f);
   await f.page.getByText(/Funding tx ·/).waitFor();
   const other = await f.context.newPage(); await other.goto(origin + '/');
   await other.evaluate(key => localStorage.removeItem(key), key);

@@ -164,20 +164,23 @@ export function CowTestTokens({ cfg, wallet, disabled, onPending, onDelivered }:
     <ol className={styles.faucetSteps} aria-label="Test-token request steps">
       <li>Switch your wallet to <strong>{L1_CHAIN.chainName}</strong>. This only changes the selected network.</li>
       <li>Confirm one faucet transaction in your wallet. You pay {L1_CHAIN.chainName} gas.</li>
-      <li>Receive tokens and gas on <strong>{L2_CHAIN.chainName}</strong>, then switch back to swap.</li>
+      <li>Receive tokens and gas on <strong>{L2_CHAIN.chainName}</strong>. Swapping will request any needed network switch.</li>
     </ol>
     <p className={styles.hint}>The official bridge delivers to your connected address. Test tokens have no monetary value.</p>
     {wallet.address && <p className={styles.hint}>Recipient: <ExplorerLink chain="l2" value={wallet.address} /></p>}
-    {info && <p className={styles.hint}>One request per wallet every {info.cooldown / 3600} hours. {!info.funded ? 'The faucet needs refilling.' : !info.eligible ? `Available again ${new Date(info.nextClaimAt * 1000).toLocaleString()}.` : ''}</p>}
-    {!onL1 && !pending && info?.eligible && <WalletNetworkSetup address={wallet.address} chainId={wallet.chainId}
+    {info && <p className={styles.hint}>One request per wallet every {info.cooldown / 3600} hours. {!info.funded ? 'The faucet needs refilling.' : ''}</p>}
+    {!onL1 && !pending && info?.funded && info.eligible && <WalletNetworkSetup address={wallet.address} chainId={wallet.chainId}
       network={{ chainId: cfg.l1ChainId, chainName: L1_CHAIN.chainName }} setup={networkSetup.setup}
       disabled={disabled || busy || wallet.connectingComposer}
       onConnect={() => void networkSetup.connect({ chainId: cfg.l1ChainId, chainName: L1_CHAIN.chainName })} />}
-    {(onL1 || !!pending) && <button disabled={disabled || busy || networkSetup.busy || wallet.connectingComposer || !!pending
+    <button disabled={disabled || busy || networkSetup.busy || wallet.connectingComposer || !!pending || !onL1
       || !wallet.isConnected || !composerReady || checkingConnection || !info?.funded || !info.eligible || !!readError} onClick={() => void claim()}>
       {phase === 'checking' || checkingConnection && !pending ? 'Checking wallet RPC…'
         : phase === 'preparing' ? 'Preparing request…' : phase === 'confirming' ? 'Confirm in wallet…'
-        : pending ? 'Checking delivery…' : 'Get test tokens'}</button>}
+        : pending ? 'Checking delivery…' : 'Get test tokens'}</button>
+    {info && !info.eligible && !pending && <p role="status" className={styles.hint}>
+      This wallet has already claimed. Available again {new Date(info.nextClaimAt * 1000).toLocaleString()}.
+    </p>}
     {onL1 && !pending && !busy && !networkSetup.busy && composerReady && !checkingConnection && info?.eligible
       && <p role="status" className={styles.hint}>Connected to {L1_CHAIN.chainName}. Click Get test tokens to open the transaction confirmation.</p>}
     {phase && <p role="status" className={styles.hint}>{phase === 'checking' ? 'Checking the active wallet connection…'
@@ -186,9 +189,6 @@ export function CowTestTokens({ cfg, wallet, disabled, onPending, onDelivered }:
     {onL1 && composerOnL1 && <ComposerStatus connection={wallet.composerConnection}
       checking={wallet.checkingComposer || busy || networkSetup.busy} onRecheck={wallet.recheckComposer} walletName={wallet.walletName} variant="notice"
       onConnectNetwork={wallet.connectComposer} connectingNetwork={wallet.connectingComposer} setupMessage={wallet.composerSetupMessage} />}
-    {onL1 && !pending && info && !info.eligible && <button disabled={disabled || busy || networkSetup.busy || wallet.connectingComposer}
-      onClick={() => void networkSetup.connect({ chainId: cfg.l2ChainId, chainName: L2_CHAIN.chainName })}>
-      {networkSetup.busy ? 'Check your wallet…' : `Switch back to ${L2_CHAIN.chainName}`}</button>}
     {!wallet.isConnected && <p className={styles.hint}>Connect your wallet using the dashboard or swap form first.</p>}
     {(error || readError) && <p role="alert" className={styles.error}>{error || readError}</p>}
     {readError && <button onClick={() => setRevision(x => x + 1)}>Retry faucet check</button>}

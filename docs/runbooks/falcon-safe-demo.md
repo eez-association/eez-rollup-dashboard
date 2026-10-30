@@ -85,15 +85,22 @@ retain their separate gas estimation path.
    and refreshed before **Send transaction** opens the wallet confirmation.
    Editing the recipient, amount or data invalidates the signature and quote.
    Confirmation is automatic, with one trace button and small L1/L2 hash links.
-   The [cost comparison](../falcon/cost-comparison.md) shows the actual paid fee first, then the same gas usage priced at the L1
-   settlement gas price. xDAI uses $1 per token; ETH uses a live ETH/USD quote.
+   The [cost comparison](../falcon/cost-comparison.md) shows the actual paid fee
+   first, then the same gas usage at the L1 gas price fetched once when the
+   comparison is first calculated. That price is kept without refreshing. The comparison is labelled
+   as estimated. xDAI uses $1 per token; ETH uses a live ETH/USD quote.
    Chiado/Gnosis are the xDAI fallback; other networks default to ETH.
 
 Funding and first-time controller setup save public recovery details before
 opening the wallet, including the sender, nonce, destination, amount, and data.
 Pending records survive navigation and reloads; they never include a Falcon
-secret or signature. **Recover funding** and **Recover controller setup** stay
-available while the key is locked. Recovery checks the exact nonce as well as
+secret or signature. Recovery display and blocking are scoped to the connected
+sender and unlocked Falcon key. Locking the key or switching wallets/keys hides
+unrelated requests without deleting them; returning restores automatic checks.
+Legacy deployment-wide records migrate to their recorded sender and key under
+the journal lock. Late wallet replies still update that original context.
+Safe discovery uses the Falcon public key, so another gas wallet can pay for
+the same Safe. Recovery checks the exact nonce as well as
 the transaction contents, so an older identical transfer is not accepted.
 Confirmation clears the pending record after verifying the canonical outcome.
 The same recovery input accepts a mined cancellation or replacement with the
@@ -189,7 +196,7 @@ secret cannot leave an unlocked-looking UI. Transaction edits and actual key
 changes produce distinct signing errors.
 
 
-Normal setup does not show transaction-hash recovery inputs. A saved setup with
+Normal setup does not show transaction-hash recovery inputs. A saved setup or funding request with
 no hash is looked up automatically by its recorded sender and nonce; matching
 transactions resume confirmation, and only a canonical replacement/cancellation
 can close a different intent. Unresolved recovery controls stay collapsed under
@@ -197,3 +204,18 @@ can close a different intent. Unresolved recovery controls stay collapsed under
 resubmission or automatic clearing based on absence alone. The send form is shown
 only after the L1 Safe has been verified, and locked keys have a prominent red
 unlock instruction.
+
+The signature playground starts as a compact row. Click its heading (or focus it
+and press Enter) to expand or collapse the signing and verification controls.
+Transaction costs and trace links follow the sending wallet, Falcon key and
+deployment. The comparison uses the entire user-paid L2 fee and the same gas
+usage at L1 prices for subsequent Falcon-authorized Safe transactions only.
+Controller/Safe creation, funding and discovering an existing Safe do not
+create cost comparison results.
+
+Safe setup shows two fixed steps: **Create Falcon controller** deploys an L2
+contract bound to the public key, then **Create Safe** creates the L1 Safe
+controlled through that contract. The active step is highlighted, completed
+preparation is crossed out, and the steps disappear after canonical L1
+confirmation reveals the account. A key with an existing controller starts
+with the first step already complete. Errors remain visible beside the steps.

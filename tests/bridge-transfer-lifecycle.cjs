@@ -57,6 +57,29 @@ const fees = f => f.page.getByRole('region',{name:'Quoted bridge fees'});
       await until(()=>estimates(f)>0 && quotes(f)>0,'Confirmed approval must start the transfer estimate and quote');
       assert.deepEqual(f.errors,[]);await f.context.close();scenarios++;
     }
-    console.log(JSON.stringify({passed:true,scenarios,noQuotesAfterBridgeSuccess:true,noEstimatesBeforeApproval:true,newTransferResumesQuoting:true,realTransactionsBroadcast:0}));
+    for(const reverse of [false,true]) for(const decimals of [6,18]) {
+      const amount=decimals===6?'1.234567':'1.234567890123456789';
+      const raw=decimals===6?1234567n:1234567890123456789n;
+      const options={reverse,decimals,amount,erc20:true,symbol:'EXACT',allowance:0n,approvalRequired:true,expandGas:false};
+      const f=await fixture(browser,options);
+      await f.page.clock.install();
+      await f.page.getByRole('button',{name:'Approve EXACT',exact:true}).click();
+      await f.page.getByRole('heading',{name:'Waiting for confirmation',exact:true}).waitFor();
+      const tx=await f.page.evaluate(()=>window.walletRequests[0]);
+      assert.equal(tx.data.slice(0,10),'0x095ea7b3');
+      assert.equal(BigInt('0x'+tx.data.slice(-64)),raw,'Approval must equal the entered transfer amount in token units');
+      options.allowance=raw;
+      f.receipt.result=success;
+      await f.page.clock.runFor(1200);
+      await f.page.getByRole('heading',{name:'Approval confirmed',exact:true}).waitFor();
+      await f.page.getByRole('button',{name:'Done',exact:true}).click();
+      assert.equal(await f.page.getByLabel('Bridge amount',{exact:true}).inputValue(),amount);
+      assert.equal(await f.page.getByRole('button',{name:'Approve EXACT',exact:true}).count(),0);
+      await f.page.getByLabel('Bridge amount',{exact:true}).fill('2');
+      await f.page.getByRole('button',{name:'Approve EXACT',exact:true}).waitFor();
+      assert.equal(await f.page.evaluate(()=>window.walletRequests.length),1,'Changing the amount never sends another approval automatically');
+      assert.deepEqual(f.errors,[]);await f.context.close();scenarios++;
+    }
+    console.log(JSON.stringify({passed:true,scenarios,noQuotesAfterBridgeSuccess:true,noEstimatesBeforeApproval:true,newTransferResumesQuoting:true,exactApprovalAmounts:true,tokenDecimals:[6,18],realTransactionsBroadcast:0}));
   }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

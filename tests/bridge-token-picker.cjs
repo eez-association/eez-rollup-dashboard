@@ -70,7 +70,8 @@ async function fixture(browser, options = {}) {
     if (method === 'eth_call') {
       const tx = params[0], selector = tx.data.slice(0,10);
       if (selector === toFunctionSelector('rollupId()')) return reply(word(path.endsWith('l1') ? 0 : 2));
-      if (selector === toFunctionSelector('wrappedTokenInfo(address)')) return reply(word(0) + word(0).slice(2));
+      if (selector === toFunctionSelector('wrappedTokenInfo(address)')) return reply(options.wrapped && path.endsWith('l1')
+        ? '0x'+l2Token.slice(2).padStart(64,'0')+word(2).slice(2) : word(0)+word(0).slice(2));
       if (selector === toFunctionSelector('getWrappedToken(address,uint64)')) return reply(word(0));
       if (tx.to.toLowerCase() === addr('0')) return reply('0x');
       if (tx.to.toLowerCase() === addr('5')) await new Promise(r => setTimeout(r, 500));
@@ -108,6 +109,8 @@ async function saved(f, symbol, address) {
     await f.panel.getByLabel('Search tokens').fill('chiado');
     await saved(f,'CHI',l1Token);
     await f.panel.getByRole('button',{name:'Select CHI '+l1Token,exact:true}).click();
+    await f.panel.getByText('Chiado',{exact:true}).first().waitFor();
+    await f.panel.getByText('Proxy',{exact:true}).waitFor();
     await f.panel.getByRole('button',{name:'Add token & select',exact:true}).click();
     await f.panel.getByLabel('Bridge amount',{exact:true}).locator('..').getByText('CHI',{exact:true}).waitFor();
     assert(await f.panel.getByRole('button',{name:/^Choose bridge asset on/}).first().evaluate(el => el === document.activeElement));
@@ -123,7 +126,17 @@ async function saved(f, symbol, address) {
     await f.panel.getByText('This token will be deployed when it is first bridged to this network.',{exact:true}).waitFor();
     const storedPair = await f.page.evaluate(address => JSON.parse(localStorage.getItem('bridgeRecentTokens')).find(t => t.address === address).counterpart, l1Token);
     await saved(f,'CHI',storedPair.address);
+    const proxyRow=f.panel.getByRole('button',{name:'Select CHI '+storedPair.address,exact:true});
+    await proxyRow.getByText('Proxy',{exact:true}).waitFor();
+    await proxyRow.getByText('Chiado',{exact:true}).waitFor();
+    assert.equal(await proxyRow.locator('code').first().getAttribute('title'),l1Token);
+    assert.equal(await proxyRow.locator('code').last().getAttribute('title'),storedPair.address);
     assert.equal(storedPair.chainId,6290);
+    for(const width of [320,390,1440]) {
+      await f.page.setViewportSize({width,height:900});
+      assert.ok(await f.page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'proxy row overflow at '+width);
+      await f.page.screenshot({path:`/tmp/bridge-token-origin-${width}.png`,fullPage:true});
+    }
     await f.close();
 
     // Empty native-first list; name search can discover catalog tokens.
@@ -145,6 +158,9 @@ async function saved(f, symbol, address) {
     await f.panel.getByRole('button',{name:'Add token & select',exact:true}).click();
     await f.panel.getByLabel('Bridge amount',{exact:true}).locator('..').getByText('CHI',{exact:true}).waitFor();
     await f.page.reload(); await open(f); await saved(f,'CHI',custom);
+    const restored=f.panel.getByRole('button',{name:'Select CHI '+custom,exact:true});
+    await restored.getByText('Chiado',{exact:true}).waitFor();
+    assert.equal(await restored.getByText('Proxy',{exact:true}).count(),0);
     await f.panel.getByRole('button',{name:'Select CHI '+custom,exact:true}).click();
     await f.panel.getByLabel('Bridge amount',{exact:true}).locator('..').getByText('CHI',{exact:true}).waitFor();
     await open(f);
@@ -181,6 +197,19 @@ async function saved(f, symbol, address) {
       assert.notEqual(repaired.counterpart.address,l2Token);
       await f.close();
     }
+
+    // Importing a wrapped token follows its on-chain origin, not the selected network.
+    f=await fixture(browser,{wrapped:true});
+    await f.panel.getByLabel('Search tokens').fill(addr('4'));
+    await f.panel.getByRole('button',{name:'Add token & select',exact:true}).waitFor();
+    await f.panel.getByText('EEZ-X Devnet',{exact:true}).first().waitFor();
+    await f.panel.getByRole('group',{name:'Bridge asset choices',exact:true}).getByText('Chiado',{exact:true}).waitFor();
+    await f.panel.getByRole('button',{name:'Add token & select',exact:true}).click();
+    await open(f);
+    const wrappedRow=f.panel.getByRole('button',{name:'Select CHI '+addr('4'),exact:true});
+    await wrappedRow.getByText('Proxy',{exact:true}).waitFor();
+    assert.equal(await wrappedRow.locator('code').first().getAttribute('title'),l2Token);
+    await f.close();
 
     // Corrupt local storage does not break the bridge.
     f = await fixture(browser);

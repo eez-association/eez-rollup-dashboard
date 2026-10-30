@@ -7,8 +7,8 @@ import { loadBridgeTokens, saveBridgeToken } from '../src/lib/bridgeTokens.ts';
 const bundle = fs.readdirSync('src/lib/treasury/builds').map(file => JSON.parse(fs.readFileSync('src/lib/treasury/builds/'+file))).find(b=>b.contracts.Bridge);
 const runtime = bundle.contracts.Bridge.runtime;
 const address = n => '0x'+n.repeat(40);
-const source={rpc:'https://source.invalid',bridge:address('1'),chainId:10200};
-const destination={rpc:'https://destination.invalid',bridge:address('2'),chainId:699169};
+const source={rpc:'https://source.invalid',bridge:address('1'),chainId:10200,name:'Chiado'};
+const destination={rpc:'https://destination.invalid',bridge:address('2'),chainId:699169,name:'RollupX'};
 const token={address:address('3'),chainId:source.chainId,name:'Test token',symbol:'TEST',decimals:6};
 const word=n=>encodeAbiParameters([{type:'uint256'}],[BigInt(n)]);
 const addr=a=>encodeAbiParameters([{type:'address'}],[a]);
@@ -19,7 +19,7 @@ test('unknown factory code cannot produce a guessed counterpart',()=>{
 });
 
 test('token pairs predict undeployed wrappers, reuse deployed wrappers, and unwrap to originals', async t=>{
-  for (const mode of ['predicted','deployed','return']) await t.test(mode,async()=>{
+  for (const mode of ['predicted','deployed','return','foreign-origin']) await t.test(mode,async()=>{
     const originalFetch=globalThis.fetch;
     const requests=[];
     globalThis.fetch=async(url,options)=>{
@@ -28,7 +28,7 @@ test('token pairs predict undeployed wrappers, reuse deployed wrappers, and unwr
       if(method==='eth_getCode')result=runtime;
       else {
         const selector=params[0].data.slice(0,10);
-        if(selector===toFunctionSelector('wrappedTokenInfo(address)'))result=encodeAbiParameters([{type:'address'},{type:'uint64'}],[mode==='return'?address('5'):zeroAddress,2n]);
+        if(selector===toFunctionSelector('wrappedTokenInfo(address)'))result=encodeAbiParameters([{type:'address'},{type:'uint64'}],[mode==='return'||mode==='foreign-origin'?address('5'):zeroAddress,mode==='foreign-origin'?3n:2n]);
         else if(selector===toFunctionSelector('rollupId()'))result=word(url===source.rpc?0:2);
         else if(selector===toFunctionSelector('getWrappedToken(address,uint64)'))result=addr(mode==='deployed'?address('6'):zeroAddress);
         else if(selector===toFunctionSelector('manager()'))result=addr(address('4'));
@@ -44,11 +44,17 @@ test('token pairs predict undeployed wrappers, reuse deployed wrappers, and unwr
       assert.equal(counterpart.chainId,destination.chainId);
       assert.deepEqual(original.counterpart,{address:counterpart.address,chainId:destination.chainId});
       assert.deepEqual(counterpart.counterpart,{address:original.address,chainId:source.chainId});
-      if(mode==='predicted') {
+      assert.deepEqual(original.origin,counterpart.origin);
+      assert.equal(original.isProxy,mode==='return'||mode==='foreign-origin');
+      assert.equal(counterpart.isProxy,mode!=='return');
+      assert.equal(original.origin.address,mode==='return'||mode==='foreign-origin'?address('5'):token.address);
+      assert.equal(original.origin.networkName,mode==='return'?'RollupX':mode==='foreign-origin'?'Rollup 3':'Chiado');
+      assert.equal(original.origin.chainId,mode==='return'?destination.chainId:mode==='foreign-origin'?undefined:source.chainId);
+      if(mode==='predicted'||mode==='foreign-origin') {
         assert.equal(counterpart.predicted,true);
         assert.notEqual(counterpart.address,token.address);
-        assert.notEqual(counterpart.address,predictBridgeToken(token,token.address,2n,destination.bridge,address('4'),runtime));
-        assert.notEqual(counterpart.address,predictBridgeToken(token,token.address,0n,source.bridge,address('4'),runtime));
+        assert.notEqual(counterpart.address,predictBridgeToken(token,original.origin.address,2n,destination.bridge,address('4'),runtime));
+        assert.notEqual(counterpart.address,predictBridgeToken(token,original.origin.address,0n,source.bridge,address('4'),runtime));
       } else assert.equal(counterpart.address,mode==='return'?address('5'):address('6'));
       assert(requests.every(r=>['eth_call','eth_getCode'].includes(r.method)));
     } finally {globalThis.fetch=originalFetch;}

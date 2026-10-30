@@ -26,3 +26,8 @@
 .footer { border-top: 1px solid var(--border); padding-top: 12px; }
 .picker button:focus-visible, .search:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 @media (max-width: 360px) { .picker { padding: 12px; } .token { gap: 8px; padding-inline: 4px; } }
+.tokenText .tokenTitle { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; overflow: visible; white-space: normal; }
+.tokenText .proxyBadge { display: inline-flex; flex-shrink: 0; padding: 2px 7px; border: 1px solid var(--border-bright); border-radius: 100px; color: var(--accent); background: var(--bg-inset); font: 500 12px/1.4 var(--sans); }
+.tokenText .provenance { margin-top: 5px; white-space: normal; overflow-wrap: anywhere; font-size: 12px; }
+.tokenName { max-width: 100%; }
+.counterpart { padding-top: 12px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 10px; }

@@ -36,14 +36,16 @@ export function CowLightDemo({ ready, wallet }: { ready: boolean; wallet: Wallet
     setCfg(null); setLoadError('');
     void (async () => {
       try {
-        const demo = await api<CowConfig>('/config', { signal: controller.signal });
+        const demo = await api<CowConfig & { tokens?: CowToken[] }>('/config', { signal: controller.signal });
         if (!DISCOVERED_CHAIN_IDS.l1 || !DISCOVERED_CHAIN_IDS.l2
           || BigInt(demo.l1ChainId) !== BigInt(DISCOVERED_CHAIN_IDS.l1)
           || BigInt(demo.l2ChainId) !== BigInt(DISCOVERED_CHAIN_IDS.l2)) {
           throw new Error('CoW Light is configured for a different network. It cannot be opened on this dashboard.');
         }
-        const catalog = await api<{ tokens: CowToken[] }>('/tokens', { signal: controller.signal });
-        const eligible = catalog.tokens.filter(hasMinimumWethReserve);
+        // Older API deployments still expose the catalog separately.
+        const catalog = Array.isArray(demo.tokens) ? demo.tokens
+          : (await api<{ tokens: CowToken[] }>('/tokens', { signal: controller.signal })).tokens;
+        const eligible = catalog.filter(hasMinimumWethReserve);
         if (!eligible.length) throw new Error('No swap tokens meet the minimum catalog reserve of 0.01 WETH.');
         if (active && !controller.signal.aborted) { setTokens(eligible); setCfg(demo); }
       } catch (e) { if (active && !controller.signal.aborted) setLoadError((e as Error).message); }

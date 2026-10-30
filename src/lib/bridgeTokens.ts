@@ -14,6 +14,10 @@ export function isSavedBridgeToken(value: unknown): value is TokenMeta {
     && typeof token.symbol === "string" && !!token.symbol.trim()
     && (token.bridgeAddress === undefined || typeof token.bridgeAddress === "string" && isTokenAddress(token.bridgeAddress))
     && (token.counterpart === undefined || !!token.counterpart && typeof token.counterpart.address === "string" && isTokenAddress(token.counterpart.address) && Number.isSafeInteger(token.counterpart.chainId))
+    && (token.isProxy === undefined || typeof token.isProxy === "boolean")
+    && (token.origin === undefined || !!token.origin && typeof token.origin.address === "string" && isTokenAddress(token.origin.address)
+      && typeof token.origin.networkName === "string" && typeof token.origin.rollupId === "string" && /^\d+$/.test(token.origin.rollupId)
+      && (token.origin.chainId === undefined || Number.isSafeInteger(token.origin.chainId) && token.origin.chainId > 0))
     && Number.isInteger(token.decimals) && token.decimals >= 0 && token.decimals <= 77;
 }
 

@@ -54,10 +54,21 @@ async function close(f) { assert.deepEqual(f.errors, []); await f.context.close(
       await f.page.evaluate(() => { window.delayTestTransaction = false; window.finishTestTransaction(); });
       await f.faucet.getByText(/Received 0.01 ctWETH and 0.0002/).waitFor();
       assert.equal(f.transactions.length, 1); assert.equal(f.signed.length, 0);
-      assert.equal(requestCount(f, 'wallet_switchEthereumChain'), 1, 'return switch requires another deliberate click');
-      await f.faucet.getByRole('button', { name: 'Switch back to EEZ test', exact: true }).click();
-      await f.page.waitForFunction(() => window.ethereum.request({ method: 'eth_chainId' }).then(chain => chain === '0x1892'));
-      assert.equal(f.transactions.length, 1);
+      assert.equal(requestCount(f, 'wallet_switchEthereumChain'), 1, 'delivery does not switch networks');
+      assert.equal(await f.faucet.getByRole('button', { name: /Switch back/ }).count(), 0);
+      await f.faucet.getByText(/This wallet has already claimed/).waitFor();
+      const form = f.page.getByRole('region', { name: 'Swap form' });
+      await form.getByRole('button', { name: 'Get quote' }).click();
+      assert.equal(requestCount(f, 'wallet_switchEthereumChain'), 1, 'reading a quote does not switch networks');
+      await form.getByRole('button', { name: 'Approve sell amount' }).click();
+      await form.getByRole('button', { name: 'Sign order' }).waitFor();
+      assert.equal(f.walletRequests.filter(r => r.method === 'wallet_switchEthereumChain').at(-1).params[0].chainId, '0x1892',
+        'the swap action handles its own L2 switch');
+      assert.ok(await f.faucet.getByRole('button', { name: 'Get test tokens', exact: true }).isVisible(),
+        'claim action remains visible after delivery and returning to L2');
+      assert.ok(await f.faucet.getByRole('button', { name: 'Get test tokens', exact: true }).isDisabled());
+      await f.faucet.getByText(/Available again/).waitFor();
+      assert.equal(f.transactions.length, 2, 'one faucet claim and one swap approval; no extra claim');
       await close(f);
     }
     {

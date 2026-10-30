@@ -54,6 +54,26 @@ input.input { font-family: var(--sans); }
 }
 
 .workflow { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.setupProgress { display: flex; flex-direction: column; gap: 16px; }
+.setupRunning:global(.btn):disabled { opacity: 1; background: var(--green-dim); color: var(--green); border-color: var(--green-border); cursor: progress; }
+.setupSteps { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }
+.setupSteps li { display: flex; align-items: center; gap: 12px; min-height: 84px; padding: 16px; border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text-dim); background: var(--bg-inset); }
+.setupSteps strong { display: block; font: 600 15px/1.4 var(--sans); }
+.setupSteps p { margin: 4px 0 0; min-height: 2.9em; font: 13px/1.45 var(--sans); }
+.setupNumber { display: grid; place-items: center; flex: 0 0 30px; height: 30px; border: 1px solid currentColor; border-radius: 50%; font: 600 14px/1 var(--mono); }
+.setupSteps li[data-state="active"] { border-color: var(--green); background: var(--green-dim); color: var(--text-bright); box-shadow: inset 3px 0 var(--green); }
+.setupSteps li[data-state="active"] .setupNumber { color: var(--green); }
+.setupSteps li[data-state="complete"] strong { text-decoration: line-through; }
+.setupSteps li[data-state="pending"] { opacity: .6; }
+.setupComplete { margin-left: auto; color: var(--green); font-size: 20px; }
+.card.playground { display: block; padding: 0; }
+.playgroundSummary { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 20px; cursor: pointer; list-style: none; }
+.playgroundSummary::-webkit-details-marker { display: none; }
+.playgroundSummary h2 { color: var(--text-bright); font: 600 15px/1.4 var(--sans); }
+.playgroundSummary::after { content: '+'; color: var(--text-dim); font: 20px/1 var(--mono); }
+.playground[open] > .playgroundSummary::after { content: '−'; }
+.playgroundSummary:focus-visible { outline: 2px solid var(--accent); outline-offset: -4px; border-radius: var(--radius-sm); }
+.playgroundBody { display: flex; flex-direction: column; gap: 16px; padding: 0 20px 20px; }
 .safeStats { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; padding: 16px 0; border-block: 1px solid var(--border); }
 .safeStats > div { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .safeStats strong { font: 500 32px/1.2 var(--mono); color: var(--text-bright); overflow-wrap: anywhere; }

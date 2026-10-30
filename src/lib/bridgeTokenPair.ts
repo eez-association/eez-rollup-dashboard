@@ -4,7 +4,7 @@ import { rpcCall } from "../rpc.ts";
 import { readBridgeToken } from "./bridgeTokens.ts";
 import factories from "./bridge-token-artifacts.json" with { type: "json" };
 
-export interface BridgeTokenNetwork { rpc: string; bridge: string; chainId: number }
+export interface BridgeTokenNetwork { rpc: string; bridge: string; chainId: number; name?: string }
 const abi = parseAbi([
   "function wrappedTokenInfo(address) view returns (address,uint64)",
   "function getWrappedToken(address,uint64) view returns (address)",
@@ -37,12 +37,19 @@ export async function resolveBridgeTokenPair(token: TokenMeta, source: BridgeTok
   const [original, originId] = decodeAbiParameters([{type:"address"},{type:"uint64"}],info);
   const sourceRollupId = decodeAbiParameters([{type:"uint64"}],sourceId)[0];
   const destinationRollupId = decodeAbiParameters([{type:"uint64"}],destinationId)[0];
+  const originalToken = original === zeroAddress ? token.address as Address : original;
+  const originalRollupId = original === zeroAddress ? sourceRollupId : originId;
+  const originNetwork = originalRollupId === sourceRollupId ? source
+    : originalRollupId === destinationRollupId ? destination : undefined;
+  const origin: NonNullable<TokenMeta["origin"]> = {
+    address: originalToken, rollupId: originalRollupId.toString(),
+    ...(originNetwork ? { chainId: originNetwork.chainId } : {}),
+    networkName: originNetwork?.name || (originNetwork ? `Chain ${originNetwork.chainId}` : `Rollup ${originalRollupId}`),
+  };
   let counterpart: TokenMeta;
   if (original !== zeroAddress && originId === destinationRollupId) {
     counterpart = await readBridgeToken(destination.rpc, original, destination.chainId, signal);
   } else {
-    const originalToken = original === zeroAddress ? token.address as Address : original;
-    const originalRollupId = original === zeroAddress ? sourceRollupId : originId;
     const deployed = decodeAbiParameters([{type:"address"}],await read(destination,"getWrappedToken",[originalToken,originalRollupId]))[0];
     if (deployed !== zeroAddress) {
       counterpart = await readBridgeToken(destination.rpc,deployed,destination.chainId,signal);
@@ -57,7 +64,7 @@ export async function resolveBridgeTokenPair(token: TokenMeta, source: BridgeTok
     }
   }
   return [
-    {...token,bridgeAddress:source.bridge,counterpart:{address:counterpart.address,chainId:destination.chainId}},
-    {...counterpart,bridgeAddress:destination.bridge,counterpart:{address:token.address,chainId:source.chainId}},
+    {...token,origin,isProxy:original !== zeroAddress,bridgeAddress:source.bridge,counterpart:{address:counterpart.address,chainId:destination.chainId}},
+    {...counterpart,origin,isProxy:originalRollupId !== destinationRollupId,bridgeAddress:destination.bridge,counterpart:{address:token.address,chainId:source.chainId}},
   ];
 }

@@ -12,6 +12,28 @@ export function recoveryKey(deployment: CrossChainDeployment, kind: RecoveryAtte
     deployment.l2.chainId, deployment.l2.anchor.blockHash, deployment.l2.manager, deployment.l2.factory.address];
   return `eez:falcon:recovery:${keccak256(toHex(JSON.stringify(identity).toLowerCase()))}:${kind}`;
 }
+export type RecoveryOwner = Pick<RecoveryAttempt, 'account' | 'publicKey'>;
+export function scopedRecoveryKey(base: string, owner: RecoveryOwner) {
+  return `${base}:${owner.account.toLowerCase()}:${keccak256(owner.publicKey)}`;
+}
+/** Called under the deployment journal lock. Only the recorded owner can adopt a legacy request. */
+export function migrateRecovery(storage: JournalStorage, base: string, owner: RecoveryOwner) {
+  const key = scopedRecoveryKey(base, owner);
+  const raw = storage.getItem(base);
+  if (!raw) return;
+  const legacy = JSON.parse(raw) as RecoveryAttempt;
+  if (legacy?.account?.toLowerCase() !== owner.account.toLowerCase()
+    || legacy?.publicKey?.toLowerCase() !== owner.publicKey.toLowerCase()) return;
+  const attempt = readRecovery(raw)!;
+  const current = readRecovery(storage.getItem(key));
+  if (current && (current.id !== attempt.id || JSON.stringify({ ...current, hash: undefined }) !== JSON.stringify({ ...attempt, hash: undefined })
+    || current.hash && attempt.hash && current.hash !== attempt.hash)) {
+    throw new Error('Two saved Falcon requests need review for this wallet and key. Both records have been preserved.');
+  }
+  // Write first: a failed write must leave the only copy intact. Repeating migration is safe.
+  storage.setItem(key, JSON.stringify(current?.hash ? current : attempt));
+  storage.removeItem(base);
+}
 export function readRecovery(raw: string | null): RecoveryAttempt | null {
   if (!raw) return null;
   const value = JSON.parse(raw) as RecoveryAttempt;

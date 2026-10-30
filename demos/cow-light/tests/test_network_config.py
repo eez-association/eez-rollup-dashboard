@@ -268,6 +268,35 @@ class ConfigurationTests(unittest.TestCase):
             self.assertEqual(status,503)
             self.assertEqual(payload['status'],'deployment_required')
 
+    def test_api_config_bundles_catalog_after_one_fresh_deployment_check(self):
+        from urllib.parse import urlparse
+        tree = ast.parse((ROOT / 'backend/server.py').read_text())
+        handler = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == 'Handler')
+        values = {'NETWORK':'chiado', 'L1_NATIVE_SYMBOL':'XDAI', 'L2_NATIVE_SYMBOL':'XDAI'}
+        cfg = MagicMock()
+        cfg.__getitem__.side_effect = values.__getitem__
+        cfg.get.side_effect = values.get
+        tokens = [{'address':ADDRESS, 'symbol':'TEST'}]
+        catalog = MagicMock(return_value=tokens)
+        namespace = {'BaseHTTPRequestHandler':object, 'urlparse':urlparse, 'CFG':cfg,
+                     'l1':None, 'l2':None, 'L1_CHAIN':10200, 'L2_CHAIN':699169,
+                     'L1_RPC':'/rpc/l1', 'L2_FRONT':'/composer/l2', 'SETTLEMENT':ADDRESS,
+                     'WETH':ADDRESS, 'WETH_L2':OTHER_ADDRESS, 'NATIVE_WETH_L2':None,
+                     'BRIDGE_L2':ADDRESS, 'vault_relayer':lambda: ADDRESS, 'catalog':catalog}
+        exec(compile(ast.Module(body=[handler],type_ignores=[]), '<api fixture>', 'exec'), namespace)
+        instance = namespace['Handler']()
+        instance.send_json = MagicMock()
+        instance.path = '/api/config'
+        instance.do_GET()
+        cfg.check_deployment.assert_called_once_with(l1=None, l2=None)
+        catalog.assert_called_once()
+        self.assertEqual(instance.send_json.call_args.args[0]['tokens'], tokens)
+        # A later request must revalidate; this optimization is not a stale cache.
+        cfg.check_deployment.side_effect = ValueError('network reset')
+        instance.do_GET()
+        self.assertEqual(instance.send_json.call_args.args[1], 503)
+        self.assertEqual(catalog.call_count, 1)
+
     def test_allowance_normalizes_wallet_address_before_contract_calls(self):
         from urllib.parse import urlparse, parse_qs
         from web3 import Web3

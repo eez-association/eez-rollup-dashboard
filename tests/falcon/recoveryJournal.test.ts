@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { readRecovery, recoveryKey, updateRecovery, recordWalletHash, rejectWalletRequest, resolveRecovery, matchesRecoveryTransaction, type RecoveryAttempt } from '../../src/lib/falcon/recoveryJournal.ts';
+import { readRecovery, recoveryKey, scopedRecoveryKey, migrateRecovery, updateRecovery, recordWalletHash, rejectWalletRequest, resolveRecovery, matchesRecoveryTransaction, type RecoveryAttempt } from '../../src/lib/falcon/recoveryJournal.ts';
 import { crossChainDeployment, testnetDeployment } from '../../src/lib/falcon/crossChainDeployment.ts';
 
 const attempt: RecoveryAttempt = {
@@ -73,4 +73,52 @@ test('late replies for a previous attempt do not alter a newer one', () => {
   assert.equal(recordWalletHash(saved, 'key', attempt, `0x${'ab'.repeat(32)}`), null);
   rejectWalletRequest(saved, 'key', attempt);
   assert.deepEqual(readRecovery(saved.getItem('key')), next);
+});
+
+
+test('wallet and Falcon key scope are independent and normalize hex casing', () => {
+  const base = recoveryKey(testnetDeployment, 'funding');
+  const key = scopedRecoveryKey(base, attempt);
+  assert.notEqual(key, scopedRecoveryKey(base, { ...attempt, account: attempt.to }));
+  assert.notEqual(key, scopedRecoveryKey(base, { ...attempt, publicKey: `0x${'cd'.repeat(897)}` }));
+  assert.equal(key, scopedRecoveryKey(base, { ...attempt, publicKey: attempt.publicKey.toUpperCase().replace('0X', '0x') as `0x${string}` }));
+});
+test('legacy recovery migrates only for its owner and survives reload and late replies', () => {
+  const saved = storage(), base = recoveryKey(testnetDeployment, 'funding'), key = scopedRecoveryKey(base, attempt);
+  saved.setItem(base, JSON.stringify(attempt));
+  for (const other of [{ ...attempt, account: attempt.to }, { ...attempt, publicKey: `0x${'cd'.repeat(897)}` as const }]) {
+    migrateRecovery(saved, base, other);
+    assert.equal(saved.getItem(scopedRecoveryKey(base, other)), null);
+    assert.deepEqual(readRecovery(saved.getItem(base)), attempt);
+  }
+  migrateRecovery(saved, base, attempt);
+  assert.equal(saved.getItem(base), null);
+  assert.deepEqual(readRecovery(saved.getItem(key)), attempt);
+  migrateRecovery(saved, base, attempt);
+  const other = { ...attempt, account: attempt.to, id: 'wallet-b' };
+  const otherKey = scopedRecoveryKey(base, other);
+  updateRecovery(saved, otherKey, null, other);
+  recordWalletHash(saved, key, attempt, `0x${'ab'.repeat(32)}`);
+  assert.deepEqual(readRecovery(saved.getItem(otherKey)), other);
+  assert.equal(readRecovery(saved.getItem(key))?.hash, `0x${'ab'.repeat(32)}`);
+});
+test('legacy migration preserves both conflicting records and retains a recovered hash', () => {
+  const saved = storage(), base = recoveryKey(testnetDeployment, 'funding'), key = scopedRecoveryKey(base, attempt);
+  saved.setItem(base, JSON.stringify(attempt));
+  const newer = { ...attempt, id: 'newer' };
+  saved.setItem(key, JSON.stringify(newer));
+  assert.throws(() => migrateRecovery(saved, base, attempt), /Both records have been preserved/);
+  assert.deepEqual(readRecovery(saved.getItem(base)), attempt);
+  assert.deepEqual(readRecovery(saved.getItem(key)), newer);
+  const recovered = { ...attempt, hash: `0x${'ab'.repeat(32)}` as const };
+  saved.setItem(key, JSON.stringify(recovered));
+  migrateRecovery(saved, base, attempt);
+  assert.equal(saved.getItem(base), null);
+  assert.deepEqual(readRecovery(saved.getItem(key)), recovered);
+});
+test('a failed migration write never removes the legacy request', () => {
+  const saved = storage(), base = recoveryKey(testnetDeployment, 'funding');
+  saved.setItem(base, JSON.stringify(attempt));
+  assert.throws(() => migrateRecovery({ ...saved, setItem: () => { throw new Error('storage full'); } }, base, attempt), /storage full/);
+  assert.deepEqual(readRecovery(saved.getItem(base)), attempt);
 });

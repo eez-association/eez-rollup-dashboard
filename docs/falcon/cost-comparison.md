@@ -1,14 +1,24 @@
 # Falcon Safe cost comparison
 
+The comparison is shown only for subsequent Falcon-authorized transactions
+from the Safe. Controller deployment, Safe creation, funding and read-only
+discovery do not produce comparison figures. Signing alone also has no paid
+transaction cost.
+
 Both cards start with the measured gas cost in the network's native token:
 
 - **Actual cost:** verified L2 receipt `gasUsed × effectiveGasPrice`.
-- **Cost without EEZ:** the **same L2 gas used** multiplied by the verified L1
-  settlement receipt's `effectiveGasPrice`.
+- **Estimated cost without EEZ:** the **same L2 gas used** multiplied by the
+  L1 RPC `eth_gasPrice` suggestion fetched once when the comparison is first
+  calculated. Keep this price snapshot for that transaction.
 
-The L1 estimate waits for that receipt. It does not use a tip-free RPC gas-price
-suggestion, gas limit, or a separately benchmarked L1 gas count. A real direct
-L1 execution could consume different gas; this is explicitly a same-gas estimate.
+The comparison is explicitly labelled as estimated. Its initial price is retained
+through confirmation and wallet switches; it is not polled, refreshed, or replaced
+by the settlement receipt price. The RPC suggestion can exclude tips paid by
+individual transactions. A failed estimate read displays as unavailable and does
+not block settlement checks. Both comparisons use gas used, never
+gas limit or a separately benchmarked L1 gas count. A real direct L1 execution
+could consume different gas; this remains a same-gas estimate.
 
 ## Currency conversion
 
@@ -32,6 +42,13 @@ amounts remain visible rather than inventing USD values. Price/source details ar
 inside Details, not a banner. xDAI-only networks never request ETH/USD.
 
 ## Included fees
+
+Cost evidence and transaction links are shown only for the sending wallet,
+Falcon key, and deployment. Switching context hides the previous transaction;
+returning to its context can show it again. Discovering an existing Safe does
+not create cost evidence. The **Transaction costs** panel measures the entire
+user-paid L2 transaction, including EEZ settlement, and compares the same L2 gas
+usage at L1 prices. It does not isolate the verifier call's execution gas.
 
 The full L2 receipt fee includes the charged base fee, priority fee and EEZ
 settlement charge. Calldata and intrinsic gas are already part of gas used.

@@ -36,15 +36,15 @@ export function BridgeTokenPicker({ direction, walletAddress, asset, tokenAddres
   const destinationChainId = Number(BigInt(destination.chainId));
   const destinationName = direction === "l1-to-l2" ? config.rollupName : config.l1NetworkName;
   const saved = recentTokens.filter(token => token.chainId === chainId && (!token.bridgeAddress || token.bridgeAddress.toLowerCase() === sourceBridge.toLowerCase()));
-  const matches = (token: TokenMeta) => [token.symbol, token.name, token.address].some(value => value.toLowerCase().includes(query));
+  const matches = (token: TokenMeta) => [token.symbol, token.name, token.address, token.origin?.address || "", token.origin?.networkName || ""].some(value => value.toLowerCase().includes(query));
   const tokens = saved.filter(matches).sort((a, b) => a.symbol.localeCompare(b.symbol));
   const discovered = query ? catalog.tokens.filter(token => matches(token)
     && !saved.some(item => item.address.toLowerCase() === token.address.toLowerCase())) : [];
   const native = chain.nativeCurrency;
   const showNative = !query || [native.name, native.symbol, "native"].some(value => value.toLowerCase().includes(query));
-  const findCounterpart = (token: TokenMeta) => token.counterpart?.chainId === destinationChainId
+  const findCounterpart = (token: TokenMeta) => token.origin && token.counterpart?.chainId === destinationChainId
     ? recentTokens.find(t => t.chainId === destinationChainId && t.address.toLowerCase() === token.counterpart!.address.toLowerCase()
-      && t.bridgeAddress?.toLowerCase() === destinationBridge.toLowerCase()) : undefined;
+      && t.origin && t.bridgeAddress?.toLowerCase() === destinationBridge.toLowerCase()) : undefined;
   const needsLookup = !!address && !tokens.some(token => findCounterpart(token));
   const lookupKey = `${chainId}:${rpc}:${sourceBridge}:${destinationChainId}:${destinationRpc}:${destinationBridge}:${address}:${retry}`;
   const [lookup, setLookup] = useState<{ key: string; pair?: [TokenMeta, TokenMeta]; error?: string } | null>(null);
@@ -59,15 +59,15 @@ export function BridgeTokenPicker({ direction, walletAddress, asset, tokenAddres
     const timer = window.setTimeout(async () => {
       try {
         const token = await readBridgeToken(rpc, address, chainId, controller.signal);
-        const pair = await resolveBridgeTokenPair(token, {rpc,bridge:sourceBridge,chainId},
-          {rpc:destinationRpc,bridge:destinationBridge,chainId:destinationChainId},controller.signal);
+        const pair = await resolveBridgeTokenPair(token, {rpc,bridge:sourceBridge,chainId,name:network},
+          {rpc:destinationRpc,bridge:destinationBridge,chainId:destinationChainId,name:destinationName},controller.signal);
         if (!cancelled) setLookup({ key: lookupKey, pair });
       } catch (error) {
         if (!cancelled) setLookup({ key: lookupKey, error: error instanceof Error && error.message.includes("does not support") ? error.message : `Couldn’t add this token. Check its address on ${network} and the connection to both networks.` });
       } finally { window.clearTimeout(timeout); }
     }, 250);
     return () => { cancelled = true; controller.abort(); window.clearTimeout(timer); window.clearTimeout(timeout); };
-  }, [needsLookup, lookupKey, rpc, address, chainId, network, sourceBridge, destinationRpc, destinationBridge, destinationChainId]);
+  }, [needsLookup, lookupKey, rpc, address, chainId, network, sourceBridge, destinationRpc, destinationBridge, destinationChainId, destinationName]);
 
   const choose = (token: TokenMeta) => {
     const counterpart = findCounterpart(token);
@@ -75,14 +75,32 @@ export function BridgeTokenPicker({ direction, walletAddress, asset, tokenAddres
     else setSearch(token.address);
   };
 
+  const shortAddress = (value: string) => `${value.slice(0, 6)}…${value.slice(-4)}`;
+  const originName = (token: TokenMeta) => token.origin?.chainId === Number(BigInt(L1_CHAIN.chainId)) ? config.l1NetworkName
+    : token.origin?.chainId === Number(BigInt(L2_CHAIN.chainId)) ? config.rollupName : token.origin?.networkName;
+  const identity = (token: TokenMeta, localNetwork: string, full = false) => <span className={styles.tokenText}>
+    <span className={styles.tokenTitle}><strong>{token.symbol}</strong>
+      {token.isProxy && <span className={styles.proxyBadge}>Proxy</span>}</span>
+    <span className={styles.tokenName}>{token.name}</span>
+    <span className={styles.provenance}>
+      {token.origin ? originName(token) : localNetwork}
+    </span>
+    <code className={full ? styles.address : undefined} title={token.origin?.address || token.address}>
+      {full ? token.origin?.address || token.address : shortAddress(token.origin?.address || token.address)}
+    </code>
+    {token.isProxy && <>
+      <span className={styles.provenance}>{localNetwork}{token.predicted ? " · Not deployed yet" : ""}</span>
+      <code className={full ? styles.address : undefined} title={token.address}>{full ? token.address : shortAddress(token.address)}</code>
+    </>}
+  </span>;
+
   const row = (token: TokenMeta & { balance?: bigint }, isSaved: boolean) => <li key={token.address.toLowerCase()}>
     <button type="button" className={styles.token} disabled={disabled}
       aria-label={`${isSaved ? "Select" : "Add"} ${token.symbol} ${token.address}`}
       aria-pressed={asset === "erc20" && token.address.toLowerCase() === tokenAddress.toLowerCase()}
       onClick={() => choose(token)}>
       <span className={styles.icon} aria-hidden="true">{token.symbol.slice(0, 2)}</span>
-      <span className={styles.tokenText}><strong>{token.symbol}</strong><span>{token.name}{token.predicted ? " · Not deployed yet" : ""}</span>
-        <code title={token.address}>{token.address.slice(0, 6)}…{token.address.slice(-4)}</code></span>
+      {identity(token, network)}
       <span className={styles.trailing}>{!isSaved ? "Add" : token.balance !== undefined ? formatUnits(token.balance, token.decimals) :
         asset === "erc20" && token.address.toLowerCase() === tokenAddress.toLowerCase() ? "✓" : ""}</span>
     </button>
@@ -97,7 +115,7 @@ export function BridgeTokenPicker({ direction, walletAddress, asset, tokenAddres
       {showNative && <li><button type="button" className={styles.token} disabled={disabled} aria-label={`Select ${native.symbol} native token`}
         aria-pressed={asset === "eth"} onClick={() => onSelect("")}>
         <span className={`${styles.icon} ${styles.nativeIcon}`} aria-hidden="true">{native.symbol === "ETH" ? "Ξ" : native.symbol.slice(0, 2)}</span>
-        <span className={styles.tokenText}><strong>{native.symbol}</strong><span>{native.name} · Native token</span></span>
+        <span className={styles.tokenText}><strong>{native.symbol}</strong><span>{native.name} · Native token</span><span className={styles.provenance}>{network}</span></span>
         {asset === "eth" && <span className={styles.trailing}>✓</span>}
       </button></li>}
       {tokens.length > 0 && <li className={styles.sectionLabel}>Saved tokens</li>}
@@ -107,10 +125,11 @@ export function BridgeTokenPicker({ direction, walletAddress, asset, tokenAddres
     </ul>
     {needsLookup && <div className={styles.import}>
       {!result ? <p className={styles.hint} role="status">Looking up token…</p> : result.error ? <><p className={styles.error} role="status">{result.error}</p><button type="button" className={styles.add} onClick={() => setRetry(value => value + 1)}>Try again</button></> : result.pair && <>
-        <div className={styles.tokenText}><strong>{result.pair[0].symbol}</strong><span>{result.pair[0].name}</span></div>
-        <code className={styles.address}>{result.pair[0].address}</code>
-        <p className={styles.hint}>Also added on {destinationName}{result.pair[1].predicted ? " · Not deployed yet" : ""}</p>
-        <code className={styles.address}>{result.pair[1].address}</code>
+        {identity(result.pair[0], network, true)}
+        <div className={styles.counterpart}>
+          <p className={styles.hint}>Also saved on {destinationName}</p>
+          {identity(result.pair[1], destinationName, true)}
+        </div>
         <button type="button" className={styles.add} disabled={disabled} onClick={() => onSelect(result.pair![0].address, result.pair)}>Add token & select</button>
       </>}
     </div>}

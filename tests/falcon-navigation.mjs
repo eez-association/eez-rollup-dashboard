@@ -22,6 +22,7 @@ try {
   assert.equal(chunks().length, 1);
   await f.page.locator('#generate').click();
   await f.page.waitForFunction(() => document.querySelector('#key-status').textContent.includes('Key generated'));
+  await f.page.locator('#signature-playground > summary').click();
   await f.page.getByTestId('message').focus();
   await f.page.keyboard.press(shortcut);
   assert(await f.page.getByTestId('public-key-hash').isVisible(), 'typing cannot hide the demo');
@@ -53,6 +54,16 @@ try {
   assert.equal(await fresh.page.locator('#safe-load, #send-l2').count(), 0, 'mismatched networks cannot initiate contract actions');
   await fresh.page.locator('#generate').click();
   await fresh.page.waitForFunction(() => document.querySelector('#key-status').textContent.includes('Key generated'));
+  const playground = fresh.page.locator('#signature-playground');
+  assert.equal(await playground.getAttribute('open'), null, 'playground starts compact');
+  assert.equal(await fresh.page.locator('#sign').isVisible(), false);
+  const compactHeight = (await playground.boundingBox()).height;
+  await playground.locator('summary').click();
+  assert((await playground.boundingBox()).height > compactHeight, 'click expands the playground');
+  await playground.locator('summary').click();
+  assert.equal(await fresh.page.locator('#sign').isVisible(), false, 'click collapses it again');
+  await playground.locator('summary').focus();
+  await fresh.page.keyboard.press('Enter');
   await fresh.page.locator('#sign').click();
   await fresh.page.waitForFunction(() => document.querySelector('#signature-status').textContent.includes('Signature ready'));
   await fresh.page.locator('#verify').click();

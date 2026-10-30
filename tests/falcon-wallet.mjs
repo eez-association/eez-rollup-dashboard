@@ -7,6 +7,7 @@ import { crossChainDeployments } from '../src/lib/falcon/crossChainDeployment.ts
 import { l1ActionDigest, l1ControllerAbi, l1ControllerFactoryAbi } from '../src/lib/falcon/l1Action.ts';
 import { managerAbi } from '../src/lib/falcon/l1Controller.ts';
 import { safeFactoryAbi, safeAbi } from '../src/lib/falcon/safe.ts';
+import { recoveryKey, scopedRecoveryKey } from '../src/lib/falcon/recoveryJournal.ts';
 import { fromHex } from '../src/lib/falcon/falcon.ts';
 import { COMPOSER_DISCOVERY_ABI, COMPOSER_DISCOVERY_ADDRESS, COMPOSER_DISCOVERY_MARKER } from '../src/lib/composerDiscovery.ts';
 import { fixture, origin } from './falcon/fixture.mjs';
@@ -15,6 +16,7 @@ const devnetCode = JSON.parse(readFileSync(new URL('./falcon/fixtures/deployed-c
 const testnetCode = JSON.parse(readFileSync(new URL('./falcon/fixtures/testnet-deployed-code.json', import.meta.url), 'utf8'));
 const account = '0x'+'88'.repeat(20), controller = '0x'+'11'.repeat(20), owner = '0x'+'22'.repeat(20), safe = '0x'+'33'.repeat(20);
 const txHash = '0x'+'ab'.repeat(32), blockHash = '0x'+'cd'.repeat(32);
+const transferTxHash = '0x'+'bc'.repeat(32);
 const revertedCreationHash = '0x'+'ac'.repeat(32);
 const controllerTxHash = '0x'+'c1'.repeat(32);
 const oldFundingHash = '0x'+'f0'.repeat(32);
@@ -25,7 +27,7 @@ try {
   for (const d of crossChainDeployments) for (const [name, type] of [['Rabby','0x0'], ['MetaMask','0x2']]) for (const missingNetwork of [false, true]) {
     const blockNumber = d.l1.anchor.blockNumber + 100n;
     const code = d.l2.chainId === 699169 ? { ...devnetCode, ...testnetCode } : devnetCode;
-    let publicKey, publicKeyHashForReads, consumed = 0n, sent;
+    let publicKey, publicKeyHashForReads, consumed = 0n, safeNonce = 0n, sent;
     let holdSettlement = d.l2.chainId === 699169 && name === 'MetaMask' && !missingNetwork;
     const needsController = d.l2.chainId === 699169 && missingNetwork;
     let controllerReady = !needsController;
@@ -78,6 +80,7 @@ try {
         sends.push(params[0]);
         if (revertNextCreation) { revertNextCreation = false; return revertedCreationHash; }
         consumed++;
+        if (same(sent.action.target, safe)) { safeNonce++; return transferTxHash; }
         return txHash;
       }
       if (method === 'eth_getBlockByNumber') {
@@ -98,19 +101,28 @@ try {
         chainId: toHex(d.l2.chainId), blockHash, blockNumber: toHex(blockNumber), type: '0x0', nonce: controllerSends[0].nonce, gas: controllerSends[0].gas, gasPrice: '0x4', transactionIndex: '0x0', v: '0x1b', r: toHex(1n,{size:32}), s: toHex(1n,{size:32}) };
       if (method === 'eth_getTransactionReceipt' && params[0] === controllerTxHash) return { transactionHash: controllerTxHash, blockHash, blockNumber: toHex(blockNumber), transactionIndex: '0x0', from: account, to: d.l2.factory.address, status: '0x1', type, gasUsed: '0x7530', effectiveGasPrice: '0x4', cumulativeGasUsed: '0x7530', logs: [] };
       if (method === 'eth_getTransactionReceipt' && [settlementHash, fundingHash].includes(params[0])) {
+        const logs = [];
+        if (params[0] === settlementHash && sent && same(sent.action.target, safe)) {
+          const { args } = decodeFunctionData({ abi: safeAbi, data: sent.action.data });
+          const baseLog = { address: safe, blockHash: l1BlockHash, blockNumber: toHex(blockNumber), transactionHash: settlementHash, transactionIndex: '0x0', removed: false };
+          logs.push({ ...baseLog, logIndex: '0x0', topics: encodeEventTopics({ abi: safeAbi, eventName: 'ExecutionSuccess', args: { txHash: keccak256('0x1234') } }), data: encodeAbiParameters([{type:'uint256'}], [0n]) });
+          logs.push({ ...baseLog, logIndex: '0x1', topics: encodeEventTopics({ abi: safeAbi, eventName: 'SafeMultiSigTransaction' }),
+            data: encodeAbiParameters(safeAbi.find(item => item.name === 'SafeMultiSigTransaction').inputs,
+              [...args, encodeAbiParameters([{type:'uint256'}, {type:'address'}, {type:'uint256'}], [safeNonce - 1n, owner, 1n])]) });
+        }
         if (params[0] === fundingHash) safeBalance = BigInt(fundingSends[0].value);
-        return { transactionHash: params[0], blockHash: l1BlockHash, blockNumber: toHex(blockNumber), transactionIndex: '0x0', from: account, to: params[0] === fundingHash ? safe : d.l1.registry, status: '0x1', type: '0x0', gasUsed: '0x7530', effectiveGasPrice: '0x3b9aca00', cumulativeGasUsed: '0x7530', logs: [] };
+        return { transactionHash: params[0], blockHash: l1BlockHash, blockNumber: toHex(blockNumber), transactionIndex: '0x0', from: account, to: params[0] === fundingHash ? safe : d.l1.registry, status: '0x1', type: '0x0', gasUsed: '0x7530', effectiveGasPrice: '0x3b9aca00', cumulativeGasUsed: '0x7530', logs };
       }
       if (method === 'eth_getTransactionReceipt' && params[0] === revertedCreationHash) return {
         transactionHash: revertedCreationHash, blockHash, blockNumber: toHex(blockNumber), transactionIndex: '0x0',
         from: account, to: controller, status: '0x0', type, gasUsed: '0x5208', effectiveGasPrice: '0x4', cumulativeGasUsed: '0x5208', logs: [],
       };
       if (method === 'eth_getTransactionReceipt' && failFirstReceipt) { failFirstReceipt = false; throw new Error('Temporary receipt RPC error'); }
-      if (method === 'eth_getTransactionReceipt') return { transactionHash: txHash, blockHash, blockNumber: toHex(blockNumber), transactionIndex: '0x0',
+      if (method === 'eth_getTransactionReceipt') return { transactionHash: same(sent.action.target, safe) ? transferTxHash : txHash, blockHash, blockNumber: toHex(blockNumber), transactionIndex: '0x0',
         from: account, to: controller, status:'0x1', type, gasUsed: toHex(5_500_000n), effectiveGasPrice: '0x4', cumulativeGasUsed: toHex(5_500_000n), logs: [{
           address: controller, topics: encodeEventTopics({ abi: l1ControllerAbi, eventName: 'CallExecuted', args: { digest: sent.digest, nonce: sent.action.nonce, target: sent.action.target } }),
-          data: encodeAbiParameters([{type:'address'},{type:'bytes32'},{type:'bytes'}], [account, keccak256(sent.signature), pad(safe, {size:32})]),
-          blockHash, blockNumber: toHex(blockNumber), transactionHash: txHash, transactionIndex: '0x0', logIndex:'0x0', removed: false,
+          data: encodeAbiParameters([{type:'address'},{type:'bytes32'},{type:'bytes'}], [account, keccak256(sent.signature), same(sent.action.target, safe) ? pad('0x01', {size:32}) : pad(safe, {size:32})]),
+          blockHash, blockNumber: toHex(blockNumber), transactionHash: same(sent.action.target, safe) ? transferTxHash : txHash, transactionIndex: '0x0', logIndex:'0x0', removed: false,
         }] };
       if (method === 'eth_call') {
         const { to, data } = params[0];
@@ -126,7 +138,7 @@ try {
         const { functionName, args: readArgs } = decodeFunctionData({ abi, data });
         if (functionName === 'controllers') publicKeyHashForReads = readArgs[0];
         const values = { verifier: d.l2.verifier.address, eezL2: d.l2.manager, l1ChainId: BigInt(d.l1.chainId), controllers: controllerReady ? controller : zeroAddress,
-          publicKeyHash: publicKeyHashForReads ?? (publicKey ? keccak256('0x'+publicKey) : toHex(0n, {size:32})), nonce: same(to, safe) ? 0n : consumed,
+          publicKeyHash: publicKeyHashForReads ?? (publicKey ? keccak256('0x'+publicKey) : toHex(0n, {size:32})), nonce: same(to, safe) ? safeNonce : consumed,
           ROLLUP_ID: d.l2.rollupId, USE_GAS_LEFT: false, singleton: d.l1.safe.singleton.address, fallbackHandler: d.l1.safe.fallbackHandler.address,
           computeCrossChainProxyAddress: owner, safes: consumed > 0n ? safe : zeroAddress,
           masterCopy: d.l1.safe.singleton.address, VERSION: '1.4.1', getOwners: [owner], getThreshold: 1n,
@@ -226,6 +238,17 @@ try {
     await page.waitForFunction(() => document.querySelector('#key-status')?.textContent.includes('Key generated'));
     publicKey = await page.getByTestId('public-key').inputValue();
     await status(needsController ? 'No Safe exists' : 'Controller ready');
+    const setupSteps = page.locator('#safe-setup-progress');
+    await setupSteps.waitFor();
+    assert.equal(await setupSteps.locator('li').nth(0).getAttribute('data-state'), needsController ? 'active' : 'complete');
+    assert.equal(await setupSteps.locator('li').nth(1).getAttribute('data-state'), needsController ? 'pending' : 'active');
+    assert.equal(await page.locator('#safe-status').isVisible(), false, 'setup uses fixed steps instead of changing status messages');
+    if (needsController && name === 'MetaMask') {
+      await page.setViewportSize({ width: 390, height: 900 });
+      assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'setup steps fit on mobile');
+      await setupSteps.screenshot({ path: '/tmp/falcon-setup-step-1.png' });
+      await page.setViewportSize({ width: 1440, height: 1000 });
+    }
     assert.equal(await page.locator('#safe-load').count(), 0, 'key installation automatically loads the Safe');
     assert.equal(sends.length + controllerSends.length, 0, 'automatic loading never creates or sends a transaction');
     assert.match(await page.locator('#safe-status').textContent(), needsController ? /No Safe exists/ : /Controller ready/, 'late switch events must not break Safe loading');
@@ -238,7 +261,24 @@ try {
       await page.locator('#safe-create').click();
       await page.waitForFunction(() => !!window.falconWalletTest.release);
       assert.equal(await page.locator('#controller-recovery-hash').count(), 0, 'normal wallet approval never shows a recovery textbox');
+      assert.equal(await setupSteps.locator('li[aria-current="step"] strong').textContent(), 'Create Falcon controller');
+      assert.match(await setupSteps.locator('li[aria-current="step"]').textContent(), /bound to your Falcon public key/);
+      if (name === 'MetaMask') {
+        await page.evaluate(() => {
+          const w = window.falconWalletTest; w.loseNextSendReply = false;
+          w.account = '0x'+'99'.repeat(20); w.emit('accountsChanged', [w.account]);
+        });
+        await status('No Safe exists');
+        await page.waitForFunction(() => !document.querySelector('#safe-create')?.disabled);
+        assert.equal(await page.locator('#controller-recovery-hash').count(), 0, 'wallet B does not inherit wallet A recovery');
+      }
       await page.evaluate(() => window.falconWalletTest.release());
+      if (name === 'MetaMask') {
+        const journalKey = scopedRecoveryKey(recoveryKey(d, 'controller'), { account, publicKey: '0x'+publicKey });
+        await page.waitForFunction(key => !!JSON.parse(localStorage.getItem(key) ?? 'null')?.hash, journalKey);
+        assert.equal(await page.locator('#controller-recovery-hash').count(), 0, 'late wallet reply stays in wallet A journal');
+        await page.evaluate(account => { const w = window.falconWalletTest; w.account = account; w.emit('accountsChanged', [account]); }, account);
+      }
       if (name === 'Rabby') {
         await page.getByText('Earlier setup needs attention', { exact: true }).waitFor();
         assert.equal(await page.locator('#controller-recovery-hash').isVisible(), false, 'unresolved recovery starts collapsed');
@@ -250,6 +290,10 @@ try {
         await recovery.getByRole('button', { name: 'Recover controller setup', exact: true }).click();
       }
       await status('Safe setup confirmed');
+      assert.equal(await setupSteps.locator('li').nth(0).getAttribute('data-state'), 'complete');
+      assert.equal(await setupSteps.locator('li').nth(0).locator('strong').evaluate(element => getComputedStyle(element).textDecorationLine), 'line-through');
+      assert.equal(await setupSteps.locator('li').nth(1).getAttribute('aria-current'), 'step');
+      if (name === 'MetaMask') await setupSteps.screenshot({ path: '/tmp/falcon-setup-step-2.png' });
       assert.equal(controllerSends.length, 1, 'recovery never creates another controller');
       assert.equal(await page.locator('#controller-recovery-hash').count(), 0);
     }
@@ -291,17 +335,26 @@ try {
       while (!observationCalls.some(call => call.method === 'eez_getSettlementByL2Block') && Date.now() < deadline) await page.waitForTimeout(25);
       assert(observationCalls.some(call => call.method === 'eez_getSettlementByL2Block'));
       assert.equal(await page.locator('#safe-send-heading').count(), 0, 'send form stays hidden before confirmed L1 execution');
+      assert.equal(await setupSteps.locator('li').nth(1).getAttribute('data-state'), 'active', 'step 2 stays active through L1 confirmation');
+      assert.equal(await page.locator('#safe-address').count(), 0, 'account replaces setup only after confirmation');
+      assert.equal(await page.locator('#safe-cost-comparison').count(), 0, 'Safe creation never shows a cost comparison');
       holdSettlement = false;
     }
     await status('Safe created on');
+    assert.equal(await setupSteps.count(), 0, 'setup steps disappear once the Safe is ready');
+    assert(!observationCalls.some(call => call.method === 'eth_gasPrice' && call.path.endsWith('/rpc/l1')), 'setup does not calculate a cost comparison');
     assert.equal(await page.locator('#safe-check-source, #safe-check-l1, #safe-replay').count(), 0);
     assert(observationCalls.some(call => call.method === 'eez_getSettlementByL2Block' && call.path.endsWith('/composer/l2')));
     assert(walletCalls.every(call => call.method !== 'eez_getSettlementByL2Block'));
     assert.equal(quotes.length, quoted+1, 'obtain a fresh quote immediately before send');
     assert.equal(sends.length, attemptsBeforeSuccess + 1, 'explicit retry sends one fresh creation transaction');
-    assert.equal(await page.locator('#safe-trace').getAttribute('href'), `#/visualizer?mode=trace&chain=l2&tx=${txHash}`);
-    assert.equal(await page.locator('#safe-trace').getAttribute('target'), '_blank', 'trace must preserve the active Falcon session');
-    assert(await page.locator(`a[href$="${txHash}"]`).count() > 0, 'retain the hash even if the Falcon key is switched during the prompt');
+    if (name === 'Rabby') {
+      assert.equal(await page.locator('#safe-trace, #safe-cost-comparison').count(), 0, 'locked keys hide transaction details from the previous context');
+    } else {
+      assert.equal(await page.locator('#safe-trace').getAttribute('href'), `#/visualizer?mode=trace&chain=l2&tx=${txHash}`);
+      assert.equal(await page.locator('#safe-trace').getAttribute('target'), '_blank', 'trace must preserve the active Falcon session');
+      assert.equal(await page.locator('#safe-cost-comparison').count(), 0, 'setup fees are excluded');
+    }
     const calls = await page.evaluate(() => window.falconWalletTest.calls);
     assert.equal(calls.filter(c => c.method === 'eth_requestAccounts').length, 1, 'the demo reuses the header connection');
     assert(calls.some(c => c.method === 'wallet_switchEthereumChain'));
@@ -312,6 +365,15 @@ try {
     assert.equal(calls.filter(c => c.method === 'eth_sendTransaction').length, attemptsBeforeSuccess + 1 + controllerSends.length);
     assert(calls.filter(c => c.method === 'wallet_switchEthereumChain').every(c => c.params[0].chainId === toHex(d.l2.chainId)), 'Safe reads and confirmation must not switch the wallet to L1');
     if (name === 'MetaMask' && d.l2.chainId === 699169) {
+      const sendsBeforeSwitch = sends.length;
+      for (const gasWallet of ['0x'+'99'.repeat(20), account]) {
+        await page.evaluate(account => { const w = window.falconWalletTest; w.account = account; w.emit('accountsChanged', [account]); }, gasWallet);
+        await status('Safe loaded');
+        assert.equal(await page.locator('#safe-address').getAttribute('href'), `${d.l1.explorer}/address/${safe}`);
+        assert.equal(await page.locator('#safe-cost-comparison').count(), 0, 'no cost comparison after setup or account discovery');
+        assert.equal(await page.locator('#safe-trace').count(), gasWallet === account ? 1 : 0, 'trace follows the same transaction context');
+      }
+      assert.equal(sends.length, sendsBeforeSwitch, 'changing the gas wallet only discovers the same Safe');
       assert.equal(await page.locator('#safe-balance').textContent(), '0');
       await page.locator('#safe-recipient').fill('0x'+'99'.repeat(20));
       await page.locator('#safe-sign').click(); await status('Safe balance is too low');
@@ -332,14 +394,14 @@ try {
         await recovery.getByRole('button', { name: 'Recover funding', exact: true }).click();
         await status('does not match the recorded');
         assert.equal(fundingSends.length, 1, 'an older identical transfer cannot clear the current attempt');
-        // A fresh demo has neither an unlocked key nor a loaded Safe. The
-        // durable recovery controls must still be available there and on reload.
+        // Locked tabs retain the durable record without showing another context's recovery.
         const reopened = await f.context.newPage();
         await f.open(reopened);
         const restored = reopened.getByRole('group', { name: 'Recover funding transaction', exact: true });
-        await restored.waitFor();
+        assert.equal(await restored.count(), 0);
         assert.equal(await reopened.getByTestId('public-key').count(), 0);
-        await reopened.reload(); await restored.waitFor();
+        await reopened.reload();
+        assert.equal(await restored.count(), 0);
         assert.equal(fundingSends.length, 1, 'reload restores recovery without another send');
         await reopened.close();
         assert(await page.locator('#safe-fund').isDisabled(), 'ambiguous funding must not be resent');
@@ -384,8 +446,30 @@ try {
       const outer = decodeFunctionData({abi:l1ControllerAbi,data:quotes.at(-1).tx.data});
       const inner = decodeFunctionData({abi:safeAbi,data:outer.args[1]});
       assert.equal(inner.args[1],0n); assert.equal(inner.args[2],'0xdeadbeef');
+      assert.equal(await page.locator('#safe-cost-comparison').count(), 0, 'signing alone has no paid transaction cost');
+      holdSettlement = true;
+      const l1PriceReadsBefore = observationCalls.filter(call => call.method === 'eth_gasPrice' && call.path.endsWith('/rpc/l1')).length;
+      await page.locator('#safe-send').click();
+      await page.getByText('Estimated cost without EEZ', { exact: true }).waitFor();
+      await page.waitForFunction(() => document.querySelector('[data-testid="cost-without-eez"]')?.textContent === '3.85e-9¢');
+      assert.equal(await page.getByTestId('cost-without-eez').getAttribute('data-estimated'), 'true');
+      assert.equal(await page.getByTestId('cost-actual').textContent(), '2.20e-9¢', 'the actual cost still uses the paid L2 receipt fee');
+      assert(observationCalls.some(call => call.method === 'eth_gasPrice' && call.path.endsWith('/rpc/l1')), 'pending comparison uses the current L1 RPC gas price');
+      assert.equal(await setupSteps.count(), 0, 'a normal transaction does not re-show setup steps');
+      holdSettlement = false;
+      await status('Transfer confirmed on');
+      assert.equal(await page.getByTestId('cost-without-eez').getAttribute('data-estimated'), 'true', 'the comparison keeps using current L1 pricing after confirmation');
+      assert.equal(await page.getByTestId('cost-actual').textContent(), '2.20e-9¢');
+      assert.equal(sends.length, attemptsBeforeSuccess + 2, 'one creation and one Falcon-authorized transfer');
+      for (const gasWallet of ['0x'+'99'.repeat(20), account]) {
+        await page.evaluate(account => { const w = window.falconWalletTest; w.account = account; w.emit('accountsChanged', [account]); }, gasWallet);
+        await status('Safe loaded');
+        assert.equal(await page.locator('#safe-cost-comparison').count(), gasWallet === account ? 1 : 0, 'transfer costs follow their wallet and key');
+      }
       assert.match(await page.getByTestId('cost-actual').textContent(), /¢/);
-      assert.equal(await page.getByTestId('cost-without-eez').textContent(), '0.55¢');
+      await page.waitForFunction(() => document.querySelector('[data-testid="cost-without-eez"]')?.textContent === '3.85e-9¢');
+      assert.equal(observationCalls.filter(call => call.method === 'eth_gasPrice' && call.path.endsWith('/rpc/l1')).length,
+        l1PriceReadsBefore + 1, 'one L1 price snapshot is retained through confirmation and wallet switches');
       assert(!f.requests.some(request => request.url.startsWith('https://api.coinbase.com/')), 'xDAI costs must not fetch or multiply by ETH/USD');
       await page.screenshot({path:'/tmp/falcon-account-transaction.png',fullPage:true});
       await page.setViewportSize({width:390,height:900});
@@ -410,6 +494,7 @@ try {
         assert.equal(await page.getByTestId('public-key').inputValue(),publicKey);
         await page.getByText(new RegExp(`Gas wallet · ${name}`)).waitFor();
         await status('Safe loaded');
+        assert.equal(await page.locator('#safe-cost-comparison').count(), 0, 'discovering an existing Safe never invents a new transaction cost');
         assert.equal(await page.locator('#safe-load').count(), 0);
         await page.locator('#safe-recipient').fill('0x'+'99'.repeat(20));
         await page.locator('#safe-sign').click(); await status('Falcon signature ready');
@@ -422,7 +507,14 @@ try {
       await page.locator('#safe-recipient').fill('0x'+'77'.repeat(20));
       await page.locator('#safe-sign').click(); await status('is not in your wallet');
       await setup.getByRole('button', { name: `Add ${d.l2.chainName}`, exact: true }).waitFor();
-      assert.equal(sends.length, attemptsBeforeSuccess + 1, 'missing-network recovery must not send another Safe transaction');
+      assert.equal(sends.length, attemptsBeforeSuccess + 2, 'missing-network recovery must not send another Safe transaction');
+    }
+    if (name === 'Rabby') {
+      await page.locator('#generate').click();
+      await page.waitForFunction(() => document.querySelector('#key-status')?.textContent.includes('Key generated'));
+      await status('Safe loaded');
+      assert.equal(await page.locator('#safe-trace, #safe-cost-comparison').count(), 0, 'a new Falcon key never inherits the prior transaction cost');
+      assert.equal(sends.length, attemptsBeforeSuccess + 1, 'key lookup does not send a transaction');
     }
     await f.close();
   }

@@ -5,7 +5,7 @@ const { encodeEventTopics, encodeAbiParameters, parseAbi, encodeFunctionResult, 
 const origin = (process.env.EEZ_UI_URL || 'http://127.0.0.1:8083/dashboard').replace(/\/$/, '');
 const shortcut = 'Control+Alt+Shift+KeyT';
 
-async function fixture(browser, { mismatch = false, unavailable = false, stale = false, wallet = false, changeDuringSign = false, lostResponse = false, rejectSwitch = false, reverted = false, faucetDelayed = false, mainnet = false, composer = 'detected', wrongNetwork = false, missingNetwork = false, missingL1Network = false, faucetFeeFailure = false } = {}) {
+async function fixture(browser, { mismatch = false, unavailable = false, stale = false, wallet = false, changeDuringSign = false, lostResponse = false, rejectSwitch = false, reverted = false, faucetDelayed = false, mainnet = false, composer = 'detected', wrongNetwork = false, missingNetwork = false, missingL1Network = false, faucetFeeFailure = false, bundledCatalog = false } = {}) {
   const context = await browser.newContext();
   const page = await context.newPage();
   const requests = [], errors = [];
@@ -13,6 +13,10 @@ async function fixture(browser, { mismatch = false, unavailable = false, stale =
   let approved = false;
   let faucetClaimed = false;
   let faucetChecks = 0;
+  const catalogTokens = [
+    { address: '0x'+'55'.repeat(20), pair: '0x'+'66'.repeat(20), symbol: 'ctUSD', name: 'Test USD', decimals: 18 },
+    { address: '0x'+'12'.repeat(20), pair: '0x'+'34'.repeat(20), symbol: 'TEST', name: 'Second token', decimals: 18, wethReserve: '1000000000000000000' },
+  ];
   if (wallet) {
     await page.exposeFunction('recordWalletRequest', (method, params) => {
       walletRequests.push({ method, params });
@@ -88,12 +92,10 @@ async function fixture(browser, { mismatch = false, unavailable = false, stale =
       status: unavailable || stale ? 503 : 200,
       json: stale ? { status: 'deployment_required' }
         : { network: mainnet ? 'mainnet' : 'chiado', l2NativeSymbol: mainnet ? 'ETH' : 'XDAI', l1ChainId: mismatch || mainnet ? 1 : 10200, l2ChainId: mismatch ? 696990 : 6290,
-          settlement: '0x'+'11'.repeat(20), vaultRelayer: '0x'+'22'.repeat(20), wethL2: '0x'+'33'.repeat(20), nativeWethL2: mainnet ? '0x'+'aa'.repeat(20) : null, bridgeL2: '0x'+'44'.repeat(20) },
+          settlement: '0x'+'11'.repeat(20), vaultRelayer: '0x'+'22'.repeat(20), wethL2: '0x'+'33'.repeat(20), nativeWethL2: mainnet ? '0x'+'aa'.repeat(20) : null, bridgeL2: '0x'+'44'.repeat(20),
+          ...(bundledCatalog ? { tokens: catalogTokens } : {}) },
     });
-    if (path.endsWith('/cowdemo/api/tokens')) return route.fulfill({ json: { tokens: [
-      { address: '0x'+'55'.repeat(20), pair: '0x'+'66'.repeat(20), symbol: 'ctUSD', name: 'Test USD', decimals: 18 },
-      { address: '0x'+'12'.repeat(20), pair: '0x'+'34'.repeat(20), symbol: 'TEST', name: 'Second token', decimals: 18, wethReserve: '1000000000000000000' },
-    ] } });
+    if (path.endsWith('/cowdemo/api/tokens')) return route.fulfill({ json: { tokens: catalogTokens } });
     if (path.endsWith('/cowdemo/api/wrapper')) {
       const token = new URL(request.url()).searchParams.get('token');
       return route.fulfill({ json: { token, wrapper: '0x'+'77'.repeat(20), deployed: token === '0x'+'55'.repeat(20) } });

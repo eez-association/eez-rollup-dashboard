@@ -170,6 +170,9 @@ approval and signing. Changing accounts invalidates the quote; ambiguous
 submissions are retained locally and reconciled against the order queue without
 automatically posting another order. Activity is filtered to the connected
 wallet and labels the signed minimum separately from actual settlement output.
+Initial configuration includes the token catalog after one full deployment
+validation. The dashboard falls back to the separate catalog endpoint for older
+APIs. Each new configuration request still validates the live deployment.
 The visual liquidity browser uses compact token rows beside the swap form: search
 token symbols, names or addresses and select a token row.
 The list and receive selector share one selection; changing it clears the quote.
@@ -219,9 +222,12 @@ this step does not submit a faucet transaction. The dashboard verifies the
 wallet's active Composer RPC before enabling **Get test tokens**. Click that
 button separately to confirm one Chiado faucet transaction. A network is added
 only if the wallet reports it missing. Progress distinguishes RPC checks, fee
-preparation, wallet confirmation and bridge delivery; **Switch back** returns
-to the rollup only when clicked. The wallet needs Chiado native currency for
-the claim transaction's gas. The funded
+preparation, wallet confirmation and bridge delivery. There is no separate
+return-network step: swap approval/signing requests the L2 network when needed.
+The wallet needs Chiado native currency for
+the claim transaction's gas. The claim button stays visible after delivery and
+when switching networks; live faucet eligibility and connection checks determine
+whether it is enabled, with the next claim time shown when applicable. The funded
 faucet bridges **0.01 ctWETH + 0.0002 native tokens** to the same address on
 the configured rollup, using its official bridge. Requests have a 24-hour
 per-wallet cooldown. The faucet distributes existing test supply; it cannot
