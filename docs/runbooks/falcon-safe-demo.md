@@ -8,8 +8,12 @@ Hiding is a navigation preference, not an authorization boundary.
 
 ## Network and wallet
 
-The initial integration targets the verified **EEZ-X 916969, rollup 4 / Chiado
-10200** deployment from `falcom-devcon-poc`. Public addresses, code hashes and
+The demo supports two verified deployments, both paired with **Chiado 10200**:
+
+- **EEZ-X Testnet 699169, rollup 2** at `https://eez.dev`.
+- **EEZ-X Devnet 916969, rollup 4** at `https://eez.asuscomm.com`, from `falcom-devcon-poc`.
+
+Public addresses, code hashes and
 chain checkpoints are in
 [`crossChainDeployment.ts`](../../src/lib/falcon/crossChainDeployment.ts).
 The dashboard's discovered chain IDs, registry, L2 manager and rollup ID must
@@ -18,9 +22,17 @@ back to default IDs. Another network can still use browser signing and backups.
 Adding a deployment requires its verified public bindings; changing only a
 chain ID does not migrate controllers or Safe ownership.
 
-Use the dashboard header to connect Rabby or MetaMask. The Falcon workflow uses
-that selected EIP-1193 provider for reads and sends, and only switches between
-already-configured networks. It never adds or replaces wallet RPC URLs. The
+Use the dashboard header to connect Rabby or MetaMask. Signing and transaction
+submission use that selected EIP-1193 provider. Safe balances and post-submission
+confirmation use the dashboard's configured read RPCs and Composer endpoint;
+these reads never ask the wallet to switch networks. Before a network has been
+confirmed in the current wallet session, Falcon and CoW offer **Switch to EEZ-X
+Testnet** (or the required network's name). Once confirmed, temporarily using
+Chiado for funding does not show the setup banner again; the next action requests
+its network switch when needed. Only a wallet-reported unknown network shows an
+**Add** action. Opening the demo never opens a wallet prompt. Setup uses the dashboard's Composer
+RPC, chain ID, native currency and explorer; it does not send a transaction.
+Existing network entries are not re-added or replaced automatically. The
 wallet's L2 broadcast endpoint must route through Composer; discovery checks
 its echoed nonce and deployment identity before the Safe flow.
 
@@ -40,32 +52,85 @@ retain their separate gas estimation path.
 1. Reveal the tab and connect the gas wallet in the dashboard header.
 2. Generate a Falcon key, unlock the saved key, or import an encrypted backup.
    Save/download an encrypted copy before leaving the tab.
-3. Use **Load my Safe**. The factory maps the Falcon public-key hash to one L2
-   controller; the controller has its own replay nonce. Create that controller
-   if absent. The on-chain workflow checks routing, code and key authority.
-4. Sign Safe creation with Falcon if no Safe exists. Review the fee and send
-   through the header's selected wallet. The controller's L1 proxy becomes the
-   Safe's sole owner. The dashboard Treasury demo is a separate wallet workflow.
-5. Check L2 inclusion, then **Check L1 execution**. A source receipt alone is not
-   proof of canonical L1 execution. For transfers, the UI also checks the exact
-   Safe operation, success event and consumed nonce. Fund the displayed Safe
-   only on its indicated L1 network before rehearsing a transfer.
-6. Sign a transfer, estimate/send, check L1 execution and demonstrate replay
-   rejection. The [cost comparison](../falcon/cost-comparison.md) appears after
-   a verified L2 transfer receipt; it is separate from the wallet fee quote.
+3. The Safe is looked up automatically when a Falcon key is generated, unlocked
+   or imported. This uses read-only RPCs and never opens a wallet prompt. The
+   factory maps each Falcon key to its controller; routing, code and authority
+   are checked before the account is shown.
+4. If no Safe exists, click **Create Safe**. The app prepares the Falcon
+   authorization, obtains a fresh fee quote and opens the selected gas wallet
+   for transaction approval. For a brand-new key it also creates the L2 controller,
+   so first-time setup can require two wallet confirmations. The controller's L1 proxy becomes the Safe's sole
+   owner. Empty Safe balance and nonce fields stay hidden before creation.
+   A known pending creation is checked automatically instead of sending another
+   request. The dashboard Treasury demo is a separate wallet workflow.
+5. L2 inclusion and L1 execution are checked automatically. A source receipt
+   alone is not proof of canonical L1 execution: the UI also checks settlement,
+   Safe ownership and, for transfers, the exact operation, success event and
+   consumed nonce. Transient read failures retry without resending. Use **See in
+   trace decoder** to inspect the submitted transaction; manual receipt and
+   replay-diagnostic buttons are omitted.
+6. The gas wallet card shows separate L1 and L2 balances. **Fund Safe** sends a
+   native-token transfer from that wallet to the Safe on Chiado, with an editable
+   amount defaulting to **0.01 xDAI**. The wallet requests the necessary network
+   switch and transaction approval. Funding confirmation and balance refresh are
+   automatic. This does not sign a Falcon action or transfer from the Safe.
+   If the wallet's submission response is unclear, further funding is blocked
+   until the transaction hash from wallet activity is recovered and its sender,
+   recipient, amount and network are checked.
+7. Once loaded, the Safe account shows its address with a copy button, balance
+   and funding controls. In **Send transaction**, enter **To** and **Amount**.
+   Expand **Data (optional)** for contract calldata; zero-value calls require
+   nonempty data. The signature, Safe hash and receipt check bind these exact bytes.
+8. Click **Sign with Falcon**. Fees are estimated automatically after signing
+   and refreshed before **Send transaction** opens the wallet confirmation.
+   Editing the recipient, amount or data invalidates the signature and quote.
+   Confirmation is automatic, with one trace button and small L1/L2 hash links.
+   The [cost comparison](../falcon/cost-comparison.md) shows the actual paid fee first, then the same gas usage priced at the L1
+   settlement gas price. xDAI uses $1 per token; ETH uses a live ETH/USD quote.
+   Chiado/Gnosis are the xDAI fallback; other networks default to ETH.
 
-If a wallet broadcast is ambiguous, use its activity hash and **Recover
+Funding and first-time controller setup save public recovery details before
+opening the wallet, including the sender, nonce, destination, amount, and data.
+Pending records survive navigation and reloads; they never include a Falcon
+secret or signature. **Recover funding** and **Recover controller setup** stay
+available while the key is locked. Recovery checks the exact nonce as well as
+the transaction contents, so an older identical transfer is not accepted.
+Confirmation clears the pending record after verifying the canonical outcome.
+The same recovery input accepts a mined cancellation or replacement with the
+recorded sender and nonce. A different confirmed payload closes the original
+request without reporting that original funding or setup succeeded; pending or
+reorganized replacements do not clear it. A late wallet reply cannot overwrite
+a hash explicitly selected through recovery.
+
+If a page was reloaded before an unsent wallet request was rejected, cancel all
+remaining wallet prompts and check wallet activity. For a record without a
+hash, confirm the checkbox and use **Check and clear unsent request**. This
+checks mined and pending nonces on both configured RPC endpoints before
+clearing the saved request. It does not cancel a signed transaction, and nonce
+reads alone cannot prove that a signed transaction will never be broadcast.
+
+If a Safe-call broadcast is ambiguous, use its activity hash and **Recover
 transaction**. The demo checks that hash against the submitted intent instead
 of resending automatically. Switching keys does not cancel an open extension
 prompt: a late returned hash is retained while the tab stays mounted. Leaving
-the tab or reloading clears in-memory transaction tracking; keep the wallet's
+the tab or reloading clears in-memory Safe-call tracking; keep the wallet's
 transaction hash for inspection before sending again.
 
 This demonstrates post-quantum application signatures, not an end-to-end
 quantum-safe chain or audited wallet. The rollup's settlement/proof trust
-assumptions still apply. No new backend, contract deployment, worker restart or
-live transaction is required to merge this UI integration. Existing controller
-source verification remains the deployment's worker responsibility.
+assumptions still apply. The UI uses the existing Composer and wallet connection;
+it does not introduce a backend service. Source verification for controllers
+created later remains the deployment's worker responsibility.
+
+The eez.dev deployment was added on 2026-10-30. Its verifier and controller
+factory were compiled with Solidity 0.8.34 from the original explorer-verified
+sources, reproducing the original creation bytecode before deployment. Both new
+contracts are fully source-verified on the eez.dev explorer. Existing Chiado
+Safe contracts were reused after checking their runtime code hashes. The gas
+wallet does not gain authority over Falcon controllers or user Safes.
+See the [deployment and live validation record](../falcon/deployments/eez-dev-699169.json).
+Signature verification and controller creation simulation passed; no user Safe
+creation or cross-chain Safe transfer was broadcast as part of this deployment.
 
 ## Keys and compatibility
 
@@ -112,5 +177,23 @@ failures and check exact quoted sends and late hashes. RPC and receipt data are
 test doubles; they do not establish live settlement or installed-extension
 compatibility. Unit tests cover fee limits/expiry/nonce changes, signature and
 receipt binding, independent interoperability vectors and cost accounting.
-Contracts and protocol pins are unchanged; no Solidity rebuild, follower replay
-or live Safe transfer is claimed for this PR.
+The original devnet deployment and protocol pins remain unchanged. The eez.dev
+addition deploys the same verifier/controller source to the second network;
+it does not include follower replay or a live Safe transfer rehearsal.
+
+
+Page reloads and pagehide lock the private key; unlock the saved encrypted copy
+before signing again. Visibility changes alone do not lock an unlocked key.
+The key manager reconciles its display after a development refresh so a cleared
+secret cannot leave an unlocked-looking UI. Transaction edits and actual key
+changes produce distinct signing errors.
+
+
+Normal setup does not show transaction-hash recovery inputs. A saved setup with
+no hash is looked up automatically by its recorded sender and nonce; matching
+transactions resume confirmation, and only a canonical replacement/cancellation
+can close a different intent. Unresolved recovery controls stay collapsed under
+**Earlier setup needs attention**. Missing transactions never cause automatic
+resubmission or automatic clearing based on absence alone. The send form is shown
+only after the L1 Safe has been verified, and locked keys have a prominent red
+unlock instruction.

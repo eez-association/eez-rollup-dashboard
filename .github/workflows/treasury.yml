@@ -77,6 +77,7 @@ jobs:
           node tests/treasury-gas-bridge-browser.mjs
           node tests/treasury-rollupx-browser.mjs
           node tests/treasury-paired-asset-browser.mjs
+          node tests/treasury-network-setup-browser.mjs
           node tests/treasury-payment-history-browser.mjs
           node tests/treasury-history-loading-browser.mjs
           node tests/treasury-payment-signing-browser.mjs
@@ -102,7 +103,13 @@ jobs:
           curl --fail --silent "$EEZ_UI_URL/" > /dev/null
           node tests/treasury-demo.cjs
           npm run test:falcon:browser
+          node tests/bridge-asset-swap.cjs
+          node tests/bridge-token-picker.cjs
+          node tests/bridge-gas-fees.cjs
+          node tests/bridge-transfer-lifecycle.cjs
           node tests/cow-demo.cjs
+          node tests/cow-api.cjs
+          node tests/wallet-network-setup.cjs
           node tests/cow-trading.cjs
           node tests/cow-faucet.cjs
           node tests/cow-history.cjs

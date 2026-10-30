@@ -61,3 +61,26 @@ export const crossChainDeployment: CrossChainDeployment = {
     }
   }
 };
+
+/** Verified on eez.dev on 2026-10-30; deployment receipts are retained in docs/falcon/deployments. */
+export const testnetDeployment: CrossChainDeployment = {
+  l1: { ...crossChainDeployment.l1, registry: '0x6258189d3a04eb31a196a8931077dfe001a9f6fd' },
+  l2: {
+    chainId: 699169,
+    chainName: 'EEZ-X Testnet',
+    anchor: { blockNumber: 0n, blockHash: '0x283b471b65276c23867b5351fe1973fc9438310d865b6f833d1cd6666478ccb0' },
+    explorer: 'https://eez.dev/explorer',
+    manager: '0x4B2760F84B83d6b3829E30A7573B0172B6d6402C',
+    rollupId: 2n,
+    verifier: {
+      address: '0x11CDD7bdefB845D13d75B3F8fB3bE3253D65d0B7',
+      runtimeCodeHash: '0x28402fe675b2e0b8fdcb281c7b5bef4c441ba32adae6b68c30f9471d87af0e66',
+    },
+    factory: {
+      address: '0x5C30D7A2357AAe7D3586a06DbDdDC5a887B30646',
+      runtimeCodeHash: '0x325af632cc6f2d40d80b14376137ebee68f5c13462d7561406bf62a789198917',
+    },
+  },
+};
+
+export const crossChainDeployments = [crossChainDeployment, testnetDeployment] as const;

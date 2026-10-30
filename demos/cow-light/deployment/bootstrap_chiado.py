@@ -98,6 +98,13 @@ def require_chiado(network, l1_chain, l2_chain):
         raise ValueError('Bootstrap requires Chiado L1 and a separate EEZ testnet; mainnet is forbidden')
 
 
+def validate_bridge_peer(local, configured_peer, expected_peer):
+    # The current bridge uses zero to select the same address on the peer chain.
+    resolved = local if int(configured_peer, 16) == 0 else configured_peer
+    if resolved.lower() != expected_peer.lower():
+        raise ValueError('Bridge peer mismatch')
+
+
 class Journal:
     def __init__(self, path, identity):
         self.path = path
@@ -135,7 +142,7 @@ def main():
     l2 = Web3(Web3.HTTPProvider(cfg['L2_RPC'], request_kwargs={'timeout': 30}))
     require_chiado(cfg['NETWORK'], l1.eth.chain_id, l2.eth.chain_id)
     cfg.check_chains(l1=l1, l2=l2)
-    front = os.environ.get('L1_FRONT') or os.environ.get('EEZ_UI_L1_FRONT_UPSTREAM')
+    front = cfg.get('L1_FRONT')
     if not front or rpc_chain_id(front) != 10200:
         raise ValueError('Configure a Chiado L1 Composer via EEZ_UI_L1_FRONT_UPSTREAM or L1_FRONT')
     composer = Web3(Web3.HTTPProvider(front, request_kwargs={'timeout': 60}))
@@ -158,14 +165,13 @@ def main():
         return result
 
     registry = read(l1, bridge1, 'manager')
-    expected_registry = os.environ.get('EEZ_REGISTRY_ADDRESS')
+    expected_registry = cfg.get('REGISTRY_L1')
     if not expected_registry or registry.lower() != expected_registry.lower():
         raise ValueError('L1 bridge manager does not match EEZ_REGISTRY_ADDRESS')
-    checks = [(read(l1, bridge1, 'canonicalBridgeAddress'), bridge2),
-              (read(l2, bridge2, 'canonicalBridgeAddress'), bridge1),
-              (read(l2, bridge2, 'manager'), manager)]
-    if any(a.lower() != b.lower() for a, b in checks):
-        raise ValueError('Bridge peer/manager mismatch')
+    validate_bridge_peer(bridge1, read(l1, bridge1, 'canonicalBridgeAddress'), bridge2)
+    validate_bridge_peer(bridge2, read(l2, bridge2, 'canonicalBridgeAddress'), bridge1)
+    if read(l2, bridge2, 'manager').lower() != manager.lower():
+        raise ValueError('Bridge manager mismatch')
     rollup = cfg['L2_ROLLUP_ID']
     if (read(l1, bridge1, 'rollupId', outputs=('uint64',)) != 0 or
         read(l2, bridge2, 'rollupId', outputs=('uint64',)) != rollup or
@@ -287,10 +293,7 @@ def main():
             {'address': token, 'symbol': 'ctUSD', 'name': 'CoW Test USD', 'decimals': 18, 'pair': pair}]})
         # JSON is shell-independent, contains no secrets, and is generated only after validation.
         atomic_json(directory / 'environment.json', {
-            'COW_NETWORK': 'chiado', 'L1_CHAIN_ID': '10200', 'L2_CHAIN_ID': str(cfg['L2_CHAIN_ID']),
-            'L2_GENESIS_HASH': cfg.genesis(l2),
-            'L2_ROLLUP_ID': str(rollup), 'BRIDGE_L1': bridge1, 'BRIDGE_L2': bridge2,
-            'EEZ_MANAGER_L2': manager, 'WETH_L1': weth, 'WETH_L2': wrapped[0],
+            'COW_NETWORK': 'chiado', 'WETH_L1': weth, 'WETH_L2': wrapped[0],
             'TOKEN_CATALOG': str(catalog_path), 'COW_MANIFEST': str(directory / 'cow-deployment.json'),
             'ROUTE_MANIFEST': str(directory / 'route-deployment.json'),
             'ORDER_QUEUE': str(directory / 'ui-orders.jsonl'), 'SOLVER_LOG': str(directory / 'solver.log')})

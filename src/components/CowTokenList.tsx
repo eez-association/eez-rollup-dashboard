@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { L1_CHAIN, L2_CHAIN } from '../config';
 import { catalogWethReserve, displayAmount, type CowToken } from '../lib/cowLight';
 import styles from './CowLightDemo.module.css';
+import { cowApi } from '../lib/cowApi';
 
 export function CowTokenList({ tokens, selected, locked, onSelect }: {
   tokens: CowToken[]; selected: string; locked: boolean; onSelect: (address: string) => void;
@@ -21,9 +22,8 @@ export function CowTokenList({ tokens, selected, locked, onSelect }: {
           controller.signal.addEventListener('abort', abort, { once: true });
           const timeout = setTimeout(abort, 15000);
           try {
-            const response = await fetch(`${import.meta.env.BASE_URL}cowdemo/api/wrapper?statusOnly=1&token=${encodeURIComponent(token.address)}`, { signal: request.signal });
-            const data = await response.json() as { token: string; wrapper: string; deployed: boolean };
-            if (!response.ok || data.token?.toLowerCase() !== token.address.toLowerCase()
+            const data = await cowApi<{ token: string; wrapper: string; deployed: boolean }>(`/wrapper?statusOnly=1&token=${encodeURIComponent(token.address)}`, { signal: request.signal });
+            if (data.token?.toLowerCase() !== token.address.toLowerCase()
               || typeof data.deployed !== 'boolean' || !/^0x[0-9a-fA-F]{40}$/.test(data.wrapper)) throw new Error('Wrapper check unavailable');
             if (!controller.signal.aborted) setBridges(previous => ({ ...previous, [token.address]: { deployed: data.deployed, wrapper: data.wrapper } }));
           } catch {

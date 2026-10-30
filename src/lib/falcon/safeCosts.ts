@@ -1,5 +1,6 @@
 import { formatUnits, keccak256, parseUnits, serializeTransaction, type Hex, type Transaction, type TransactionReceipt } from 'viem';
 import type { EezClient } from './eez.ts';
+import { nativeCurrency } from '../networkIdentity.ts';
 
 // Frozen reference, not a live price feed. Provenance and model limits: docs/falcon/cost-comparison.md.
 export const COST_REFERENCE = {
@@ -19,7 +20,30 @@ export type SourceCost = GasObservation & { baseFeePerGas: bigint; serializedByt
 export type SettlementCost = GasObservation & { blobGasUsed: bigint; blobGasPrice: bigint };
 export type SafeCostEvidence = {
   sourceHash: Hex; source: SourceCost | null; settlement: SettlementCost | null; l1Verified?: boolean; problem?: string;
+  receiptFee?: { gasUsed: bigint; gasPrice: bigint; l1GasPrice: bigint | null };
+  settlementFee?: { gasUsed: bigint; gasPrice: bigint; blobGasUsed?: bigint; blobGasPrice?: bigint };
 };
+
+/** The complete wallet fee already includes EEZ settlement. Never add the batch fee again. */
+export function simpleGasCosts(gasUsed: bigint, paidGasPrice: bigint, l1GasPrice: bigint | null) {
+  if (gasUsed <= 0n || paidGasPrice < 0n || (l1GasPrice !== null && l1GasPrice < 0n)) throw new Error('Invalid gas cost inputs.');
+  return { actualWei: gasUsed * paidGasPrice, withoutEezWei: l1GasPrice === null ? null : gasUsed * l1GasPrice };
+}
+
+/** L2 inherits the bridged L1 native asset; explicit ETH/xDAI metadata takes priority. */
+export function gasToken(symbol: string, l1ChainId: number): 'ETH' | 'xDAI' {
+  const normalized = symbol.trim().toUpperCase();
+  if (normalized === 'ETH') return 'ETH';
+  if (normalized === 'XDAI') return 'xDAI';
+  return nativeCurrency(String(l1ChainId)).symbol === 'xDAI' ? 'xDAI' : 'ETH';
+}
+
+export function nativeFeeCents(wei: bigint, usdPerTokenE8: bigint): string {
+  if (wei < 0n || usdPerTokenE8 <= 0n) throw new Error('Invalid native-token cost inputs.');
+  const cents = Number(formatUnits(wei * usdPerTokenE8, 24));
+  if (cents > 0 && cents < 0.000001) return `${cents.toPrecision(3)}¢`;
+  return `${new Intl.NumberFormat('en-US', { maximumFractionDigits: cents < 1 ? 6 : 2 }).format(cents)}¢`;
+}
 
 /** Keep distinct positive fees visible below one millionth of a dollar. */
 export function formatCostUsd(wei: bigint, usdMicros: bigint) {

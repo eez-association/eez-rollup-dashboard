@@ -11,6 +11,9 @@ import type { TreasuryActionGuard } from '../lib/treasury/setupState';
 type Chain = 'l1' | 'l2';
 export function useTreasuryFaucet(deployment: TreasuryConfig, wallet: TreasuryWallet, onConfirmed: () => Promise<unknown>, guardAction?: TreasuryActionGuard) {
   const key = safeFaucetKey(deployment);
+  // Parents may reparse the same saved manifest when wallet balances/chain change.
+  // Only a changed configuration invalidates a pending claim, not object identity.
+  const deploymentIdentity = JSON.stringify(deployment);
   const [asset, setAsset] = useState<TestnetAsset | null>(null);
   const [claims, setClaims] = useState<Record<Chain, AssetJournal>>({ l1: {}, l2: {} });
   const [busy, setBusy] = useState({ l1: false, l2: false }), [error, setError] = useState('');
@@ -30,7 +33,7 @@ export function useTreasuryFaucet(deployment: TreasuryConfig, wallet: TreasuryWa
     setAsset(null); setClaims({ l1: {}, l2: {} }); setError(''); setDetectionError(''); setTrackingError('');
     const detect = async () => {
       try {
-        if (deployment.environment !== 'dashboard-testnet') return;
+        if (deployment.environment !== 'dashboard-testnet' && deployment.network?.discovered?.kind !== 'demo') return;
         const verified = await verifiedSafeFaucet(deployment, await loadTreasuryArtifacts());
         if (!alive) return;
         if (verified) {
@@ -47,7 +50,7 @@ export function useTreasuryFaucet(deployment: TreasuryConfig, wallet: TreasuryWa
     };
     void detect();
     return () => { alive = false; generation.current++; clearTimeout(timer); };
-  }, [deployment, key]);
+  }, [deploymentIdentity, key]);
   useEffect(() => {
     if (!asset) return;
     let alive = true;
@@ -72,7 +75,7 @@ export function useTreasuryFaucet(deployment: TreasuryConfig, wallet: TreasuryWa
     };
     void poll(); const timer = setInterval(poll, 2500);
     return () => { alive = false; clearInterval(timer); };
-  }, [asset, deployment, key]);
+  }, [asset, deploymentIdentity, key]);
   const claim = async (chain: Chain) => {
     if (active.current[chain] || !asset) return;
     const scope = generation.current;

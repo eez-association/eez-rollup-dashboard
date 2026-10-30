@@ -8,13 +8,13 @@ const idle: ComposerDetection = { status: "idle", chainId: null, detail: "" };
 export function useComposerDetection(provider: EthereumProvider | null, address: string | null, chainId: string | null, ready: boolean, revision = 0) {
   const [connection, setConnection] = useState<ComposerDetection>(idle);
   const [checking, setChecking] = useState(false);
-  const checkRef = useRef<() => Promise<void>>(async () => {});
+  const checkRef = useRef<() => Promise<ComposerDetection>>(async () => idle);
 
   useEffect(() => {
     setConnection(idle);
     if (!ready || !provider || !address || !chainId) {
       setChecking(false);
-      checkRef.current = async () => {};
+      checkRef.current = async () => idle;
       return;
     }
     let active = true;
@@ -30,12 +30,18 @@ export function useComposerDetection(provider: EthereumProvider | null, address:
         rollupManagerAddress: config.rollupManagerAddress,
         l1BridgeAddress: config.l1Bridge, l2BridgeAddress: config.l2Bridge,
       });
-      if (!active || current !== sequence) return;
+      if (!active || current !== sequence) return {
+        status: 'unavailable' as const,
+        chainId: null,
+        detail: 'Wallet connection or Composer check changed. Recheck before continuing.',
+      };
       inFlight = false;
       // Even if the RPC cannot answer chainId, offer setup guidance for the
       // wallet's last reported network without claiming positive detection.
-      setConnection({ ...result, chainId: result.chainId ?? chainId });
+      const connection = { ...result, chainId: result.chainId ?? chainId };
+      setConnection(connection);
       setChecking(false);
+      return connection;
     };
     const refresh = () => {
       if (!inFlight && document.visibilityState === "visible") void check();
@@ -47,7 +53,7 @@ export function useComposerDetection(provider: EthereumProvider | null, address:
     const interval = setInterval(refresh, 30000);
     return () => {
       active = false;
-      checkRef.current = async () => {};
+      checkRef.current = async () => idle;
       clearInterval(interval);
       window.removeEventListener("focus", refresh);
       document.removeEventListener("visibilitychange", refresh);
@@ -55,5 +61,6 @@ export function useComposerDetection(provider: EthereumProvider | null, address:
   }, [provider, address, chainId, ready, revision]);
 
   const recheckComposer = useCallback(() => { void checkRef.current(); }, []);
-  return { composerConnection: connection, checkingComposer: checking, recheckComposer };
+  const verifyComposer = useCallback(() => checkRef.current(), []);
+  return { composerConnection: connection, checkingComposer: checking, recheckComposer, verifyComposer };
 }

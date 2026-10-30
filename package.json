@@ -34,7 +34,7 @@
     "treasury:verification": "node --experimental-strip-types scripts/verification/server.mjs http://127.0.0.1:8080 .runtime/treasury-verification/jobs",
     "test:treasury-verification": "node --test tests/treasury-verification.test.mjs",
     "test:treasury-verification:integration": "node tests/integration/treasury-source-verification.mjs",
-    "test:falcon:browser": "node tests/falcon-navigation.mjs && node tests/falcon-keystore.mjs && node tests/falcon-wallet.mjs"
+    "test:falcon:browser": "node tests/falcon-navigation.mjs && node tests/falcon-keystore.mjs && node tests/falcon-wallet.mjs && node tests/falcon-recovery-browser.mjs"
   },
   "dependencies": {
     "@noble/post-quantum": "0.7.1",

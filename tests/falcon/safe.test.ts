@@ -1,15 +1,16 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { decodeFunctionData, encodeAbiParameters, encodeEventTopics, keccak256, pad, zeroAddress, zeroHash, type Hex, type TransactionReceipt } from 'viem';
-import { hasSafeExecution, parseSafeTransfer, safeAbi, safeCallData, safeCallResult, safeOwnerApproval, type SafeOperation } from '../../src/lib/falcon/safe.ts';
+import { hasSafeExecution, parseSafeTransfer, parseSafeTransaction, safeOperationCall, safeAbi, safeCallData, safeCallResult, safeOwnerApproval, type SafeOperation } from '../../src/lib/falcon/safe.ts';
+import { testnetDeployment } from '../../src/lib/falcon/crossChainDeployment.ts';
 const owner = '0x0000000000000000000000000000000000000011';
 const target = '0x0000000000000000000000000000000000000022';
 const recipient = '0x0000000000000000000000000000000000000033';
 const op: Extract<SafeOperation, {kind:'transfer'}> = {kind:'transfer',owner,target,recipient,value:7n,safeNonce:3n,safeTxHash:keccak256('0x1234')};
 const log = (eventName: 'ExecutionSuccess' | 'ExecutionFailure') => ({ address: target, topics: encodeEventTopics({abi:safeAbi,eventName,args:{txHash:op.safeTxHash}}), data:encodeAbiParameters([{type:'uint256'}],[0n]) });
-const txLog = (value=7n, sender=owner) => ({ address:target,topics:encodeEventTopics({abi:safeAbi,eventName:'SafeMultiSigTransaction'}),data:encodeAbiParameters(
+const txLog = (value=7n, sender=owner, data: Hex='0x') => ({ address:target,topics:encodeEventTopics({abi:safeAbi,eventName:'SafeMultiSigTransaction'}),data:encodeAbiParameters(
   [{type:'address'},{type:'uint256'},{type:'bytes'},{type:'uint8'},{type:'uint256'},{type:'uint256'},{type:'uint256'},{type:'address'},{type:'address'},{type:'bytes'},{type:'bytes'}],
-  [recipient,value,'0x',0,0n,0n,0n,zeroAddress,zeroAddress,safeOwnerApproval(owner),encodeAbiParameters([{type:'uint256'},{type:'address'},{type:'uint256'}],[3n,sender,1n])],
+  [recipient,value,data,0,0n,0n,0n,zeroAddress,zeroAddress,safeOwnerApproval(owner),encodeAbiParameters([{type:'uint256'},{type:'address'},{type:'uint256'}],[3n,sender,1n])],
 )});
 const receipt = (...logs: unknown[]) => ({logs} as TransactionReceipt);
 
@@ -38,4 +39,18 @@ test('Safe L1 evidence binds success hash, operation, sender, nonce and contract
  assert(!hasSafeExecution(receipt(log('ExecutionSuccess'),txLog()),{...op,safeNonce:4n}));
  assert(!hasSafeExecution(receipt(log('ExecutionSuccess'),txLog()),{...op,safeTxHash:zeroHash}));
  assert(!hasSafeExecution(receipt(log('ExecutionSuccess'),{...txLog(),address:recipient}),op));
+});
+test('optional calldata is signed, forwarded and matched in L1 execution evidence',()=>{
+ const parsed=parseSafeTransaction(recipient,'0','0xDeAdBeEf');
+ assert.deepEqual(parsed,{recipient,value:0n,data:'0xdeadbeef'});
+ const call={...op,...parsed};
+ const encoded=safeOperationCall(testnetDeployment,call);
+ const {args}=decodeFunctionData({abi:safeAbi,data:encoded.data});
+ assert.equal(args[2],'0xdeadbeef'); assert.equal(args[1],0n);
+ assert(hasSafeExecution(receipt(log('ExecutionSuccess'),txLog(0n,owner,'0xdeadbeef')),call));
+ assert(!hasSafeExecution(receipt(log('ExecutionSuccess'),txLog(0n,owner,'0xdeadbeee')),call));
+ assert(!hasSafeExecution(receipt(log('ExecutionSuccess'),txLog(0n)),call));
+ for(const data of ['0x1','0xzz','1234','0x'+'ab'.repeat(60*1024+1)])assert.throws(()=>parseSafeTransaction(recipient,'0',data));
+ assert.throws(()=>parseSafeTransaction(recipient,'0',''));
+ assert.deepEqual(parseSafeTransaction(recipient,'1',''),{recipient,value:10n**18n,data:'0x'});
 });

@@ -283,7 +283,7 @@ function PairedTreasuryConnected({ deployment, wallet, payments = false, network
     if (!selected.provider || !selected.address) throw new Error("Connect a wallet first");
     const chain = submitting ? client.submissionSource(current.transaction) : client.transactionSource(current.transaction);
     const chainId = BigInt(deployment[chain].chainId);
-    const network = chain === "l1" ? deployment.l1.chainId === 10200 ? "Chiado" : "Ethereum" : "EEZ-X";
+    const network = chain === "l1" ? deployment.l1.chainId === 10200 ? "Chiado" : deployment.l1.chainId === 1 ? "Ethereum" : "L1" : "EEZ-X";
     if (BigInt(await selected.provider.request({ method: "eth_chainId" }) as string) !== chainId) {
       assertActive();
       setBusy(`Switching wallet to ${network}…`);
@@ -373,7 +373,8 @@ function PairedTreasuryConnected({ deployment, wallet, payments = false, network
   const correctChain = wallet.chainId && BigInt(wallet.chainId) === BigInt(deployment[nextChain].chainId);
   const locked = !!busy || !!intent && !terminal(outcome) || !!restored.error || ownerChangePending;
   const displayStatus = busy || outcome?.detail || (review ? "Collect owner approvals, then submit once." : "Review an action to collect owner approvals.");
-  const l1Name = deployment.l1.chainId === 10200 ? "Chiado" : "Ethereum";
+  const assetLabel = deployment.network?.discovered?.symbol ?? "USDC";
+  const l1Name = deployment.l1.chainId === 10200 ? "Chiado" : deployment.l1.chainId === 1 ? "Ethereum" : "L1";
   let split: { amount: bigint; fromL1: bigint; fromL2: bigint; error: string } | undefined;
   if (payments && balances && kind === "fixed") {
     try {
@@ -391,11 +392,11 @@ function PairedTreasuryConnected({ deployment, wallet, payments = false, network
       <div><p className="eez-eyebrow">[ {l1Name} + EEZ-X · {payments ? "TREASURY PAYMENTS" : "OWNER VERIFICATION"} ]</p><h2>{payments ? "One treasury, two Safes" : "One owner set, two Safes"}</h2>
         <p>{payments && (deployment.payments && verifiesL1Initiation(deployment.payments)) ? "Start from either Safe and pay on either chain, using one owner set and one shared budget." : `Approve on EEZ-X. The Safe verifies your authority against the current ${l1Name} owners.`}</p></div>
       <div className={styles.owners}>
-        <span className={styles.badge}>{deployment.environment === "isolated-devnet" ? "Isolated devnet" : deployment.environment === "ethereum-mainnet" ? "Ethereum + EEZ-X" : "Chiado + EEZ-X testnet"}</span></div>
+        <span className={styles.badge}>{deployment.environment === "dashboard-network" ? "Dashboard network" : deployment.environment === "isolated-devnet" ? "Isolated devnet" : deployment.environment === "ethereum-mainnet" ? "Ethereum + EEZ-X" : "Chiado + EEZ-X testnet"}</span></div>
     </div>
     <div className={payments ? styles.balanceSummary : styles.overview}>
       {payments && <section className={styles.card} aria-label="Live shared budget"><h3>Shared budget remaining</h3>
-        <strong className={styles.amount}>{balances ? formatUSDC(balances.globalLimit - balances.spent) : "—"} <span>USDC</span></strong>
+        <strong className={styles.amount}>{balances ? formatUSDC(balances.globalLimit - balances.spent) : "—"} <span>{assetLabel}</span></strong>
         {balances ? <><p><span data-testid="global-spent">{formatUSDC(balances.spent)}</span> / 150 spent · resets at {new Date(balances.resetsAt * 1000).toLocaleTimeString()}</p>
           <progress aria-label="Shared budget used" value={Number(balances.spent)} max={Number(balances.globalLimit)} /></> : <p className={styles.hint}>Reading the shared budget…</p>}
       </section>}
@@ -406,8 +407,8 @@ function PairedTreasuryConnected({ deployment, wallet, payments = false, network
         return <section className={styles.card} key={chain} aria-label={`${chain === "l1" ? l1Name : "EEZ-X"} Safe funds`}>
           <h3 className={styles.chainLabel} data-chain={chain}>{name} Safe</h3>
           <SafeIdentity address={chain === "l1" ? deployment.safeL1 : deployment.safeL2} name={name} explorer={explorer} safeAppUrl={chain === "l1" ? deployment.safeAppUrl : undefined} />
-          {payments && <><div className={styles.safeBalanceRow}><strong className={styles.amount}>{balances ? formatUSDC(chain === "l1" ? balances.balanceL1 : balances.balanceL2) : "—"} <span>USDC</span></strong>
-            <TreasurySafeFaucet faucet={faucet} chain={chain} l1Name={l1Name} disabled={!networkReady || !!busy || !!review || !wallet.address} /></div>
+          {payments && <><div className={styles.safeBalanceRow}><strong className={styles.amount}>{balances ? formatUSDC(chain === "l1" ? balances.balanceL1 : balances.balanceL2) : "—"} <span>{assetLabel}</span></strong>
+            <TreasurySafeFaucet faucet={faucet} chain={chain} l1Name={l1Name} assetLabel={assetLabel} disabled={!networkReady || !!busy || !!review || !wallet.address} /></div>
             {allowance ? <><p>{formatUSDC(remaining(allowance))} available under this Safe’s limit</p>
               <p className={styles.hint}><span data-testid={`${chain}-spent`}>{formatUSDC(allowance[1]!)}</span> / {formatUSDC(allowance[0]!)} spent this period</p></> : <p className={styles.hint}>Reading this Safe’s balance…</p>}</>}
         </section>;
@@ -428,13 +429,13 @@ function PairedTreasuryConnected({ deployment, wallet, payments = false, network
             <select id="treasury-kind" value={kind} onChange={e => { const next = e.target.value as "fixed" | "invoice" | "transfer"; setKind(next); if (next === "transfer") { selectSource("l1"); setDestination("l2"); setRecipient(deployment.safeL2); setAllocation(null); } else if (kind === "transfer") { setRecipient(deployment.payments!.recipient); setValue("40"); } if (next === "invoice") { selectSource("l2"); setValue("110"); setDestination("l1"); setRecipient(deployment.payments!.recipient); } }}>
               <option value="fixed">Fixed amount</option>{deployment.l1.front && (!deployment.fees || deployment.fees.l1MaxTotalWei) && <option value="transfer">Move to EEZ-X Safe</option>}{invoiceId && <option value="invoice">Invoice with required acceptance</option>}
             </select></>}
-          <label htmlFor="treasury-value">{payments ? "Amount (USDC)" : "New demonstration value"}</label>
+          <label htmlFor="treasury-value">{payments ? `Amount (${assetLabel})` : "New demonstration value"}</label>
           <input id="treasury-value" readOnly={kind === "invoice"} inputMode={payments ? "decimal" : "numeric"} autoComplete="off" value={value} maxLength={78} onChange={e => setValue(e.target.value)} />
           {payments && <>
             <label htmlFor="treasury-recipient">Recipient address</label><input id="treasury-recipient" readOnly={kind === "invoice" || kind === "transfer"} value={recipient} onChange={e => setRecipient(e.target.value)} />
             <label htmlFor="treasury-destination">Recipient chain</label><select id="treasury-destination" disabled={kind === "invoice" || kind === "transfer"} value={destination} onChange={e => { const chain = e.target.value as "l1" | "l2"; setDestination(chain); setAllocation(null); }}><option value="l2">EEZ-X</option><option value="l1">{l1Name}</option></select>
-            {kind === "transfer" && <p className={styles.hint}>Move USDC from your {l1Name} Safe to your EEZ-X Safe through the shared bridge. Owners approve this internal transfer directly; it does not use the payment budget.</p>}
-            {kind === "fixed" && <TreasuryFundingSplit l1Name={l1Name} split={split} loading={!balances}
+            {kind === "transfer" && <p className={styles.hint}>Move {assetLabel} from your {l1Name} Safe to your EEZ-X Safe through the shared bridge. Owners approve this internal transfer directly; it does not use the payment budget.</p>}
+            {kind === "fixed" && <TreasuryFundingSplit assetLabel={assetLabel} l1Name={l1Name} split={split} loading={!balances}
               onChange={fromL1 => { if (split) setAllocation({ amount: split.amount, fromL1 }); }}
               onReset={() => setAllocation(null)} />}
             {kind === "invoice" && <div className={styles.notice} aria-label="Invoice scenario">
@@ -445,14 +446,14 @@ function PairedTreasuryConnected({ deployment, wallet, payments = false, network
           </>}
         </fieldset>
         {!payments && <p className={styles.hint}>Updates the demonstration value on EEZ-X.</p>}
-        {review && <div className={styles.route} aria-label="Reviewed Safe transaction"><p>Initiating Safe: {review.payment?.source === "l1" ? l1Name : "EEZ-X"}</p><h4>{review.payment ? `${formatUSDC(BigInt(review.payment.amount))} USDC → ${review.payment.destination === "l1" ? l1Name : "EEZ-X"}` : `Set value to ${review.value}`}</h4>
+        {review && <div className={styles.route} aria-label="Reviewed Safe transaction"><p>Initiating Safe: {review.payment?.source === "l1" ? l1Name : "EEZ-X"}</p><h4>{review.payment ? `${formatUSDC(BigInt(review.payment.amount))} ${assetLabel} → ${review.payment.destination === "l1" ? l1Name : "EEZ-X"}` : `Set value to ${review.value}`}</h4>
           {review.payment && review.funding && <><p>Recipient: <code>{review.payment.recipient}</code></p><p data-testid="funding-preview">{formatUSDC(review.funding.fromL1)} from {l1Name} + {formatUSDC(review.funding.fromL2)} from EEZ-X</p>
             {review.payment.kind === "transfer" ? <p>Internal transfer: the payment budget and spending allowances stay unchanged. The batch approves exactly this amount for the bridge and clears the approval.</p> : <details className={styles.disclosure}><summary>How this payment is funded</summary>
               <p>Contributions execute in this order:</p>
               <ol>{(review.payment.source === "l1" ? ["l1", "l2"] as const : ["l2", "l1"] as const)
                 .filter(chain => (chain === "l1" ? review.funding!.fromL1 : review.funding!.fromL2) > 0n).map(chain => <li key={chain}>
                   <strong className={styles.chainLabel} data-chain={chain}>{chain === "l1" ? l1Name : "EEZ-X"} Safe:</strong>{" "}
-                  {formatUSDC(chain === "l1" ? review.funding!.fromL1 : review.funding!.fromL2)} USDC{" "}
+                  {formatUSDC(chain === "l1" ? review.funding!.fromL1 : review.funding!.fromL2)} {assetLabel}{" "}
                   {review.payment!.destination === chain ? `go directly to the recipient on ${chain === "l1" ? l1Name : "EEZ-X"}.`
                     : chain === "l1" ? "pass through the local policy and normal bridge; matching wrapped tokens are minted to the recipient on EEZ-X."
                     : `pass through the local policy and normal bridge; wrapped tokens are burned and canonical tokens are released to the recipient on ${l1Name}.`}
@@ -480,7 +481,7 @@ function PairedTreasuryConnected({ deployment, wallet, payments = false, network
           {review && !intent && !correctChain && wallet.address && (approvals.length >= review.snapshot.threshold || currentOwner && !alreadySigned)
             && <p className={styles.hint}>Your wallet will ask to switch to {nextChain === "l1" ? l1Name : "EEZ-X"} before {approvals.length >= review.snapshot.threshold ? "submission" : "signing"}.</p>}
           {review && deployment.payments?.bridgeKind === "standard" && source === "l2" && <p className={styles.hint}>Approve for your EEZ-X Safe, then submit on {l1Name}. EEZ verifies the current shared owners and completes the payment across both chains.</p>}
-          {fee && !terminal(outcome) && <WalletFeeRates fee={fee} description="Fees sent to your wallet for this Safe transaction. The submitting wallet pays gas separately from the Safe’s USDC payment." />}
+          {fee && !terminal(outcome) && <WalletFeeRates fee={fee} description="Fees sent to your wallet for this Safe transaction. The submitting wallet pays gas separately from the Safe’s token payment." />}
           {review && !intent && <button className={`btn ${approvals.length >= review.snapshot.threshold ? "btn-solid" : "btn-outline"}`} disabled={locked || !ready || !wallet.address || approvals.length < review.snapshot.threshold}
             onClick={() => void run("Waiting for wallet submission…", submitting)}>Submit Safe transaction</button>}
         </div>}
@@ -510,7 +511,7 @@ function PairedTreasuryConnected({ deployment, wallet, payments = false, network
     </div>}
     {!payments && (busy || intent || outcome) && <section className={styles.card} aria-label="Safe transaction status"><h3 aria-live="polite">{outcome?.rollback ? "Rollback verified" : outcome?.kind === "settled" ? `Settled on ${l1Name}` : "Transaction status"}</h3>
       {(!terminal(outcome) || (outcome?.kind === "rejected" && !outcome.rollback)) && <p role="status" aria-live="polite">{displayStatus}</p>}
-      {intent?.payment && outcome?.kind !== "settled" && <p>{formatUSDC(BigInt(intent.payment.amount))} USDC to <code>{intent.payment.recipient}</code> on {intent.payment.destination === "l1" ? l1Name : "EEZ-X"}</p>}
+      {intent?.payment && outcome?.kind !== "settled" && <p>{formatUSDC(BigInt(intent.payment.amount))} {assetLabel} to <code>{intent.payment.recipient}</code> on {intent.payment.destination === "l1" ? l1Name : "EEZ-X"}</p>}
       <TreasuryOutcomeDetails outcome={outcome} deployment={deployment} intent={intent ?? undefined} settlement={history.settlementFor(outcome)} />
       {intent && <>
         {(intent.hash || outcome?.hash) && (!intent.payment || outcome?.kind !== "settled") && <div className={styles.hint}><TreasuryChainLink deployment={deployment} chain={intent.submissionChain ?? intent.payment?.source ?? "l2"} value={(intent.hash || outcome?.hash)!} testId="submitted-hash">Submitted {(intent.submissionChain ?? intent.payment?.source) === "l1" ? l1Name : "EEZ-X"} transaction</TreasuryChainLink></div>}

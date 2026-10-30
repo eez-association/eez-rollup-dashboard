@@ -11,6 +11,8 @@ import type { TreasuryWallet } from './TreasuryConnected';
 import profile from '../lib/treasury/paired-testnet-network.json';
 import { TreasuryPairedRestart } from './TreasuryPairedRestart';
 import styles from './TreasuryDemo.module.css';
+import { TreasuryNetworkSetup } from './TreasuryNetworkSetup';
+import { savedNetworkKey } from '../lib/treasury/savedNetwork';
 
 type TreasuryDemoProps = { wallet: TreasuryWallet; ready: boolean; onBridgeGas?: (destination: 'l1' | 'l2') => void };
 
@@ -45,11 +47,17 @@ function TreasuryDemoView({ wallet, ready, onBridgeGas }: TreasuryDemoProps) {
   if (!ready) return <p role="status">Loading treasury configuration…</p>;
   if (parsed.error) return <p role="alert">{parsed.error}</p>;
   if (!parsed.deployment && !config.treasury) {
-    if (network) return <div className={styles.treasury}>{network.assetProvisioning
+    // Resume journals with their original immutable network identity. New setups
+    // discover the selected dashboard deployment instead of using a chain list.
+    if (network && localStorage.getItem(mainnetSetupKey)) return <div className={styles.treasury}>{network.assetProvisioning
       ? <TreasuryMainnetNetwork key={resetVersion} wallet={wallet} target={target} network={network} onComplete={() => setRevision(x => x + 1)} onBridgeGas={onBridgeGas} />
       : <TreasuryMainnetSetup key={resetVersion} wallet={wallet} target={target} network={network} onComplete={() => setRevision(x => x + 1)} onBridgeGas={onBridgeGas} />}
       <TreasuryPairedRestart network={network} wallet={wallet} onRestart={restart} /></div>;
-    if (shared && config.l1FeesEnabled && config.l2FeesEnabled) return <TreasuryTestnet wallet={wallet} target={target} bridgeL1={config.l1Bridge} bridgeL2={config.l2Bridge} token={config.treasuryTokenAddress} onBridgeGas={onBridgeGas} />;
+    if (shared && config.l1FeesEnabled && config.l2FeesEnabled && localStorage.getItem(savedNetworkKey(target, config.l1Bridge, config.l2Bridge, config.treasuryTokenAddress)))
+      return <TreasuryTestnet wallet={wallet} target={target} bridgeL1={config.l1Bridge} bridgeL2={config.l2Bridge} token={config.treasuryTokenAddress} onBridgeGas={onBridgeGas} />;
+    return <TreasuryNetworkSetup dashboard={{ l1ChainId: L1_CHAIN.chainId, l2ChainId: L2_CHAIN.chainId, registry: config.rollupsAddress,
+      manager: config.ccmL2Address, bridgeL1: config.l1Bridge, bridgeL2: config.l2Bridge }} target={target} wallet={wallet}
+      token={config.treasuryTokenAddress} feesEnabled={config.l1FeesEnabled && config.l2FeesEnabled} onBridgeGas={onBridgeGas} />;
   }
   if (!parsed.deployment) return <p role="status">Connect a configured paired treasury for this network.</p>;
   const deployment = parsed.deployment;

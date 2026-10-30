@@ -4,6 +4,8 @@
 .totals { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
 .total { display: flex; flex-direction: column; gap: 8px; min-width: 0; padding: 16px; background: var(--bg-inset); border: 1px solid var(--border); border-radius: var(--radius-sm); }
 .total strong { color: var(--text-bright); font: 500 clamp(18px, 1.7vw, 25px)/1.4 var(--mono); overflow-wrap: anywhere; }
+.actual { border-color: var(--green-border); background: var(--green-dim); }
+.actual strong { color: var(--green); font-size: clamp(28px, 3vw, 40px); }
 .comparison:is([data-stage="pending-l1"], [data-stage="unavailable"], [data-stage="checking"]) .total:last-child strong { font: 500 16px/1.5 var(--sans); overflow-wrap: normal; }
 .ethereum { color: var(--eez-label); }
 .eez { color: #b5a3ee; }
@@ -27,6 +29,7 @@
 .price { display: flex; flex-direction: column; gap: 8px; min-width: 0; color: var(--text-dim); font: 12px/1.5 var(--sans); }
 .problem { color: var(--yellow); font: 13px/1.55 var(--sans); }
 @media (max-width: 640px) {
+  .totals { grid-template-columns: minmax(0, 1fr); }
   .total { padding: 12px; }
   .prices { grid-template-columns: minmax(0, 1fr); }
   .table th, .table td { padding: 10px 3px; }

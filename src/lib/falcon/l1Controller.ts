@@ -12,6 +12,13 @@ export const managerAbi = parseAbi([
 ]);
 export type ControllerState = { controller: Address; nonce: bigint; timestamp: bigint };
 export type Settlement = { l1BlockNumber: bigint; l1BlockHash: Hex; l1TransactionHash: Hex };
+export class FalconTransactionReverted extends Error {
+  readonly transactionHash: Hex;
+  constructor(transactionHash: Hex) {
+    super('Transaction reverted. Inspect its trace before trying again.');
+    this.transactionHash = transactionHash;
+  }
+}
 
 export async function checkChain(client: EezClient, chain: ChainBinding) {
   if (await client.getChainId() !== chain.chainId) throw new Error(`Select ${chain.chainName} in your wallet.`);
@@ -22,7 +29,7 @@ export async function checkCode(client: EezClient, binding: CodeBinding, label: 
   if (!code || keccak256(code) !== binding.runtimeCodeHash) throw new Error(`${label} bytecode does not match this deployment.`);
 }
 
-/** Discovery and all subsequent requests use the same captured wallet provider. */
+/** Discovery and subsequent requests use the same provider, pinned to this deployment. */
 export async function controllerClient(provider: Pick<EthereumProvider, 'request'>, deployment: CrossChainDeployment, signal: AbortSignal) {
   const { l1, l2 } = deployment;
   const discovery = await probeComposer(provider, {
@@ -99,8 +106,8 @@ export async function canonicalReceipt(client: EezClient, hash: Hex, signal: Abo
     try { receipt = await client.getTransactionReceipt({ hash }); }
     catch (error) { if (!(error instanceof Error) || error.name !== 'TransactionReceiptNotFoundError') throw error; }
     if (receipt) {
-      if (receipt.status !== 'success') throw new Error('Transaction reverted. Inspect its receipt before retrying.');
       if ((await client.getBlock({ blockNumber: receipt.blockNumber })).hash !== receipt.blockHash) throw new Error('Receipt block is no longer canonical. Recheck the transaction.');
+      if (receipt.status !== 'success') throw new FalconTransactionReverted(hash);
       return receipt;
     }
     await new Promise<void>((resolve, reject) => {

@@ -28,8 +28,10 @@ on the internal Docker network; no API or solver ports are published.
 The API receives only the public configuration variables listed in the Compose
 file, not the whole `.env` or a signing key.
 
-Set `COW_NETWORK=mainnet` (or `chiado`) explicitly in the root `.env`, keeping
-the dashboard's RPC/bridge settings for that same network. Shared RPC endpoints
+Select a `COW_DEPLOYMENT_ENV` profile or set `COW_NETWORK=mainnet` (or `chiado`)
+in the root `.env`, keeping the dashboard's RPC/bridge settings for that same
+network. An explicit `COW_NETWORK` overrides the profile; without either, the
+standalone default is mainnet. Shared RPC endpoints
 must be reachable from containers: use service names or `host.docker.internal`
 for host services, not `localhost`. `COW_PUBLIC_L1_RPC` and
 `COW_PUBLIC_L2_FRONT` must instead be reachable from the user's browser.
@@ -128,6 +130,33 @@ python3 solver/worker.py                  # separate process
 Open `http://127.0.0.1:8787/`. The browser only signs the EIP-712 order;
 settlement is performed by the worker.
 
+For a local dashboard, set `EEZ_UI_COW_UPSTREAM=http://127.0.0.1:8787`
+when starting Vite. The API can use the existing network's remote RPCs; no
+local blockchain is required. With network/bridge settings but no CoW token
+or settlement bindings, the API stays available for health checks and returns
+`deployment_required` for trading and token requests. Supply verified CoW and
+route manifests for that exact network before enabling the solver; running
+the API alone does not make swaps operational.
+
+Set `EEZ_UI_RUNTIME_CONFIG` to the same runtime JSON used by Vite to share its
+RPCs, Composer endpoints, registry, manager, bridges, rollup ID and explorers
+with the CoW API, solver and deployment tools. Relative paths resolve from the
+dashboard repository root. For example, a local `COW_ENV_FILE` can contain:
+
+```dotenv
+EEZ_UI_RUNTIME_CONFIG=.runtime/eez-dev.json
+COW_DEPLOYMENT_ENV=config/deployments/eez-dev-699169-r2.json
+```
+
+The network-specific CoW profile contains application bindings and paths;
+shared dashboard addresses do not need to be copied into it. Restart the CoW
+processes after editing the shared runtime file. Explicit environment overrides
+remain supported. Deployment manifests retain the identity observed on chain
+and reject mismatches; they do not choose the active network.
+
+The verified EEZ-X deployment and restore instructions are documented in
+[`deployment/EEZ-dev-r2.md`](deployment/EEZ-dev-r2.md).
+
 The dashboard provides a native React swap form in its hidden **CoW Light Demo** tab. Press
 **Ctrl+Alt+Shift+T** (**Cmd+Option+Shift+T** on macOS) outside a text field to
 reveal both Treasury and CoW Light tabs; press again to hide them. Configure
@@ -185,14 +214,21 @@ conversion route and separate validation; the current route is unchanged.
 ### Get test tokens on Chiado
 
 The Chiado tab labels its sell asset **ctWETH** and provides **Get test tokens**.
-Connect the shared dashboard wallet and confirm a transaction on Chiado. The
-wallet needs Chiado native currency for that transaction's gas. The funded
+First select **Switch to Chiado** and approve the network switch in your wallet;
+this step does not submit a faucet transaction. The dashboard verifies the
+wallet's active Composer RPC before enabling **Get test tokens**. Click that
+button separately to confirm one Chiado faucet transaction. A network is added
+only if the wallet reports it missing. Progress distinguishes RPC checks, fee
+preparation, wallet confirmation and bridge delivery; **Switch back** returns
+to the rollup only when clicked. The wallet needs Chiado native currency for
+the claim transaction's gas. The funded
 faucet bridges **0.01 ctWETH + 0.0002 native tokens** to the same address on
 the configured rollup, using its official bridge. Requests have a 24-hour
 per-wallet cooldown. The faucet distributes existing test supply; it cannot
 mint tokens, has no server signing key and is never offered on mainnet.
 
-Configure `COW_FAUCET_L1` in the shared `.env`. The read-only faucet API checks
+The selected CoW profile supplies `COW_FAUCET_L1`; an explicit environment
+override is also supported. The read-only faucet API checks
 its token, bridge and rollup against the active deployment before advertising
 amounts, inventory or eligibility. Pending wallet requests and transaction
 hashes are kept per network and account across reloads. The UI checks a
@@ -337,9 +373,12 @@ settings override shared aliases; shared settings now override saved deployment
 snapshots. Thus a snapshot cannot silently retain an old bridge or rollup ID
 when the shared environment changes. Chiado has no default rollup ID.
 
-When the API uses localhost or container RPCs, set `COW_PUBLIC_L1_RPC` and
-`COW_PUBLIC_L2_FRONT` in that same `.env` to their browser-reachable HTTP(S)
-URLs. These only change the endpoints advertised by `/api/config`; backend
+With `EEZ_UI_RUNTIME_CONFIG`, browser-facing RPC routes are taken from the
+dashboard's `browser.l1RpcUrl` and `browser.l2FrontUrl`; backend connections use
+its `proxy` endpoints. Without that file, set `COW_PUBLIC_L1_RPC` and
+`COW_PUBLIC_L2_FRONT` when the backend uses private or container RPCs. Public
+endpoints can be HTTP(S) URLs or paths relative to the dashboard origin.
+These only change the endpoints advertised by `/api/config`; backend
 reads and solver submissions keep using the internal upstreams. Do not put
 credentials in public endpoint URLs. Wallet approval is limited to the current
 quote's sell amount.
@@ -397,9 +436,10 @@ python3 deployment/bootstrap_chiado.py --deployment rog-916969
 python3 deployment/bootstrap_chiado.py --deployment rog-916969 --execute
 ```
 
-The bootstrap requires `EEZ_REGISTRY_ADDRESS` and the shared bridge/manager
-settings documented above, plus `EEZ_UI_L1_FRONT_UPSTREAM` (or `L1_FRONT`) for
-L1-origin bridge transactions. It verifies chain IDs, code presence, reciprocal
+The bootstrap reads the registry, bridge/manager settings and L1 Composer from
+the shared dashboard runtime JSON. The existing `EEZ_REGISTRY_ADDRESS` and
+`EEZ_UI_L1_FRONT_UPSTREAM` environment settings remain supported. It verifies
+chain IDs, code presence, reciprocal
 bridge peers, and manager/rollup bindings before execution. Both the script
 and custom token/liquidity constructors refuse Ethereum mainnet; the constructors
 only allow Chiado chain ID 10200. The script is intentionally Chiado-only, not
@@ -440,9 +480,10 @@ entry points can load that file:
 export COW_DEPLOYMENT_ENV=runtime/chiado/deployments/rog-916969/environment.json
 ```
 
-Keep the shared RPC environment exported. The generated file provides token,
-bridge, manager and chain bindings and separate queue, log, catalog and GPv2 /
-route manifest paths. Explicit demo-specific environment variables override it;
+Keep the shared RPC environment exported. The generated file provides token
+bindings and separate queue, log, catalog and GPv2 / route manifest paths.
+Bridge, manager and chain settings continue to come from the shared dashboard
+configuration. Explicit demo-specific environment variables override it;
 unset stale values before selecting another deployment. Rerun the read-only
 bootstrap check before reuse after a network reset or protocol upgrade.
 GPv2 and the route/helper are **not** deployed by the asset bootstrap; continue

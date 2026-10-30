@@ -1,0 +1,16 @@
+{
+  "chainId": 10200,
+  "factory": "0x24236687b73c1496Dd16AF46209380CC8f0974d5",
+  "weth": "0x234ccc757Bb2f0e9cc65818F2B6FDB18122Dc060",
+  "tokens": [
+    {
+      "address": "0xD318f55e12518EfdE24ec7FEac4441e8B5A3F1a7",
+      "symbol": "ctUSD",
+      "name": "CoW Test USD",
+      "decimals": 18,
+      "pair": "0x33ac8b5919B2429a36FabE47c6292574fD686AA8",
+      "wethReserve": "1000000000000000000000",
+      "tokenReserve": "100000000000000000000000"
+    }
+  ]
+}

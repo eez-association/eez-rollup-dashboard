@@ -17,11 +17,13 @@ PATH_KEYS = ('TOKEN_CATALOG', 'ORDER_QUEUE', 'SOLVER_LOG', 'ROUTE_MANIFEST',
              'COW_MANIFEST', 'COWSWAP_ARTIFACTS', 'GPV2_ARTIFACT')
 ADDRESS_KEYS = ('WETH_L1', 'WETH_L2', 'BRIDGE_L1', 'BRIDGE_L2',
                 'EEZ_MANAGER_L2', 'SETTLEMENT_L2', 'NATIVE_WETH_L2',
-                'DETERMINISTIC_FACTORY_L1', 'COW_FAUCET_L1')
+                'DETERMINISTIC_FACTORY_L1', 'COW_FAUCET_L1', 'REGISTRY_L1')
 SHARED_SETTINGS = {
     'L1_RPC': 'EEZ_UI_L1_RPC_UPSTREAM',
     'L2_RPC': 'EEZ_UI_L2_RPC_UPSTREAM',
     'L2_FRONT': 'EEZ_UI_L2_FRONT_UPSTREAM',
+    'L1_FRONT': 'EEZ_UI_L1_FRONT_UPSTREAM',
+    'REGISTRY_L1': 'EEZ_REGISTRY_ADDRESS',
     'L1_EXPLORER': 'EEZ_UI_L1_EXPLORER_URL',
     'L2_EXPLORER': 'EEZ_UI_L2_EXPLORER_URL',
     'BRIDGE_L1': 'EEZ_L1_BRIDGE_SENDER',
@@ -38,13 +40,11 @@ def environment(environ):
     """Read only explicitly selected public settings; never execute a .env file."""
     explicit = {k: v for k, v in environ.items() if v != ''}
     path = explicit.get('COW_ENV_FILE')
-    if not path:
-        return explicit
-    allowed = {'COW_NETWORK', 'COW_DEPLOYMENT_ENV', 'L2_GENESIS_HASH',
+    allowed = {'COW_NETWORK', 'COW_DEPLOYMENT_ENV', 'L2_GENESIS_HASH', 'EEZ_UI_RUNTIME_CONFIG',
                *INTEGER_KEYS, *PATH_KEYS, *ADDRESS_KEYS, *PUBLIC_ENDPOINT_KEYS, *SHARED_SETTINGS,
                *SHARED_SETTINGS.values()}
     values = {}
-    for line in Path(path).expanduser().read_text().splitlines():
+    for line in Path(path).expanduser().read_text().splitlines() if path else []:
         name, sep, value = line.removeprefix('export ').partition('=')
         name = name.strip()
         if not sep or name not in allowed:
@@ -55,7 +55,39 @@ def environment(environ):
         if len(parts) != 1 or '$' in parts[0] or '`' in parts[0]:
             raise ValueError(f'{name}: use a literal .env value; shell expansion is not supported')
         values[name] = parts[0]
-    return {**values, **explicit}
+    selected = {**values, **explicit}
+    runtime_path = selected.get('EEZ_UI_RUNTIME_CONFIG')
+    shared = dashboard_environment(runtime_path) if runtime_path else {}
+    return {**shared, **selected}
+
+
+def dashboard_environment(filename):
+    """Use the same runtime JSON as Vite, without copying network bindings."""
+    path = Path(filename).expanduser()
+    if not path.is_absolute():
+        path = ROOT.parents[1] / path
+    data = json.loads(path.read_text())
+    if not isinstance(data, dict) or not isinstance(data.get('browser'), dict) or not isinstance(data.get('proxy'), dict):
+        raise ValueError('Dashboard runtime configuration requires browser and proxy objects')
+    bindings = {
+        'proxy': {'l1Rpc': 'EEZ_UI_L1_RPC_UPSTREAM', 'l2Rpc': 'EEZ_UI_L2_RPC_UPSTREAM',
+                  'l1Front': 'EEZ_UI_L1_FRONT_UPSTREAM', 'l2Front': 'EEZ_UI_L2_FRONT_UPSTREAM'},
+        'browser': {'bridgeL1Address': 'EEZ_L1_BRIDGE_SENDER', 'bridgeL2Address': 'EEZ_L2_BRIDGE_RECEIVER',
+                    'l2ContractAddress': 'EEZL2_ADDRESS', 'l1ContractAddress': 'EEZ_REGISTRY_ADDRESS',
+                    'rollupId': 'EEZ_ROLLUP_ID', 'l1ExplorerUrl': 'EEZ_UI_L1_EXPLORER_URL',
+                    'l2ExplorerUrl': 'EEZ_UI_L2_EXPLORER_URL',
+                    'l1RpcUrl': 'COW_PUBLIC_L1_RPC', 'l2FrontUrl': 'COW_PUBLIC_L2_FRONT'},
+    }
+    values = {}
+    for section, fields in bindings.items():
+        for source, target in fields.items():
+            value = data[section].get(source)
+            if value is None or value == '':
+                continue
+            if isinstance(value, bool) or not isinstance(value, (str, int)):
+                raise ValueError(f'Invalid dashboard setting: {section}.{source}')
+            values[target] = str(value)
+    return values
 
 
 def rpc_chain_id(endpoint):
@@ -215,10 +247,16 @@ def load_config(environ=None, root=ROOT):
     values['COW_FAUCET_L1'] = env.get('COW_FAUCET_L1')
     for key in PUBLIC_ENDPOINT_KEYS:
         if env.get(key):
-            endpoint = urlsplit(env[key])
-            if endpoint.scheme not in ('http','https') or not endpoint.hostname or endpoint.username or endpoint.password:
-                raise ValueError(f'{key}: expected a public HTTP(S) URL without credentials')
-            values[key] = env[key]
+            value = env[key]
+            endpoint = urlsplit(value)
+            # Public browser routes can be relative to the dashboard origin.
+            # The explorer API is called by Python and still requires an absolute URL.
+            relative = (key != 'COW_WRAPPER_EXPLORER_API' and value.startswith('/')
+                        and not value.startswith('//') and not endpoint.scheme and not endpoint.netloc)
+            absolute = endpoint.scheme in ('http', 'https') and endpoint.hostname and not endpoint.username and not endpoint.password
+            if '\\' in value or any(ord(c) <= 32 for c in value) or not (relative or absolute):
+                raise ValueError(f'{key}: expected a public HTTP(S) URL without credentials or a dashboard-origin path')
+            values[key] = value
     if env.get('L2_GENESIS_HASH'):
         if not re.fullmatch(r'0x[0-9a-fA-F]{64}', env['L2_GENESIS_HASH']):
             raise ValueError('Invalid L2_GENESIS_HASH')

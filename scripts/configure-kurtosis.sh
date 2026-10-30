@@ -97,6 +97,7 @@ jq -n \
     --arg rollupManager "$EEZ_ROLLUP_MANAGER_ADDRESS" \
     --arg bridgeL1 "$EEZ_L1_BRIDGE_SENDER" \
     --arg bridgeL2 "$EEZ_L2_BRIDGE_RECEIVER" \
+    --arg treasuryToken "${EEZ_UI_TREASURY_TOKEN_ADDRESS:-}" \
     --arg rollupId "$EEZ_ROLLUP_ID" \
     --argjson l1FeesEnabled "$EEZ_UI_L1_FEES_ENABLED" \
     --argjson l2FeesEnabled "$EEZ_UI_L2_FEES_ENABLED" \
@@ -138,6 +139,7 @@ jq -n \
         rollupManagerAddress: $rollupManager,
         bridgeL1Address: $bridgeL1,
         bridgeL2Address: $bridgeL2,
+        treasuryTokenAddress: $treasuryToken,
         rollupId: $rollupId,
         l1FeesEnabled: $l1FeesEnabled,
         l2FeesEnabled: $l2FeesEnabled,

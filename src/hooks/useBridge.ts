@@ -5,6 +5,7 @@ import { rpcCall } from "../rpc";
 import { estimateGas, estimateBridgeGas, GasEstimateError, gasToHex, getEip1559Fees } from "../lib/gasEstimation";
 import { prepareNativeBridgeMax } from "../lib/bridgeMax";
 import { readBridgeManager } from "../lib/bridgeManager";
+import { loadBridgeTokens, readBridgeToken, saveBridgeToken } from "../lib/bridgeTokens";
 import type { CrossChainFeeQuote } from "../lib/fees/payment.mjs";
 
 type Logger = (msg: string, type?: "ok" | "err" | "info") => void;
@@ -24,6 +25,9 @@ export type BridgePhase =
 
 export interface TokenMeta {
   chainId?: number;
+  predicted?: boolean;
+  bridgeAddress?: string;
+  counterpart?: { address: string; chainId: number };
   name: string;
   symbol: string;
   decimals: number;
@@ -75,8 +79,6 @@ export interface BridgeFeeState {
 
 const EMPTY_FEES: BridgeFeeState = { status: "idle", requestKey: null, quote: null, errorMessage: null };
 
-const RECENT_TOKENS_KEY = "bridgeRecentTokens";
-const MAX_RECENT_TOKENS = 8;
 
 // Bridge ABI selectors (verified via `forge inspect Bridge methodIdentifiers`)
 const BRIDGE_ABI = {
@@ -117,23 +119,6 @@ function decodeUint256(hex: string): bigint {
   const clean = hex.replace("0x", "");
   if (!clean || clean === "0".repeat(64)) return 0n;
   return BigInt("0x" + clean.slice(0, 64));
-}
-
-function decodeString(hex: string): string {
-  try {
-    const clean = hex.replace("0x", "");
-    if (clean.length < 128) return "";
-    const offset = parseInt(clean.slice(0, 64), 16) * 2;
-    const length = parseInt(clean.slice(offset, offset + 64), 16);
-    const data = clean.slice(offset + 64, offset + 64 + length * 2);
-    const bytes = new Uint8Array(data.length / 2);
-    for (let i = 0; i < bytes.length; i++) {
-      bytes[i] = parseInt(data.slice(i * 2, i * 2 + 2), 16);
-    }
-    return new TextDecoder().decode(bytes);
-  } catch {
-    return "";
-  }
 }
 
 /** Format a raw bigint balance to a human-readable string with up to 4 decimal places */
@@ -203,23 +188,6 @@ async function fetchRevertReason(rpcUrl: string, txHash: string): Promise<string
   }
 }
 
-function loadRecentTokens(): TokenMeta[] {
-  try {
-    return JSON.parse(localStorage.getItem(RECENT_TOKENS_KEY) || "[]") as TokenMeta[];
-  } catch {
-    return [];
-  }
-}
-
-function saveRecentToken(token: TokenMeta) {
-  const existing = loadRecentTokens();
-  const filtered = existing.filter(
-    (t) => t.chainId !== token.chainId || t.address.toLowerCase() !== token.address.toLowerCase(),
-  );
-  const updated = [token, ...filtered].slice(0, MAX_RECENT_TOKENS);
-  localStorage.setItem(RECENT_TOKENS_KEY, JSON.stringify(updated));
-}
-
 export function useBridge(
   log: Logger,
   sendTx: SendTx,
@@ -261,7 +229,7 @@ export function useBridge(
     maxError: null,
   });
 
-  const [recentTokens, setRecentTokens] = useState<TokenMeta[]>(loadRecentTokens);
+  const [recentTokens, setRecentTokens] = useState<TokenMeta[]>(loadBridgeTokens);
 
   const stateRef = useRef(state);
   stateRef.current = state;
@@ -365,6 +333,18 @@ export function useBridge(
             }));
           }
         } else if (tokenAddress && /^0x[0-9a-fA-F]{40}$/.test(tokenAddress)) {
+          if (stateRef.current.tokenMeta?.predicted) {
+            const code = await rpcCall(sourceRpc, "eth_getCode", [tokenAddress, "latest"]);
+            if (code === "0x" || code === "0x0") {
+              if (!cancelled) setState(s => ({ ...s, sourceBalance: "0", sourceBalanceRaw: 0n, allowance: 0n, tokenNeedsApproval: false, tokenReadError: null }));
+              return;
+            }
+            const meta = await readBridgeToken(sourceRpc, tokenAddress, Number(BigInt(direction === "l1-to-l2" ? L1_CHAIN.chainId : L2_CHAIN.chainId)));
+            if (!cancelled) {
+              setState(s => ({ ...s, tokenMeta: { ...s.tokenMeta, ...meta, predicted: false } }));
+              setRecentTokens(tokens => saveBridgeToken({ ...meta, predicted: false }, tokens));
+            }
+          }
           const decimals = stateRef.current.tokenMeta?.decimals ?? 18;
 
           // Fetch balance
@@ -425,49 +405,25 @@ export function useBridge(
       return;
     }
 
-    let cancelled = false;
+    const controller = new AbortController();
     const timer = setTimeout(async () => {
       const sourceRpc = direction === "l1-to-l2" ? config.l1Rpc : config.l2Rpc;
-
-      let name = "Unknown Token";
-      let symbol = "???";
-      let decimals = 18;
-
+      const chainId = Number(BigInt(direction === "l1-to-l2" ? L1_CHAIN.chainId : L2_CHAIN.chainId));
+      const timeout = setTimeout(() => controller.abort(), 10000);
       try {
-        const nameResult = (await rpcCall(sourceRpc, "eth_call", [
-          { to: tokenAddress, data: ERC20_ABI.name }, "latest",
-        ])) as string;
-        const decoded = decodeString(nameResult);
-        if (decoded) name = decoded;
-      } catch { /* fallback */ }
-
-      try {
-        const symbolResult = (await rpcCall(sourceRpc, "eth_call", [
-          { to: tokenAddress, data: ERC20_ABI.symbol }, "latest",
-        ])) as string;
-        const decoded = decodeString(symbolResult);
-        if (decoded) symbol = decoded;
-      } catch { /* fallback */ }
-
-      try {
-        const decResult = (await rpcCall(sourceRpc, "eth_call", [
-          { to: tokenAddress, data: ERC20_ABI.decimals }, "latest",
-        ])) as string;
-        decimals = Number(decodeUint256(decResult));
-        if (decimals > 77) decimals = 18; // sanity
-      } catch { /* fallback */ }
-
-      if (!cancelled) {
-        const chainId = Number(BigInt(direction === "l1-to-l2" ? L1_CHAIN.chainId : L2_CHAIN.chainId));
-        const meta: TokenMeta = { name, symbol, decimals, address: tokenAddress, chainId };
-        setState((s) => ({ ...s, tokenMeta: meta }));
-        saveRecentToken(meta);
-        setRecentTokens(loadRecentTokens());
-      }
+        const meta = await readBridgeToken(sourceRpc, tokenAddress, chainId, controller.signal);
+        if (controller.signal.aborted) return;
+        setState(s => ({ ...s, tokenMeta: { ...s.tokenMeta, ...meta, predicted: false } }));
+        setRecentTokens(tokens => saveBridgeToken({ ...meta, predicted: false }, tokens));
+      } catch {
+        // A failed lookup must never save a guessed token or decimal precision.
+      } finally { clearTimeout(timeout); }
     }, 300);
 
-    return () => { cancelled = true; clearTimeout(timer); };
+    return () => { controller.abort(); clearTimeout(timer); };
   }, [state.tokenAddress, state.asset, state.direction, configLoaded]);
+
+  const bridgeCompleted = state.phase === "confirmed";
 
   // Gas estimation effect — runs when bridge params change
   useEffect(() => {
@@ -475,7 +431,7 @@ export function useBridge(
     const bridgeAddr = direction === "l1-to-l2" ? config.l1Bridge : config.l2Bridge;
 
     estimatedRequest.current = null;
-    if (!configLoaded || !walletAddress || !bridgeAddr || !amount) {
+    if (bridgeCompleted || !configLoaded || !walletAddress || !bridgeAddr || !amount) {
       setState((s) => ({ ...s, gas: defaultGas }));
       return;
     }
@@ -491,8 +447,16 @@ export function useBridge(
       return;
     }
 
-    if (asset === "erc20" && (!tokenAddress || !/^0x[0-9a-fA-F]{40}$/.test(tokenAddress))) {
+    if (asset === "erc20" && (!tokenMeta || tokenMeta.predicted || !tokenAddress || !/^0x[0-9a-fA-F]{40}$/.test(tokenAddress))) {
       setState((s) => ({ ...s, gas: defaultGas }));
+      return;
+    }
+
+    // Locking an original ERC20 cannot succeed until its allowance is ready.
+    // Show the approval action without estimating a transfer that must revert.
+    if (asset === "erc20" && (state.tokenNeedsApproval === null ||
+        state.tokenNeedsApproval && (state.allowance === null || state.allowance < rawAmount))) {
+      setState(s => ({ ...s, gas: defaultGas }));
       return;
     }
 
@@ -541,14 +505,14 @@ export function useBridge(
     }, 400);
 
     return () => { cancelled = true; clearTimeout(timer); controller.abort(); };
-  }, [state.direction, state.asset, state.amount, state.tokenAddress, state.tokenMeta?.decimals, state.destinationAddress, state.allowance, walletAddress, configLoaded, config.l1Bridge, config.l2Bridge, config.rollupId, config.l1ProxyRpc, config.l2ProxyRpc]);
+  }, [bridgeCompleted, state.direction, state.asset, state.amount, state.tokenAddress, state.tokenMeta?.decimals, state.tokenMeta?.predicted, state.destinationAddress, state.allowance, state.tokenNeedsApproval, walletAddress, configLoaded, config.l1Bridge, config.l2Bridge, config.rollupId, config.l1ProxyRpc, config.l2ProxyRpc]);
 
   const feeSource = state.direction === "l1-to-l2" ? "l1" : "l2";
   const feeRpc = feeSource === "l1" ? config.l1ProxyRpc : config.l2ProxyRpc;
   const feeChain = feeSource === "l1" ? L1_CHAIN : L2_CHAIN;
   const feesEnabled = feeSource === "l1" ? config.l1FeesEnabled : config.l2FeesEnabled;
   let feeTransaction: Record<string, string> | null = null;
-  if (configLoaded && feesEnabled && walletAddress && state.amount &&
+  if (!bridgeCompleted && configLoaded && feesEnabled && walletAddress && state.amount &&
       (state.gas.status === "estimated" || state.gas.status === "unsupported" && state.gasOverrideHex)) {
     const amount = parseAmount(state.amount, state.asset === "eth" ? 18 : state.tokenMeta?.decimals ?? 18);
     const approved = state.asset === "eth" || state.tokenNeedsApproval === false ||
@@ -571,7 +535,7 @@ export function useBridge(
     }
     // Freeze the final quote while the user copies its values into the wallet.
     // A background preview must never replace the quote being signed.
-    if (!["idle", "confirmed", "failed"].includes(state.phase)) return;
+    if (!["idle", "failed"].includes(state.phase)) return;
     const controller = new AbortController();
     let expiryTimer: ReturnType<typeof setTimeout> | undefined;
     setState(s => ({ ...s, fees: { ...EMPTY_FEES, requestKey: feeRequestKey, status: "loading" } }));
@@ -597,19 +561,19 @@ export function useBridge(
   }, []);
 
   const setDirection = useCallback((dir: BridgeDirection) => {
-    setState((s) => ({
-      ...s,
-      direction: dir,
-      sourceBalance: null,
-      sourceBalanceRaw: null,
-      allowance: null,
-      tokenNeedsApproval: null,
-      tokenReadError: null,
-      phase: "idle",
-      txHash: null,
-      error: null,
-    }));
-  }, []);
+    setState(s => {
+      const chainId = Number(BigInt(dir === "l1-to-l2" ? L1_CHAIN.chainId : L2_CHAIN.chainId));
+      const sourceChainId = Number(BigInt(s.direction === "l1-to-l2" ? L1_CHAIN.chainId : L2_CHAIN.chainId));
+      const selected = recentTokens.find(t => t.chainId === sourceChainId && t.address.toLowerCase() === s.tokenAddress.toLowerCase()
+        && t.bridgeAddress?.toLowerCase() === (s.direction === "l1-to-l2" ? config.l1Bridge : config.l2Bridge).toLowerCase());
+      const paired = selected?.counterpart?.chainId === chainId ? recentTokens.find(t =>
+        t.chainId === chainId && t.address.toLowerCase() === selected.counterpart!.address.toLowerCase()
+        && t.bridgeAddress?.toLowerCase() === (dir === "l1-to-l2" ? config.l1Bridge : config.l2Bridge).toLowerCase()) : undefined;
+      return { ...s, direction: dir, tokenAddress: paired?.address ?? s.tokenAddress,
+        tokenMeta: paired ?? null, sourceBalance: null, sourceBalanceRaw: null,
+        allowance: null, tokenNeedsApproval: null, tokenReadError: null, phase: "idle", txHash: null, error: null };
+    });
+  }, [recentTokens]);
 
   const setAsset = useCallback((asset: BridgeAsset) => {
     setState((s) => ({
@@ -639,11 +603,14 @@ export function useBridge(
     setState((s) => ({ ...s, destinationAddress: addr }));
   }, []);
 
-  const setTokenAddress = useCallback((addr: string) => {
+  const setTokenAddress = useCallback((addr: string, pair?: [TokenMeta, TokenMeta]) => {
+    if (pair) setRecentTokens(tokens => saveBridgeToken(pair[1], saveBridgeToken(pair[0], tokens)));
     setState((s) => ({
       ...s,
       tokenAddress: addr,
-      tokenMeta: null,
+      tokenMeta: pair?.[0] ?? null,
+      sourceBalance: null,
+      sourceBalanceRaw: null,
       allowance: null,
       tokenNeedsApproval: null,
       tokenReadError: null,
@@ -698,7 +665,8 @@ export function useBridge(
   }, []);
 
   const dismiss = useCallback(() => {
-    setState((s) => ({ ...s, phase: "idle", error: null, txHash: null }));
+    setState((s) => ({ ...s, phase: "idle", error: null, txHash: null,
+      ...(s.phase === "confirmed" ? { amount: "", fees: EMPTY_FEES, gas: defaultGas } : {}) }));
   }, []);
 
   /** Approve ERC20 spending for the bridge */
@@ -781,7 +749,7 @@ export function useBridge(
       return;
     }
 
-    if (asset === "erc20" && (stateRef.current.tokenNeedsApproval === null || stateRef.current.sourceBalanceRaw === null ||
+    if (asset === "erc20" && (!tokenMeta || tokenMeta.predicted || stateRef.current.tokenNeedsApproval === null || stateRef.current.sourceBalanceRaw === null ||
         stateRef.current.sourceBalanceRaw < rawAmount || stateRef.current.tokenNeedsApproval &&
         (stateRef.current.allowance === null || stateRef.current.allowance < rawAmount))) {
       setState(s => ({ ...s, phase: "failed", error: s.tokenReadError || "Check your token balance and required approval before bridging" }));
@@ -840,9 +808,8 @@ export function useBridge(
             const receipt = (await rpcCall(rpcUrl, "eth_getTransactionReceipt", [txHash])) as TxReceipt | null;
             if (receipt) {
               if (receipt.status === "0x1") {
-                setState((s) => ({ ...s, phase: "confirmed", error: null }));
+                setState((s) => ({ ...s, phase: "confirmed", error: null, fees: EMPTY_FEES }));
                 log("Bridge transaction confirmed on L1 — L2 delivery atomic", "ok");
-                setTimeout(() => setState((s) => (s.phase === "confirmed" ? { ...s, phase: "idle", txHash: null } : s)), 5000);
               } else {
                 const reason = await fetchRevertReason(rpcUrl, txHash);
                 setState((s) => ({
@@ -889,9 +856,8 @@ export function useBridge(
             const receipt = (await rpcCall(rpcUrl, "eth_getTransactionReceipt", [txHash])) as TxReceipt | null;
             if (receipt) {
               if (receipt.status === "0x1") {
-                setState((s) => ({ ...s, phase: "confirmed", error: null }));
+                setState((s) => ({ ...s, phase: "confirmed", error: null, fees: EMPTY_FEES }));
                 log("Bridge transaction confirmed on L2", "ok");
-                setTimeout(() => setState((s) => (s.phase === "confirmed" ? { ...s, phase: "idle", txHash: null } : s)), 5000);
               } else {
                 const reason = await fetchRevertReason(rpcUrl, txHash);
                 setState((s) => ({

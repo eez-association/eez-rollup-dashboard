@@ -29,6 +29,7 @@ function CallInspector({ node, model, tokens }: { node: TraceNode | undefined; m
       <dt>Transaction</dt><dd>{node.tx ? <ExplorerLink value={node.tx} type="tx" chain={chain} /> : "Not observed"}</dd>
       <dt>Block</dt><dd>{node.block !== null ? <ExplorerLink value={String(node.block)} type="block" chain={chain} /> : "Not observed"}</dd>
       {node.abiSource && <><dt>Decoded using</dt><dd>{node.abiSource}{node.abiProvider ? " · " + node.abiProvider : ""}</dd></>}
+      {node.accountType === "eoa" && <><dt>Account type</dt><dd>EOA · no bytecode at the transaction block</dd></>}
     </dl>
     {node.impl && <p className={styles.muted}>Implementation: <ExplorerLink value={node.impl.address} chain={chain} /></p>}
     <h3>Arguments</h3>
@@ -56,7 +57,7 @@ function ContractList({ model }: { model: TraceModel }) {
     } else contracts.set(key, { chain, address, name: name || "Unknown contract", roles: new Set([role]) });
   };
   for (const node of model.nodes) {
-    if (node.kind === "ghost") continue;
+    if (node.kind === "ghost" || node.accountType === "eoa") continue;
     add(node.chain, node.address, node.contract, node.impl ? "Proxy" : "Call target");
     if (node.impl) add(node.chain, node.impl.address, node.impl.contract, "Implementation");
   }

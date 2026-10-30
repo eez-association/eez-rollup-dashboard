@@ -7,12 +7,16 @@ const primary='https://read.invalid',alternate='https://composer.invalid',addres
 function fixture(t,options={}){
  const original=globalThis.fetch,calls=[];let headers=0;
  t.after(()=>{globalThis.fetch=original;});
+ const respond=(url,{id,method,params})=>{
+  calls.push({url,method,params});
+  if(method==='eth_chainId')return {id,result:url===alternate&&options.foreign?'0x1':'0x27d8'};
+  if(method==='eth_getBlockByNumber')return {id,result:{number:tag,hash:options.reorg&&++headers>2||options.mismatch&&url===alternate?'0x'+'cd'.repeat(32):blockHash}};
+  if(url===primary)return options.success?{id,result:'0x1234'}:{id,error:{code:-32000,message:options.error??'No state available for block 23721767'}};
+  return {id,result:'0x1234'};
+ };
  globalThis.fetch=async(url,request)=>{
-  const {method,params}=JSON.parse(request.body);calls.push({url,method,params});
-  if(method==='eth_chainId')return Response.json({result:url===alternate&&options.foreign?'0x1':'0x27d8'});
-  if(method==='eth_getBlockByNumber')return Response.json({result:{number:tag,hash:options.reorg&&++headers>2||options.mismatch&&url===alternate?'0x'+'cd'.repeat(32):blockHash}});
-  if(url===primary)return options.success?Response.json({result:'0x1234'}):Response.json({error:{code:-32000,message:options.error??'No state available for block 23721767'}});
-  return Response.json({result:'0x1234'});
+  const body=JSON.parse(request.body);
+  return Response.json(Array.isArray(body)?body.map(item=>respond(url,item)):respond(url,body));
  };
  return {calls,io:new DeploymentIO({l1:{rpc:primary,front:alternate},l2:{rpc:primary,front:alternate}},release)};
 }

@@ -3,7 +3,7 @@ import test from 'node:test';
 import { readFileSync } from 'node:fs';
 import { keccak256, type Hex } from 'viem';
 import { falconDashboardConfig } from '../../src/lib/falcon/dashboardConfig.ts';
-import { crossChainDeployment as d } from '../../src/lib/falcon/crossChainDeployment.ts';
+import { crossChainDeployment as d, testnetDeployment } from '../../src/lib/falcon/crossChainDeployment.ts';
 
 const host = { l1ChainId: '0x27d8', l2ChainId: '0xdfde9', registry: d.l1.registry,
   manager: d.l2.manager, rollupId: '4', feesEnabled: true, quoteUrl: 'https://dashboard.example/composer/l2',
@@ -24,11 +24,26 @@ test('fees reuse the host endpoint and native ceiling without enabling an unquot
   }
   assert.equal(falconDashboardConfig({ ...host, maxTotalWei: '1' }).fees?.maxTotalFee, 1n);
 });
+test('eez.dev uses its verified contracts and rejects mixed devnet routing', () => {
+  const testnet = { ...host, l2ChainId: '0xaab21', registry: testnetDeployment.l1.registry, rollupId: '2', quoteUrl: 'https://eez.dev/composer/l2' };
+  assert.equal(falconDashboardConfig(testnet).deployment, testnetDeployment);
+  assert.equal(falconDashboardConfig(testnet).fees?.url, testnet.quoteUrl);
+  for (const patch of [{ registry: d.l1.registry }, { rollupId: '4' }, { l2ChainId: host.l2ChainId }, { l2ChainId: null }]) {
+    assert.equal(falconDashboardConfig({ ...testnet, ...patch }).deployment, null);
+  }
+});
 test('public wallet-test bytecode matches the deployment identities, independently of RPC mocks', () => {
   const code = JSON.parse(readFileSync(new URL('./fixtures/deployed-code.json', import.meta.url), 'utf8'));
   const bindings = { verifier: d.l2.verifier, controllerFactory: d.l2.factory, safeFactory: d.l1.safe!.factory,
     singleton: d.l1.safe!.singleton, fallbackHandler: d.l1.safe!.fallbackHandler };
   for (const [name, binding] of Object.entries(bindings)) {
+    assert.equal(code[name].address, binding.address);
+    assert.equal(keccak256(code[name].code as Hex), binding.runtimeCodeHash);
+  }
+});
+test('eez.dev wallet fixture bytecode matches its verified deployment', () => {
+  const code = JSON.parse(readFileSync(new URL('./fixtures/testnet-deployed-code.json', import.meta.url), 'utf8'));
+  for (const [name, binding] of Object.entries({ verifier: testnetDeployment.l2.verifier, controllerFactory: testnetDeployment.l2.factory })) {
     assert.equal(code[name].address, binding.address);
     assert.equal(keccak256(code[name].code as Hex), binding.runtimeCodeHash);
   }

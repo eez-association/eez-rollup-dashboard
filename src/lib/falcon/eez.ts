@@ -1,22 +1,14 @@
 import { createPublicClient, custom, decodeEventLog, encodeFunctionData, keccak256, type Address, type Hex, type TransactionReceipt } from 'viem';
 import { verifierAbi } from './verifierAbi.ts';
 
-import { crossChainDeployment } from './crossChainDeployment.ts';
+import type { CrossChainDeployment } from './crossChainDeployment.ts';
 
 // Use the same checked deployment for the standalone verifier and the Safe flow.
-export const EEZ = {
-  chainId: crossChainDeployment.l2.chainId,
-  chainName: crossChainDeployment.l2.chainName,
-  explorer: crossChainDeployment.l2.explorer,
-  genesisHash: crossChainDeployment.l2.anchor.blockHash,
-  address: crossChainDeployment.l2.verifier.address,
-  runtimeCodeHash: crossChainDeployment.l2.verifier.runtimeCodeHash,
-} as const;
-
-export const EEZ_CHAIN = {
-  chainId: `0x${EEZ.chainId.toString(16)}`,
-};
-
+export const verifierDeployment = ({ l2 }: CrossChainDeployment) => ({
+  chainId: l2.chainId, chainName: l2.chainName, explorer: l2.explorer,
+  anchor: l2.anchor, address: l2.verifier.address, runtimeCodeHash: l2.verifier.runtimeCodeHash,
+});
+export type VerifierDeployment = ReturnType<typeof verifierDeployment>;
 const inputs = [{ name: 'message', type: 'bytes' }, { name: 'signature', type: 'bytes' }, { name: 'publicKey', type: 'bytes' }] as const;
 export const recordAbi = [
   { type: 'function', name: 'verifyAndRecord', stateMutability: 'nonpayable', inputs, outputs: [] },
@@ -34,37 +26,37 @@ export function recordData(sample: PublicSample) {
   return encodeFunctionData({ abi: recordAbi, functionName: 'verifyAndRecord', args: [sample.message, sample.signature, sample.publicKey] });
 }
 
-/** Every network read uses the selected wallet's configured endpoint. There is no HTTP fallback. */
+/** One explicit transport: a guarded wallet session or the dashboard's read-only RPC adapter. */
 export function eezClient(provider: Pick<EthereumProvider, 'request'>) {
   return createPublicClient({ ccipRead: false, transport: custom(provider, { retryCount: 0 }) });
 }
 export type EezClient = ReturnType<typeof eezClient>;
 
-export async function checkDeployment(client: EezClient, signal: AbortSignal) {
+export async function checkDeployment(client: EezClient, signal: AbortSignal, deployment: VerifierDeployment) {
   signal.throwIfAborted();
-  if (await client.getChainId() !== EEZ.chainId) throw new Error('The RPC is on a different chain.');
-  const genesis = await client.getBlock({ blockNumber: 0n });
-  if (genesis.hash !== EEZ.genesisHash) throw new Error('The devnet has changed. Update the verifier deployment.');
+  if (await client.getChainId() !== deployment.chainId) throw new Error('The RPC is on a different chain.');
+  const anchor = await client.getBlock({ blockNumber: deployment.anchor.blockNumber });
+  if (anchor.hash !== deployment.anchor.blockHash) throw new Error('The network has changed. Update the verifier deployment.');
   const blockNumber = await client.getBlockNumber();
-  const code = await client.getCode({ address: EEZ.address, blockNumber });
-  if (!code || keccak256(code) !== EEZ.runtimeCodeHash) throw new Error('Verifier bytecode does not match the pinned deployment.');
+  const code = await client.getCode({ address: deployment.address, blockNumber });
+  if (!code || keccak256(code) !== deployment.runtimeCodeHash) throw new Error('Verifier bytecode does not match the pinned deployment.');
   signal.throwIfAborted();
   return { client, blockNumber };
 }
 
-export async function simulateL2(client: EezClient, sample: PublicSample, signal: AbortSignal, account: Address) {
-  const { blockNumber } = await checkDeployment(client, signal);
-  const valid = await client.readContract({ address: EEZ.address, abi: verifierAbi, functionName: 'verify', args: [sample.message, sample.signature, sample.publicKey], blockNumber });
+export async function simulateL2(client: EezClient, sample: PublicSample, signal: AbortSignal, account: Address, deployment: VerifierDeployment) {
+  const { blockNumber } = await checkDeployment(client, signal, deployment);
+  const valid = await client.readContract({ address: deployment.address, abi: verifierAbi, functionName: 'verify', args: [sample.message, sample.signature, sample.publicKey], blockNumber });
   if (!valid) return { valid, blockNumber, gas: null };
-  const gas = await client.estimateGas({ account, to: EEZ.address, data: recordData(sample), blockNumber });
+  const gas = await client.estimateGas({ account, to: deployment.address, data: recordData(sample), blockNumber });
   return { valid, blockNumber, gas };
 }
 
 /** Receipt success alone is insufficient: require this verifier's event bound to all submitted inputs. */
-export function verifiedReceipt(receipt: TransactionReceipt, sample: PublicSample, submitter: Address) {
-  if (receipt.status !== 'success' || receipt.to?.toLowerCase() !== EEZ.address.toLowerCase()) return false;
+export function verifiedReceipt(receipt: TransactionReceipt, sample: PublicSample, submitter: Address, deployment: VerifierDeployment) {
+  if (receipt.status !== 'success' || receipt.to?.toLowerCase() !== deployment.address.toLowerCase()) return false;
   return receipt.logs.some(log => {
-    if (log.address.toLowerCase() !== EEZ.address.toLowerCase()) return false;
+    if (log.address.toLowerCase() !== deployment.address.toLowerCase()) return false;
     try {
       const event = decodeEventLog({ abi: recordAbi, eventName: 'SignatureVerified', data: log.data, topics: log.topics, strict: true });
       return event.args.submitter.toLowerCase() === submitter.toLowerCase()
@@ -75,8 +67,8 @@ export function verifiedReceipt(receipt: TransactionReceipt, sample: PublicSampl
   });
 }
 
-export async function waitForVerification(client: EezClient, hash: Hex, sample: PublicSample, submitter: Address, signal: AbortSignal) {
-  await checkDeployment(client, signal);
+export async function waitForVerification(client: EezClient, hash: Hex, sample: PublicSample, submitter: Address, signal: AbortSignal, deployment: VerifierDeployment) {
+  await checkDeployment(client, signal, deployment);
   // An explicit bounded poll stops on unmount; a timeout leaves the submitted hash available for rechecking.
   const until = Date.now() + 120_000;
   while (Date.now() < until) {
@@ -88,7 +80,7 @@ export async function waitForVerification(client: EezClient, hash: Hex, sample: 
     }
     if (receipt) {
       if (receipt.status !== 'success') throw new Error('The L2 transaction reverted.');
-      if (!verifiedReceipt(receipt, sample, submitter)) throw new Error('The receipt does not contain the expected Falcon verification event.');
+      if (!verifiedReceipt(receipt, sample, submitter, deployment)) throw new Error('The receipt does not contain the expected Falcon verification event.');
       if ((await client.getBlock({ blockNumber: receipt.blockNumber })).hash !== receipt.blockHash) throw new Error('The receipt block was reorganized. Check the transaction again.');
       return receipt;
     }

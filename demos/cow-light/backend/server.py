@@ -24,8 +24,10 @@ CATALOG=CFG['TOKEN_CATALOG']; QUEUE=CFG['ORDER_QUEUE']; QUEUE_LOCK=QUEUE.with_su
 SOLVER_LOG=CFG['SOLVER_LOG']
 L1_RPC=CFG['L1_RPC']; L2_RPC=CFG['L2_RPC']; L2_FRONT=CFG['L2_FRONT']
 L1_CHAIN=CFG['L1_CHAIN_ID']; L2_CHAIN=CFG['L2_CHAIN_ID']
-WETH=CFG['WETH_L1']; WETH_L2=CFG['WETH_L2']
-SETTLEMENT=CFG['SETTLEMENT_L2']; BRIDGE_L2=CFG['BRIDGE_L2']
+# Missing application bindings must disable trading, not take down the status
+# API. Every trading endpoint checks the complete deployment before using them.
+WETH=CFG.get('WETH_L1'); WETH_L2=CFG.get('WETH_L2')
+SETTLEMENT=CFG.get('SETTLEMENT_L2'); BRIDGE_L2=CFG['BRIDGE_L2']
 NATIVE_WETH_L2=CFG.get('NATIVE_WETH_L2')
 PAIR_ABI=[{"type":"function","name":"getReserves","stateMutability":"view","inputs":[],"outputs":[{"type":"uint112"},{"type":"uint112"},{"type":"uint32"}]},{"type":"function","name":"token0","stateMutability":"view","inputs":[],"outputs":[{"type":"address"}]}]
 BRIDGE_ABI=[{"type":"function","name":"getWrappedToken","stateMutability":"view","inputs":[{"type":"address"},{"type":"uint64"}],"outputs":[{"type":"address"}]}]
@@ -199,12 +201,12 @@ def order_debug(row, events):
 
 class Handler(BaseHTTPRequestHandler):
     def send_json(self,obj,code=200):
-        b=json.dumps(obj).encode();self.send_response(code);self.send_header("content-type","application/json");self.send_header("content-length",str(len(b)));self.send_header("access-control-allow-origin","*");self.end_headers();self.wfile.write(b)
+        b=json.dumps(obj).encode();self.send_response(code);self.send_header("content-type","application/json");self.send_header("content-length",str(len(b)));self.send_header("cache-control","no-store");self.send_header("access-control-allow-origin","*");self.end_headers();self.wfile.write(b)
     def do_OPTIONS(self):self.send_response(204);self.send_header("access-control-allow-origin","*");self.send_header("access-control-allow-headers","content-type");self.end_headers()
     def do_GET(self):
         p=urlparse(self.path)
         try:
-            if p.path in ('/api/config', '/api/quote', '/api/wrapper', '/api/allowance', '/api/balances', '/api/faucet'):
+            if p.path in ('/api/config', '/api/tokens', '/api/quote', '/api/wrapper', '/api/allowance', '/api/balances', '/api/faucet'):
                 try:
                     CFG.check_deployment(l1=l1,l2=l2)
                 except Exception:
@@ -276,6 +278,6 @@ class Handler(BaseHTTPRequestHandler):
 if __name__=="__main__":
     # Keep the status API available after a reset; trading requests and the
     # solver independently validate the live deployment before proceeding.
-    catalog()
-    port=int(os.getenv("PORT","8787"));print(f"EEZ CoW Light UI: http://127.0.0.1:{port}",flush=True)
-    ThreadingHTTPServer((os.getenv("HOST","127.0.0.1"),port),Handler).serve_forever()
+    server=ThreadingHTTPServer((os.getenv("HOST","127.0.0.1"),int(os.getenv("PORT","8787"))),Handler)
+    print(f"EEZ CoW Light UI: http://127.0.0.1:{server.server_port}",flush=True)
+    server.serve_forever()

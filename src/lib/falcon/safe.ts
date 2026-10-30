@@ -23,7 +23,7 @@ const guardSlot = '0x4a204f620c8c5ccdca3fd54d003badd85ba500436a431f0cbda4f558c93
 const fallbackSlot = '0x6c9a6c4a39284e37ed1cf53d337577d14212a4870fb976a4366c693b939918d5' as Hex;
 export type RemoteSafe = { owner: Address; target: Address | null; nonce: bigint | null; balance: bigint | null };
 export type SafeOperation = { kind: 'create' } | {
-  kind: 'transfer'; target: Address; owner: Address; recipient: Address; value: bigint; safeNonce: bigint; safeTxHash: Hex;
+  kind: 'transfer'; target: Address; owner: Address; recipient: Address; value: bigint; data?: Hex; safeNonce: bigint; safeTxHash: Hex;
 };
 
 /** Safe v=1 approval is authenticated by its caller. These public bytes alone grant no authority. */
@@ -43,11 +43,26 @@ export function parseSafeTransfer(recipient: string, amount: string): { recipien
   if (value <= 0n || value > maxUint256) throw new Error('Transfer amount must be positive and fit uint256.');
   return { recipient: getAddress(recipient), value };
 }
+export function parseSafeData(input: string): Hex {
+  const data = input.trim() || '0x';
+  if (!/^0x(?:[0-9a-f]{2})*$/i.test(data)) throw new Error('Data must be complete hexadecimal bytes starting with 0x.');
+  if (data.length > 2 + 60 * 1024 * 2) throw new Error('Transaction data exceeds 60 KiB.');
+  return data.toLowerCase() as Hex;
+}
+export function parseSafeTransaction(recipient: string, amount: string, input = ''): { recipient: Address; value: bigint; data: Hex } {
+  const data = parseSafeData(input);
+  if (data === '0x') return { ...parseSafeTransfer(recipient, amount), data };
+  if (!isAddress(recipient) || sameAddress(recipient, zeroAddress)) throw new Error('Enter a valid, nonzero recipient address.');
+  if (!/^(0|[1-9]\d*)(\.\d{1,18})?$/.test(amount)) throw new Error('Enter an amount with at most 18 decimal places.');
+  const value = parseUnits(amount, 18);
+  if (value > maxUint256) throw new Error('Transaction amount must fit uint256.');
+  return { recipient: getAddress(recipient), value, data };
+}
 export function safeOperationCall(d: CrossChainDeployment, op: SafeOperation) {
   if (!d.l1.safe) throw new Error('Safe deployment has not been configured.');
   return op.kind === 'create'
     ? { target: d.l1.safe.factory.address, data: encodeFunctionData({ abi: safeFactoryAbi, functionName: 'createSafe' }) }
-    : { target: op.target, data: safeCallData(op.owner, op.recipient, op.value) };
+    : { target: op.target, data: safeCallData(op.owner, op.recipient, op.value, op.data ?? '0x') };
 }
 
 export async function loadRemoteSafe(client: EezClient, d: CrossChainDeployment, controller: Address, signal: AbortSignal, atBlock?: bigint): Promise<RemoteSafe> {
@@ -85,15 +100,16 @@ export async function loadRemoteSafe(client: EezClient, d: CrossChainDeployment,
   return { owner, target, nonce, balance };
 }
 
-export async function prepareSafeTransfer(client: EezClient, d: CrossChainDeployment, controller: Address, recipient: Address, value: bigint, signal: AbortSignal): Promise<SafeOperation> {
+export async function prepareSafeTransfer(client: EezClient, d: CrossChainDeployment, controller: Address, recipient: Address, value: bigint, signal: AbortSignal, input: Hex = '0x'): Promise<SafeOperation> {
+  const data = parseSafeData(input);
   const blockNumber = await client.getBlockNumber();
   const remote = await loadRemoteSafe(client, d, controller, signal, blockNumber);
   if (!remote.target || remote.nonce === null || remote.balance === null) throw new Error('Create your Safe first.');
   if (sameAddress(recipient, remote.target)) throw new Error('Choose a recipient other than this Safe.');
   if (remote.balance < value) throw new Error('Safe balance is too low. Fund this Safe on L1, then reload.');
-  const safeTxHash = await client.readContract({ address: remote.target, abi: safeAbi, functionName: 'getTransactionHash', args: [...safeCallFields(recipient, value), remote.nonce], blockNumber });
+  const safeTxHash = await client.readContract({ address: remote.target, abi: safeAbi, functionName: 'getTransactionHash', args: [...safeCallFields(recipient, value, data), remote.nonce], blockNumber });
   signal.throwIfAborted();
-  return { kind: 'transfer', target: remote.target, owner: remote.owner, recipient, value, safeNonce: remote.nonce, safeTxHash };
+  return { kind: 'transfer', target: remote.target, owner: remote.owner, recipient, value, data, safeNonce: remote.nonce, safeTxHash };
 }
 
 export function safeCallResult(op: SafeOperation, result: Hex): Address | true {
@@ -120,7 +136,7 @@ export function hasSafeExecution(receipt: TransactionReceipt, op: Extract<SafeOp
         const a = event.args;
         if (a.additionalInfo.length !== 194) continue;
         const [nonce, sender, threshold] = decodeAbiParameters([{ type: 'uint256' }, { type: 'address' }, { type: 'uint256' }], a.additionalInfo);
-        transaction = transaction || (sameAddress(a.to, op.recipient) && a.value === op.value && a.data === '0x' && a.operation === 0
+        transaction = transaction || (sameAddress(a.to, op.recipient) && a.value === op.value && a.data.toLowerCase() === (op.data ?? '0x').toLowerCase() && a.operation === 0
           && a.safeTxGas === 0n && a.baseGas === 0n && a.gasPrice === 0n && sameAddress(a.gasToken, zeroAddress) && sameAddress(a.refundReceiver, zeroAddress)
           && a.signatures.toLowerCase() === safeOwnerApproval(op.owner).toLowerCase() && nonce === op.safeNonce && sameAddress(sender, op.owner) && threshold === 1n);
       }
