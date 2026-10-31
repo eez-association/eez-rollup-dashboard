@@ -3,9 +3,9 @@ import type { CrossChainDeployment } from './crossChainDeployment.ts';
 
 /** Public submission details only. Never store a Falcon secret or signature here. */
 export type RecoveryAttempt = {
-  version: 1; id: string; kind: 'funding' | 'controller'; chainId: number;
+  version: 1; id: string; kind: 'funding' | 'controller' | 'owner'; chainId: number;
   account: Address; to: Address; nonce: string; value: string; data: Hex;
-  publicKey: Hex; controller?: Address; hash?: Hex;
+  publicKey: Hex; controller?: Address; safeNonce?: string; hash?: Hex;
 };
 export function recoveryKey(deployment: CrossChainDeployment, kind: RecoveryAttempt['kind']) {
   const identity = [deployment.l1.chainId, deployment.l1.anchor.blockHash, deployment.l1.registry,
@@ -37,7 +37,7 @@ export function migrateRecovery(storage: JournalStorage, base: string, owner: Re
 export function readRecovery(raw: string | null): RecoveryAttempt | null {
   if (!raw) return null;
   const value = JSON.parse(raw) as RecoveryAttempt;
-  if (!value || value.version !== 1 || !['funding', 'controller'].includes(value.kind)
+  if (!value || value.version !== 1 || !['funding', 'controller', 'owner'].includes(value.kind)
     || typeof value.id !== 'string' || !value.id || !Number.isSafeInteger(value.chainId) || value.chainId <= 0
     || typeof value.account !== 'string' || !isAddress(value.account) || typeof value.to !== 'string' || !isAddress(value.to)
     || typeof value.nonce !== 'string' || !/^(0|[1-9]\d*)$/.test(value.nonce)
@@ -45,6 +45,7 @@ export function readRecovery(raw: string | null): RecoveryAttempt | null {
     || typeof value.data !== 'string' || !/^0x(?:[\da-f]{2})*$/i.test(value.data)
     || typeof value.publicKey !== 'string' || !/^0x[\da-f]{1794}$/i.test(value.publicKey)
     || value.kind === 'funding' && (!isAddress(value.controller ?? '') || value.data !== '0x')
+    || value.kind === 'owner' && (!isAddress(value.controller ?? '') || !/^(0|[1-9]\d*)$/.test(value.safeNonce ?? '') || value.value !== '0')
     || value.hash !== undefined && !/^0x[\da-f]{64}$/i.test(value.hash)) {
     throw new Error('Saved Falcon recovery details are invalid. Preserve this record and check wallet activity before sending again.');
   }

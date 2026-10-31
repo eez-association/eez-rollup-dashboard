@@ -14,6 +14,8 @@ import { l1ActionDigest, l1ControllerAbi, type SignedL1Action } from '../../lib/
 import { canonicalReceipt, checkChain, checkL1Authorization, controllerClient, createL1ControllerData, executeL1Data, FalconTransactionReverted, l1CallResult, loadL1Controller, parseSettlement, sameAddress, type ControllerState } from '../../lib/falcon/l1Controller.ts';
 import { type SafeCostEvidence } from '../../lib/falcon/safeCosts.ts';
 import { SafeCostComparison } from './SafeCostComparison.tsx';
+import { ExistingFalconSafe } from './ExistingFalconSafe';
+import { attachmentKey, readAttachment } from '../../lib/falcon/existingSafe';
 import { SafeFeeQuote } from './SafeFeeQuote.tsx';
 import { fetchFeeQuote, feeErrorMessage, recoverFeeTransaction, StaleFeeQuote, submitFeeQuote, UnknownFeeSubmission, type FeeConfig, type FeeIntent, type FeeTransaction, type QuotedFee } from '../../lib/falcon/l2Fees.ts';
 import styles from './FalconPanel.module.css';
@@ -34,6 +36,9 @@ export function FalconSafe({ signer, wallet, deployment, fees }: { signer: Signe
   const currentScope = useRef(recoveryScope); currentScope.current = recoveryScope;
   const [controller, setController] = useState<ControllerState | null>(null);
   const [remote, setRemote] = useState<RemoteSafe | null>(null);
+  const [existingSafe, setExistingSafe] = useState(false);
+  const [ownerPending, setOwnerPending] = useState(false);
+  const [attachmentRevision, setAttachmentRevision] = useState(0);
   const [lookedUp, setLookedUp] = useState(false);
   const [loadingSafe, setLoadingSafe] = useState(false);
   const [recipient, setRecipient] = useState('');
@@ -80,7 +85,7 @@ export function FalconSafe({ signer, wallet, deployment, fees }: { signer: Signe
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; request.current?.abort(); }; }, []);
   useEffect(() => {
     setController(null); setRemote(null); setLookedUp(false); setPrepared(null); setObservation('L1 read');
-    setCopyNotice('');
+    setCopyNotice(''); setExistingSafe(false); setOwnerPending(false);
     if (!running.current) setNotice(initial);
     // Retain submitted hashes: the extension owns any pending transaction prompt.
   }, [signer.publicKeyHex, deployment]);
@@ -102,8 +107,8 @@ export function FalconSafe({ signer, wallet, deployment, fees }: { signer: Signe
             setController(state); setRemote(target); setLookedUp(true); setLoadingSafe(false);
             if (!running.current) setNotice({ kind: target?.target ? 'valid' : 'neutral', text: target?.target
               ? 'Safe loaded. Ready to send a transaction.'
-              : state ? `Controller ready. Create your Safe on ${deployment.l1.chainName} to continue.`
-                : 'No Safe exists for this Falcon key yet. Click Create Safe to set it up.' });
+              : state ? `Controller ready. Create a Safe or add to an existing Safe on ${deployment.l1.chainName}.`
+                : 'Create your Falcon controller on L2 to begin.' });
             return;
           } catch (error) {
             if (abort.signal.aborted) return;
@@ -114,7 +119,7 @@ export function FalconSafe({ signer, wallet, deployment, fees }: { signer: Signe
       } catch { /* Key changes and unmount cancel read-only discovery. */ }
     })();
     return () => abort.abort();
-  }, [signer.publicKeyHex, deployment, wallet.address]);
+  }, [signer.publicKeyHex, deployment, wallet.address, attachmentRevision]);
   useEffect(() => {
     request.current?.abort(); request.current = null;
     running.current = false; setBusy(false);
@@ -216,7 +221,7 @@ export function FalconSafe({ signer, wallet, deployment, fees }: { signer: Signe
           if (abort.signal.aborted || !mounted.current || currentDeployment.current !== deployment) return;
           setSubmitted({ scope: recoveryScope, kind: 'controller', hash: attempt.hash!, account: attempt.account, publicKey: attempt.publicKey });
           if (sameKey(attempt.publicKey)) { setController(state); setRemote(safe); setLookedUp(true); }
-          setNotice({ kind: 'valid', text: safe.target ? 'Safe loaded. Ready to send a transaction.' : 'Safe setup confirmed. Continue creating your Safe.' });
+          setNotice({ kind: 'valid', text: safe.target ? 'Safe loaded. Ready to send a transaction.' : 'Controller confirmed. Choose a new or existing Safe.' });
           return;
         } catch (error) {
           if (abort.signal.aborted) return;
@@ -354,7 +359,8 @@ export function FalconSafe({ signer, wallet, deployment, fees }: { signer: Signe
     return { session, client: await controllerClient(session.provider, deployment, signal) };
   }
   async function readRemote(address: Address, signal: AbortSignal) {
-    return loadRemoteSafe(l1ReadClient(signal), deployment, address, signal);
+    const attachment = signer.publicKeyHex ? readAttachment(localStorage, attachmentKey(deployment, `0x${signer.publicKeyHex}`)) : undefined;
+    return loadRemoteSafe(l1ReadClient(signal), deployment, address, signal, undefined, attachment);
   }
   const l1ReadClient = (signal: AbortSignal) => eezClient(falconReadProvider(config.l1Rpc, signal, deployment.l1.chainName));
 
@@ -379,7 +385,7 @@ export function FalconSafe({ signer, wallet, deployment, fees }: { signer: Signe
     let state = await loadL1Controller(client, deployment, key.publicKey, signal);
     if (!state && create) {
       if (controllerJournal.attempt || controllerJournal.error) throw new Error('Recover the previous controller setup before submitting another.');
-      setNotice({ kind: 'pending', text: 'First setup step: approve preparation of your Safe. A second wallet confirmation will create the account.' });
+      setNotice({ kind: 'pending', text: 'Approve creation of your Falcon controller on L2. Choose a Safe after confirmation.' });
       const data = createL1ControllerData(key.publicKey);
       const gas = await client.estimateGas({ account: session.account, to: deployment.l2.factory.address, data });
       const nonce = await client.getTransactionCount({ address: session.account, blockTag: 'pending' });
@@ -421,7 +427,7 @@ export function FalconSafe({ signer, wallet, deployment, fees }: { signer: Signe
     let operation: SafeOperation = { kind: 'create' };
     if (remote.target) {
       const transfer = parseSafeTransaction(input.recipient, input.amount, input.data);
-      operation = await prepareSafeTransfer(l1ReadClient(signal), deployment, controller.controller, transfer.recipient, transfer.value, signal, transfer.data);
+      operation = await prepareSafeTransfer(l1ReadClient(signal), deployment, controller.controller, transfer.recipient, transfer.value, signal, transfer.data, remote.attachment);
     }
     const { client } = await sourceSession(signal);
     const state = await loadL1Controller(client, deployment, key.publicKey, signal);
@@ -483,6 +489,18 @@ export function FalconSafe({ signer, wallet, deployment, fees }: { signer: Signe
     });
   }
 
+  function createController() {
+    return run(async signal => {
+      const key = keySnapshot();
+      const state = await findController(key, signal, true);
+      if (!state) throw new Error('Controller setup is not ready.');
+      const safe = await readRemote(state.controller, signal);
+      key.assertCurrent();
+      setController(state); setLookedUp(true); setRemote(safe);
+      setNotice({ kind: 'valid', text: 'Controller ready. Create a Safe or add to an existing Safe.' });
+    });
+  }
+
   function createSafe() {
     return run(async signal => {
       if (uncertain) throw new Error('Recover the previous wallet transaction before sending again.');
@@ -493,7 +511,8 @@ export function FalconSafe({ signer, wallet, deployment, fees }: { signer: Signe
         && sameKey(submitted.publicKey) && submitted.hash !== revertedSourceHash) {
         return;
       }
-      const state = controller ?? await findController(key, signal, true);
+      if (ownerPending) throw new Error('Finish the existing Safe owner transaction first.');
+      const state = controller ?? await findController(key, signal);
       if (!state) throw new Error('Safe setup is not ready. Try loading your Safe again.');
       setController(state); setLookedUp(true);
       const current = await readRemote(state.controller, signal);
@@ -620,7 +639,7 @@ export function FalconSafe({ signer, wallet, deployment, fees }: { signer: Signe
     setNotice({ kind: 'pending', text: 'Checking the Safe and Falcon authorization, then estimating the cross-chain call…' });
     if (prepared.operation.kind === 'transfer') {
       const op = prepared.operation;
-      const current = await prepareSafeTransfer(l1ReadClient(signal), deployment, prepared.signed.action.controller, op.recipient, op.value, signal, op.data ?? '0x');
+      const current = await prepareSafeTransfer(l1ReadClient(signal), deployment, prepared.signed.action.controller, op.recipient, op.value, signal, op.data ?? '0x', op.attachment);
       if (current.kind !== 'transfer' || !sameAddress(current.target, op.target) || current.safeNonce !== op.safeNonce || current.safeTxHash !== op.safeTxHash) throw new Error('Safe changed. Reload and sign the transfer again.');
     }
     const { session, client } = await sourceSession(signal);
@@ -735,19 +754,30 @@ export function FalconSafe({ signer, wallet, deployment, fees }: { signer: Signe
       <ol id="safe-setup-progress" className={styles.setupSteps} aria-label="Safe setup progress" aria-live="polite">
         <li data-state={preparationComplete ? 'complete' : 'active'} aria-current={!preparationComplete ? 'step' : undefined}>
           <span className={styles.setupNumber} aria-hidden="true">1</span>
-          <div><strong>Create Falcon controller</strong><p>Deploy a controller contract on {deployment.l2.chainName}, bound to your Falcon public key.</p></div>
+          <div><strong>Create Falcon controller</strong><p>Deploy your controller on {deployment.l2.chainName} · L2.</p></div>
           {preparationComplete && <span className={styles.setupComplete} aria-label="Complete">✓</span>}
         </li>
-        <li data-state={preparationComplete ? 'active' : 'pending'} aria-current={preparationComplete ? 'step' : undefined}>
+        {preparationComplete && <li data-state="active" aria-current="step">
           <span className={styles.setupNumber} aria-hidden="true">2</span>
-          <div><strong>Create Safe</strong><p>Create your Safe on {deployment.l1.chainName}, controlled by that contract.</p></div>
-        </li>
+          <div><strong>Choose your Safe</strong><p>Create a Safe or add your controller to an existing Safe on {deployment.l1.chainName} · L1.</p></div>
+        </li>}
       </ol>
-      <button id="safe-create" className={`btn btn-solid ${styles.action} ${setupRunning ? styles.setupRunning : ''}`}
-        disabled={unavailable} aria-busy={setupRunning} onClick={() => void createSafe()}>
-        {setupRunning ? 'Creating Falcon Safe…' : 'Create Safe'}
-      </button>
-      {controller && <SafeFeeQuote fee={fee} config={fees} />}
+      {!preparationComplete ? <button id="controller-create" className={`btn btn-solid ${styles.action}`} disabled={unavailable} aria-busy={setupRunning} onClick={() => void createController()}>
+        {setupRunning ? 'Creating controller…' : 'Create Falcon controller'}
+      </button> : <>
+        {!existingSafe && <div className={styles.actions}>
+          <button id="safe-create" className={`btn btn-solid ${styles.action}`} disabled={unavailable || ownerPending} aria-busy={setupRunning} onClick={() => void createSafe()}>
+            {setupRunning ? 'Creating Safe…' : 'Create a Safe'}
+          </button>
+          <button className={`btn btn-outline ${styles.action}`} disabled={unavailable || ownerPending} onClick={() => setExistingSafe(true)}>Add to existing Safe</button>
+        </div>}
+        {existingSafe && <button className="btn btn-outline" disabled={unavailable || ownerPending} onClick={() => setExistingSafe(false)}>Back to Safe options</button>}
+        {controller && signer.publicKeyHex && <ExistingFalconSafe key={recoveryScope} wallet={wallet} deployment={deployment} controller={controller}
+          publicKey={`0x${signer.publicKeyHex}`} disabled={unavailable} visible={existingSafe} onPending={setOwnerPending}
+          isCurrent={() => mounted.current && currentKey.current === signer.publicKeyHex && currentScope.current === recoveryScope && currentDeployment.current === deployment}
+          onAttached={() => { setExistingSafe(false); setOwnerPending(false); setAttachmentRevision(value => value + 1); }} />}
+        {!existingSafe && <SafeFeeQuote fee={fee} config={fees} />}
+      </>}
     </div>}
     {!signer.publicKeyHex && <p role="status" className={`${styles.status} ${styles.unlockNotice}`}><strong>Unlock your Falcon key</strong><br />Your Safe account will load automatically.</p>}
     {(fundingJournal.error || controllerJournal.error) && <p role="alert">{fundingJournal.error || controllerJournal.error}</p>}
@@ -841,7 +871,7 @@ export function FalconSafe({ signer, wallet, deployment, fees }: { signer: Signe
       </section> : null}
       <details className={styles.details}><summary>Contracts &amp; authority</summary>
         <p className={styles.hint}>{observation} · Controller nonce {controller.nonce.toString()}.</p>
-        <p className={styles.hint}>The controller’s L1 proxy is the Safe’s sole owner. No recovery owner or module is installed. Keep your encrypted Falcon backup.</p>
+        <p className={styles.hint}>{remote.attachment ? 'Your wallet and the controller’s L1 proxy are the two owners, with threshold 1. Existing Safe modules and settings are preserved.' : 'The controller’s L1 proxy is the Safe’s sole owner. No recovery owner or module is installed.'} Keep your encrypted Falcon backup.</p>
         <p className={styles.contractDetails}><a id="safe-controller" href={`${deployment.l2.explorer}/address/${controller.controller}`} target="_blank" rel="noreferrer">L2 controller · {controller.controller}</a></p>
         <p className={styles.contractDetails}><a href={`${deployment.l1.explorer}/address/${remote.owner}`} target="_blank" rel="noreferrer">L1 owner proxy · {remote.owner}</a></p>
       </details>

@@ -56,20 +56,28 @@ retain their separate gas estimation path.
    or imported. This uses read-only RPCs and never opens a wallet prompt. The
    factory maps each Falcon key to its controller; routing, code and authority
    are checked before the account is shown.
-4. If no Safe exists, click **Create Safe**. The app prepares the Falcon
-   authorization, obtains a fresh fee quote and opens the selected gas wallet
-   for transaction approval. For a brand-new key it also creates the L2 controller,
-   so first-time setup can require two wallet confirmations. The controller's L1 proxy becomes the Safe's sole
-   owner. Empty Safe balance and nonce fields stay hidden before creation.
-   A known pending creation is checked automatically instead of sending another
-   request. The dashboard Treasury demo is a separate wallet workflow.
+4. If no controller exists, click **Create Falcon controller** and confirm its
+   deployment on L2. Confirmation opens the Safe choices; it never creates a Safe
+   automatically. **Create a Safe** runs the existing Falcon-authorized creation
+   flow on L1, with the controller's L1 proxy as sole owner. **Add to existing
+   Safe** instead opens an L1 address field. A completed Treasury setup on the
+   same network supplies its L1 Safe as an editable suggestion.
+   **Add owner** supports a verified Safe whose only owner is the connected wallet
+   and whose threshold is 1. The wallet signs an EIP-712 Safe transaction, then
+   submits it on L1 to add the controller's deterministic L1 proxy. The wallet
+   remains an owner and the threshold stays at 1 (1 of 2). Existing modules and
+   handler are retained; the L2 mirror is not modified. Nonce or ownership changes
+   invalidate the review. The attached Safe address is remembered in this browser,
+   scoped to the deployment and Falcon key, and its live authority is checked on
+   every load and transaction. The registry can provision the owner proxy on the
+   first cross-chain call.
 5. L2 inclusion and L1 execution are checked automatically. A source receipt
    alone is not proof of canonical L1 execution: the UI also checks settlement,
    Safe ownership and, for transfers, the exact operation, success event and
    consumed nonce. Transient read failures retry without resending. Use **See in
    trace decoder** to inspect the submitted transaction; manual receipt and
    replay-diagnostic buttons are omitted.
-6. The gas wallet card shows separate L1 and L2 balances. **Fund Safe** sends a
+6. The gas wallet stays in the dashboard header. **Fund Safe** sends a
    native-token transfer from that wallet to the Safe on Chiado, with an editable
    amount defaulting to **0.01 xDAI**. The wallet requests the necessary network
    switch and transaction approval. Funding confirmation and balance refresh are
@@ -91,10 +99,11 @@ retain their separate gas estimation path.
    as estimated. xDAI uses $1 per token; ETH uses a live ETH/USD quote.
    Chiado/Gnosis are the xDAI fallback; other networks default to ETH.
 
-Funding and first-time controller setup save public recovery details before
+Funding, first-time controller setup and L1 owner addition save recovery details before
 opening the wallet, including the sender, nonce, destination, amount, and data.
 Pending records survive navigation and reloads; they never include a Falcon
-secret or signature. Recovery display and blocking are scoped to the connected
+secret or Falcon signature. Owner-addition calldata includes the wallet’s EOA Safe
+approval for that exact nonce. Recovery display and blocking are scoped to the connected
 sender and unlocked Falcon key. Locking the key or switching wallets/keys hides
 unrelated requests without deleting them; returning restores automatic checks.
 Legacy deployment-wide records migrate to their recorded sender and key under
