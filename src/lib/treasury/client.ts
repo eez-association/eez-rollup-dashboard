@@ -8,6 +8,7 @@ import { parseMainnetBindings, validateMainnet, treasuryExplorerUrl } from "./ma
 import type { MainnetBindings } from "./mainnet.ts";
 import type { SetupNetwork } from './mainnetSetup.ts';
 import { validateDiscoveredNetwork } from './networkDiscovery.ts';
+import { readBridgeManager } from '../bridgeManager.ts';
 import { decodeSafeExecution, safeExecutionTopics } from "./safeEvents.ts";
 import { supportedSafeVersion } from "./safeSetup.ts";
 import { mirrorRelayOutcome } from "./mirrorRelay.ts";
@@ -328,7 +329,9 @@ export class TreasuryClient {
         const bridge = chain === "l1" ? p.bridgeL1 : p.bridgeL2;
         for (const [name, expected] of [...(p.bridgeKind === "standard" ? [] : [["canonicalToken", p.tokenL1]]), ["manager", chain === "l1" ? c.registry : c.manager],
           ["canonicalBridgeAddress", chain === "l1" ? p.bridgeL2 : p.bridgeL1]])
-          requireThat(same(await contractRead(this, chain, bridge, treasuryBridgeAbi, name!) as string, expected!), "Reverse route bridge bindings changed");
+          requireThat(same(name === 'manager' && p.bridgeKind === 'standard'
+            ? await readBridgeManager(data => this.rpc(c[chain].rpc, 'eth_call', [{ to: bridge, data }, 'latest']))
+            : await contractRead(this, chain, bridge, treasuryBridgeAbi, name!) as string, expected!), "Reverse route bridge bindings changed");
         requireThat((p.bridgeKind === "standard" || await contractRead(this, chain, bridge, treasuryBridgeAbi, "treasuryRollupId") === rollup)
           && await contractRead(this, chain, bridge, treasuryBridgeAbi, "rollupId") === (chain === "l1" ? 0n : rollup), "Reverse route rollup binding changed");
       }

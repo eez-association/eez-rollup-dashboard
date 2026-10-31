@@ -137,6 +137,7 @@ def main():
 
     from web3 import Web3
     from eth_account import Account
+    from deployment.route_identity import bridge_manager
     cfg = load_config()
     l1 = Web3(Web3.HTTPProvider(cfg['L1_RPC'], request_kwargs={'timeout': 30}))
     l2 = Web3(Web3.HTTPProvider(cfg['L2_RPC'], request_kwargs={'timeout': 30}))
@@ -164,13 +165,13 @@ def main():
             result['implementation'] = code_identity(w, impl, False)
         return result
 
-    registry = read(l1, bridge1, 'manager')
+    registry = bridge_manager(l1, bridge1)
     expected_registry = cfg.get('REGISTRY_L1')
     if not expected_registry or registry.lower() != expected_registry.lower():
         raise ValueError('L1 bridge manager does not match EEZ_REGISTRY_ADDRESS')
     validate_bridge_peer(bridge1, read(l1, bridge1, 'canonicalBridgeAddress'), bridge2)
     validate_bridge_peer(bridge2, read(l2, bridge2, 'canonicalBridgeAddress'), bridge1)
-    if read(l2, bridge2, 'manager').lower() != manager.lower():
+    if bridge_manager(l2, bridge2).lower() != manager.lower():
         raise ValueError('Bridge manager mismatch')
     rollup = cfg['L2_ROLLUP_ID']
     if (read(l1, bridge1, 'rollupId', outputs=('uint64',)) != 0 or

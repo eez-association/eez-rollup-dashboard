@@ -6,6 +6,7 @@ const { toFunctionSelector } = require('viem');
 const fs = require('node:fs');
 const factoryBundle = fs.readdirSync('src/lib/treasury/builds').map(f => JSON.parse(fs.readFileSync('src/lib/treasury/builds/'+f))).find(b => b.contracts.Bridge);
 const bridgeRuntime = factoryBundle.contracts.Bridge.runtime;
+const proxyFactories = JSON.parse(fs.readFileSync('tests/fixtures/bridge-token-factories.json'));
 const origin = process.env.EEZ_UI_URL || 'http://127.0.0.1:8083/dashboard';
 const addr = c => '0x' + c.repeat(40);
 const account = addr('2'), l1Token = addr('7'), l2Token = addr('8'), bridge = addr('1');
@@ -63,7 +64,9 @@ async function fixture(browser, options = {}) {
     if (/send|sign/i.test(method)) { writes.push(method); return route.abort(); }
     const reply = result => route.fulfill({json: {jsonrpc: '2.0', id, result}});
     if (method === 'eth_chainId') return reply(path.endsWith('l1') ? options.chain || '0x27d8' : '0x1892');
-    if (method === 'eth_getCode') return reply(params[0].toLowerCase() === bridge ? bridgeRuntime : '0x');
+    if (method === 'eth_getCode') return reply(params[0].toLowerCase() === bridge ? options.modern ? proxyFactories.proxy : bridgeRuntime
+      : options.modern && params[0].toLowerCase() === addr('a') ? options.unknownImplementation ? '0x6000' : proxyFactories.implementation : '0x');
+    if (method === 'eth_getStorageAt' && options.modern) return reply('0x'+addr('a').slice(2).padStart(64,'0'));
     if (method === 'eth_getBalance') return reply(word(10n**19n));
     if (method === 'eth_getBlockByNumber') return reply({number:'0x10',timestamp:'0x'+Math.floor(Date.now()/1000).toString(16),transactions:[],baseFeePerGas:'0x7',gasUsed:'0x0',gasLimit:'0x1c9c380'});
     if (method === 'eth_getLogs') return reply([]);
@@ -75,6 +78,7 @@ async function fixture(browser, options = {}) {
       if (selector === toFunctionSelector('getWrappedToken(address,uint64)')) return reply(word(0));
       if (tx.to.toLowerCase() === addr('0')) return reply('0x');
       if (tx.to.toLowerCase() === addr('5')) await new Promise(r => setTimeout(r, 500));
+      if (selector === toFunctionSelector('manager()') && options.modern) return route.fulfill({json:{jsonrpc:'2.0',id,error:{code:3,message:'execution reverted'}}});
       if (['0xb3f5aaab', '0x481c6a75'].includes(selector)) return reply('0x' + addr('3').slice(2).padStart(64,'0'));
       if (selector === '0x313ce567') return reply(word(18));
       if (selector === '0x95d89b41') return reply(text(tx.to.toLowerCase() === l2Token ? 'ROLL' : tx.to.toLowerCase() === dai.toLowerCase() ? 'DAI' : 'CHI'));
@@ -209,6 +213,36 @@ async function saved(f, symbol, address) {
     const wrappedRow=f.panel.getByRole('button',{name:'Select CHI '+addr('4'),exact:true});
     await wrappedRow.getByText('Proxy',{exact:true}).waitFor();
     assert.equal(await wrappedRow.locator('code').first().getAttribute('title'),l2Token);
+    await f.close();
+
+    // A current proxy exposing only EEZContract can import an unbridged
+    // original on either chain. The browser must retain the predicted pair.
+    for (const reverse of [false,true]) {
+      f = await fixture(browser,{modern:true});
+      if (reverse) {
+        await f.panel.getByRole('button',{name:'Close token picker',exact:true}).click();
+        await f.panel.getByRole('button',{name:/^Swap source and destination:/}).click();
+        await open(f);
+      }
+      const original = reverse ? l2Token : l1Token, symbol = reverse ? 'ROLL' : 'CHI';
+      await f.panel.getByRole('button',{name:`Select ${symbol} ${original}`,exact:true}).click();
+      await f.panel.getByRole('button',{name:'Add token & select',exact:true}).click();
+      await f.panel.getByLabel('Bridge amount',{exact:true}).locator('..').getByText(symbol,{exact:true}).waitFor();
+      const pair = await f.page.evaluate(address=>{
+        const tokens=JSON.parse(localStorage.getItem('bridgeRecentTokens'));
+        const original=tokens.find(t=>t.address===address);
+        return [original,tokens.find(t=>t.address===original.counterpart.address)];
+      },original);
+      assert.equal(pair[1].predicted,true);
+      assert.equal(pair[0].chainId,reverse ? 6290 : 10200);
+      assert.equal(pair[1].chainId,reverse ? 10200 : 6290);
+      assert(!f.calls.some(call=>call.method==='eth_call' && call.params[0].data===toFunctionSelector('manager()')));
+      await f.close();
+    }
+    f = await fixture(browser,{modern:true,unknownImplementation:true});
+    await f.panel.getByRole('button',{name:'Select CHI '+l1Token,exact:true}).click();
+    await f.panel.getByText('This bridge implementation does not support token address prediction yet.',{exact:true}).waitFor();
+    assert.equal(await f.panel.getByRole('button',{name:'Add token & select',exact:true}).count(),0);
     await f.close();
 
     // Corrupt local storage does not break the bridge.
