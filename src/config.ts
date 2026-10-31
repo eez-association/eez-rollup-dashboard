@@ -14,6 +14,8 @@ export const config = {
   l1NetworkName: "L1 network",
   l1NetworkLogo: "generic" as "ethereum" | "gnosis" | "generic",
   l1NetworkLogoUrl: "",
+  /** Set when the L1 RPC reports Ethereum mainnet (chain ID 1); shows the devnet notice. */
+  l1IsEthereumMainnet: false,
   /** Optional Blockscout API and chain-filtered public token list. */
   l1ExplorerApi: "",
   tokenListUrl: "",

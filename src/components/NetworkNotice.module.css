@@ -1,0 +1,15 @@
+.notice {
+  width: calc(100% - 64px);
+  max-width: 1136px;
+  margin: var(--sp-4) auto 0;
+  padding: 10px var(--sp-4);
+  border: 1px solid var(--yellow-border);
+  border-left: 3px solid var(--yellow);
+  border-radius: var(--radius-sm);
+  background: var(--yellow-dim);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.notice strong { color: var(--text-bright); font-weight: 600; }
+@media (max-width: 640px) { .notice { width: calc(100% - 36px); margin-top: 12px; } }
