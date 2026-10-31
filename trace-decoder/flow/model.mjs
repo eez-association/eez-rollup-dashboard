@@ -124,7 +124,7 @@ export function buildFlowModel(trace, { label, explorers = {}, mode = 'combined'
       kind: 'call', frameId: frame.id, chain: frame.chain, role,
       tokenTransfers: [...(transfers.get(frame.id) || [])],
       protocol: PROTOCOL_ROLES.has(role) || role === 'proxy-creation', callType: frame.type || 'CALL',
-      contract, address: frame.to ?? null, from: frame.from ?? null,
+      contract, accountType: d.accountType, address: frame.to ?? null, from: frame.from ?? null,
       fn: role === 'system-value-transfer' ? 'Value to L2 system' : functionName(d, frame), signature: d.signature || null, args: (d.arguments || []).map(argument),
       ret: returnInfo(d, frame), value: String(frame.value ?? '0'), isStatic: !!frame.isStatic,
       crossChainRead: !!frame.isStatic && (outgoingByFrame.has(frame.id) || incomingByFrame.has(frame.id)),
@@ -274,6 +274,44 @@ export function buildFlowModel(trace, { label, explorers = {}, mode = 'combined'
   transactions.sort((a, b) => Number(b.inFlow === true || b.requested) - Number(a.inFlow === true || a.requested) || (rank[a.role] ?? 9) - (rank[b.role] ?? 9) || Number(a.block ?? 0) - Number(b.block ?? 0) || Number(a.index ?? 0) - Number(b.index ?? 0));
 
   for (const node of nodes) node.inFlow = scope.frames.has(node.frameId || node.crossing?.managerFrameId);
+  // Linking a remote call moves it out of its recorded executeOnBehalf parent.
+  // For L2-started flows retain that observed L1 caller as a second connection
+  // to the same node. It is not another execution or a second tree parent.
+  const protocolLinks = [];
+  if (!physical && trace.origin?.chain === 'L2') {
+    const byFrame = new Map(nodes.filter(node => node.frameId).map(node => [node.frameId, node]));
+    for (const incoming of trace.incoming || []) {
+      const caller = byFrame.get(incoming.proxyFrameId), target = byFrame.get(incoming.frameId);
+      if (caller?.chain !== 'L1' || !target || !target.inFlow || target.crossing?.status !== 'matched' ||
+          caller.role !== 'incoming-proxy' || caller.tx !== target.tx || caller.chain !== target.chain ||
+          frames.get(target.frameId)?.parentId !== caller.frameId || caller.children.includes(target.id)) continue;
+      protocolLinks.push({ from: caller.id, to: target.id });
+    }
+    // Attempts are batch entries. Recover their physical ancestry because the
+    // logical tree has relocated the matched application calls into the L2 flow.
+    const relatedAttempts = new Set(), checked = new Set();
+    const includeAncestors = id => {
+      for (let frame = frames.get(id); frame && !checked.has(frame.id); frame = frames.get(frame.parentId)) {
+        checked.add(frame.id);
+        if (frame.chain === 'L1' && frame.protocol?.name === '_attemptExecuteImmediateL2Txs') relatedAttempts.add(frame.id);
+      }
+    };
+    for (const id of scope.frames) includeAncestors(id);
+    includeAncestors(exactLink?.l1Execution?.frameId);
+    // An unresolved occurrence can still belong to this flow. Keep its
+    // candidates (including rejected returns) available as execution evidence.
+    for (const outgoing of trace.outgoing || []) if (scope.frames.has(outgoing.frameId)) {
+      for (const id of outgoing.candidates || []) includeAncestors(id);
+      for (const candidate of outgoing.rejectedCandidates || []) includeAncestors(candidate.frameId);
+    }
+    // Without any attribution, leave the available attempts visible.
+    if (relatedAttempts.size) for (const node of nodes) {
+      const frame = frames.get(node.frameId);
+      if (frame?.chain === 'L1' && frame.protocol?.name === '_attemptExecuteImmediateL2Txs') {
+        node.flowAttempt = relatedAttempts.has(frame.id) ? 'related' : 'other';
+      }
+    }
+  }
   const chainIds = trace.metadata?.chainIds || {};
   const relevantIssues = (trace.unresolved || []).filter(u => (!u.frameId || scope.frames.has(u.frameId)) &&
     !(prepared.has(u.frameId) && u.code === 'remote-execution-unavailable'));
@@ -295,7 +333,7 @@ export function buildFlowModel(trace, { label, explorers = {}, mode = 'combined'
     }])),
     settlements: (trace.settlements || []).map(s => ({ id: s.id, l1Tx: s.l1TransactionHash, l1Block: s.l1BlockNumber ?? null, firstL2Block: s.firstL2Block ?? null, lastL2Block: s.lastL2Block ?? null })),
     stateObservations: trace.metadata?.stateObservations || [],
-    transactions, roots, nodes, gas,
+    transactions, roots, nodes, gas, protocolLinks,
     matchingNotes: matchingNotes.map(u => ({ code: u.code, message: u.message, frameId: u.frameId || null })),
     unresolved: unresolved.map(u => ({ code: u.code, message: u.message, frameId: u.frameId || null })),
     stats: { frames: scope.frames.size, preparedResponses: nodes.filter(n => n.preparedResponse && scope.frames.has(n.frameId)).length, preparedResults: [...prepared].filter(id => scope.frames.has(id)).length, crossings: (trace.outgoing || []).filter(o => scope.frames.has(o.frameId)).length, matched: (trace.outgoing || []).filter(o => scope.frames.has(o.frameId) && o.status === 'matched').length, events: (trace.events || []).filter(e => scope.frames.has(e.frameId)).length },

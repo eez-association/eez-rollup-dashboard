@@ -11,7 +11,7 @@ const valid = (r: SourceRequest) => r && /^[a-f\d]{64}$/.test(r.build) && Number
  * identities only: the service selects retained inputs and checks live code. */
 export function dependencySourceRequests(value: unknown, build = currentRelease.build): SourceRequest[] {
   const c = value as Partial<TreasuryConfig> | null;
-  if (!c || !['dashboard-testnet','ethereum-mainnet'].includes(c.environment ?? '') || !c.payments?.pair) return [];
+  if (!c || !['dashboard-testnet','ethereum-mainnet','dashboard-network'].includes(c.environment ?? '') || !c.payments?.pair) return [];
   const requests = new Map<string, SourceRequest>();
   const add = (chain: 'l1' | 'l2', address: unknown) => {
     const chainId = c[chain]?.chainId;

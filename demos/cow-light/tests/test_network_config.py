@@ -2,6 +2,7 @@ import importlib.util
 import ast
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import sys
@@ -19,6 +20,83 @@ OTHER_ADDRESS = '0x' + '34' * 20
 
 
 class ConfigurationTests(unittest.TestCase):
+    def test_compose_shared_environment_respects_selected_deployment_profile(self):
+        compose = (ROOT.parents[1] / 'docker-compose.yml').read_text().split('\nservices:', 1)[0]
+        # Exercise the actual public variable mappings, including their defaults.
+        fields = re.findall(r'^    ([A-Z_0-9]+): "\$\{([A-Z_0-9]+):-([^}]*)\}"$', compose, re.M)
+        self.assertTrue(fields)
+        supplied = {'COW_DEPLOYMENT_ENV':'config/deployments/eez-dev-699169-r2.json',
+                    'EEZ_UI_L2_RPC_UPSTREAM':'http://dashboard/l2',
+                    'EEZ_UI_L1_FRONT_UPSTREAM':'http://dashboard/composer/l1',
+                    'EEZ_REGISTRY_ADDRESS':ADDRESS}
+        env = {key: supplied.get(variable) or default for key, variable, default in fields}
+        with patch('network_config.rpc_chain_id', return_value=699169):
+            cfg = self.config(**env)
+        self.assertEqual(cfg['NETWORK'], 'chiado')
+        self.assertEqual(cfg['L2_CHAIN_ID'], 699169)
+        self.assertEqual(cfg['L1_FRONT'], supplied['EEZ_UI_L1_FRONT_UPSTREAM'])
+        self.assertEqual(cfg['REGISTRY_L1'], ADDRESS)
+        self.assertEqual(cfg.catalog()[0]['symbol'], 'ctUSD')
+        self.assertEqual(self.config(COW_NETWORK='')['NETWORK'], 'mainnet')
+
+    def test_eez_dev_profile_contains_application_settings_not_dashboard_copies(self):
+        filename = 'config/deployments/eez-dev-699169-r2.json'
+        profile = json.loads((self.root / filename).read_text())
+        shared = {'L1_CHAIN_ID', 'L2_CHAIN_ID', 'L2_ROLLUP_ID', 'L2_GENESIS_HASH',
+                  'BRIDGE_L1', 'BRIDGE_L2', 'EEZ_MANAGER_L2', 'REGISTRY_L1',
+                  'L1_RPC', 'L2_RPC', 'L1_FRONT', 'L2_FRONT'}
+        self.assertFalse(shared.intersection(profile))
+        with patch('network_config.rpc_chain_id', return_value=699169):
+            cfg = self.config(COW_DEPLOYMENT_ENV=filename, L2_RPC='http://dashboard/l2',
+                              EEZ_L1_BRIDGE_SENDER=ADDRESS, EEZ_ROLLUP_ID='2')
+        self.assertEqual(cfg['L2_CHAIN_ID'], 699169)
+        self.assertEqual(cfg['BRIDGE_L1'], ADDRESS)
+        self.assertEqual(cfg['L2_ROLLUP_ID'], 2)
+        self.assertEqual(cfg.catalog()[0]['symbol'], 'ctUSD')
+        self.assertTrue(cfg['ORDER_QUEUE'].is_relative_to(self.root / 'runtime'))
+
+    def test_dashboard_runtime_supplies_shared_network_without_cow_copies(self):
+        runtime = self.root / 'dashboard.json'
+        data = {'browser': {'bridgeL1Address':ADDRESS, 'bridgeL2Address':OTHER_ADDRESS,
+                            'l1ContractAddress':OTHER_ADDRESS, 'l2ContractAddress':ADDRESS,
+                            'rollupId':2, 'l2ExplorerUrl':'https://example.test/explorer',
+                            'l1RpcUrl':'/rpc/l1', 'l2FrontUrl':'/composer/l2'},
+                'proxy': {'l1Rpc':'https://example.test/rpc/l1', 'l2Rpc':'https://example.test/rpc/l2',
+                          'l1Front':'https://example.test/composer/l1', 'l2Front':'https://example.test/composer/l2'}}
+        runtime.write_text(json.dumps(data))
+        env_file = self.root / 'cow.env'
+        env_file.write_text(f'EEZ_UI_RUNTIME_CONFIG={runtime}\nCOW_NETWORK=chiado\n')
+        with patch('network_config.rpc_chain_id', return_value=699169):
+            cfg = self.config(COW_ENV_FILE=str(env_file))
+            self.assertEqual(cfg['L2_CHAIN_ID'], 699169)
+            self.assertEqual(cfg['L2_ROLLUP_ID'], 2)
+            self.assertEqual(cfg['BRIDGE_L1'], ADDRESS)
+            self.assertEqual(cfg['BRIDGE_L2'], OTHER_ADDRESS)
+            self.assertEqual(cfg['EEZ_MANAGER_L2'], ADDRESS)
+            self.assertEqual(cfg['REGISTRY_L1'], OTHER_ADDRESS)
+            self.assertEqual(cfg['L1_FRONT'], data['proxy']['l1Front'])
+            self.assertEqual(cfg['L2_EXPLORER'], data['browser']['l2ExplorerUrl'])
+            self.assertEqual(cfg['L1_RPC'], data['proxy']['l1Rpc'])
+            self.assertEqual(cfg['L2_FRONT'], data['proxy']['l2Front'])
+            self.assertEqual(cfg['COW_PUBLIC_L1_RPC'], '/rpc/l1')
+            self.assertEqual(cfg['COW_PUBLIC_L2_FRONT'], '/composer/l2')
+            # A changed shared setting is read on reload, not retained in a CoW copy.
+            data['browser']['bridgeL1Address'] = OTHER_ADDRESS
+            runtime.write_text(json.dumps(data))
+            self.assertEqual(self.config(COW_ENV_FILE=str(env_file))['BRIDGE_L1'], OTHER_ADDRESS)
+            self.assertEqual(self.config(COW_ENV_FILE=str(env_file), BRIDGE_L1=ADDRESS)['BRIDGE_L1'], ADDRESS)
+
+    def test_dashboard_runtime_overrides_historical_deployment_infrastructure(self):
+        runtime = self.root / 'dashboard.json'
+        runtime.write_text(json.dumps({'browser': {'bridgeL1Address':ADDRESS, 'rollupId':2}, 'proxy':{}}))
+        cfg = self.config(EEZ_UI_RUNTIME_CONFIG=str(runtime), COW_DEPLOYMENT_ENV='config/deployments/rog-916969.json')
+        self.assertEqual(cfg['BRIDGE_L1'], ADDRESS)
+        self.assertEqual(cfg['L2_ROLLUP_ID'], 2)
+        for data in ([], {'browser':{},'proxy':[]}, {'browser':{'rollupId':True},'proxy':{}}):
+            runtime.write_text(json.dumps(data))
+            with self.assertRaisesRegex(ValueError, '[Dd]ashboard'):
+                self.config(EEZ_UI_RUNTIME_CONFIG=str(runtime))
+
     def test_wrapper_explorer_endpoint_from_shared_environment_file(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / '.env'
@@ -148,9 +226,15 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual(cfg['L2_FRONT'], 'http://127.0.0.1:18998')
         self.assertEqual(cfg['COW_PUBLIC_L1_RPC'], 'https://dashboard.example/rpc/l1')
         self.assertEqual(cfg['COW_PUBLIC_L2_FRONT'], 'https://dashboard.example/composer/l2')
-        for value in ('file:///rpc', 'https://user:password@example.com', 'https:///rpc'):
+        for value in ('file:///rpc', 'https://user:password@example.com', 'https:///rpc',
+                      '//other.example/rpc', '/\\other.example/rpc', '/\n/other.example/rpc', 'rpc/l2'):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 self.config(COW_PUBLIC_L2_FRONT=value)
+        cfg = self.config(COW_PUBLIC_L1_RPC='/rpc/l1', COW_PUBLIC_L2_FRONT='/composer/l2')
+        self.assertEqual(cfg['COW_PUBLIC_L1_RPC'], '/rpc/l1')
+        self.assertEqual(cfg['COW_PUBLIC_L2_FRONT'], '/composer/l2')
+        with self.assertRaises(ValueError):
+            self.config(COW_WRAPPER_EXPLORER_API='/explorer/api/v2')
 
     def test_env_file_shell_substitution_is_rejected(self):
         path = self.root / '.env'
@@ -183,6 +267,58 @@ class ConfigurationTests(unittest.TestCase):
             payload, status = instance.send_json.call_args.args
             self.assertEqual(status,503)
             self.assertEqual(payload['status'],'deployment_required')
+
+    def test_api_config_bundles_catalog_after_one_fresh_deployment_check(self):
+        from urllib.parse import urlparse
+        tree = ast.parse((ROOT / 'backend/server.py').read_text())
+        handler = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == 'Handler')
+        values = {'NETWORK':'chiado', 'L1_NATIVE_SYMBOL':'XDAI', 'L2_NATIVE_SYMBOL':'XDAI'}
+        cfg = MagicMock()
+        cfg.__getitem__.side_effect = values.__getitem__
+        cfg.get.side_effect = values.get
+        tokens = [{'address':ADDRESS, 'symbol':'TEST'}]
+        catalog = MagicMock(return_value=tokens)
+        namespace = {'BaseHTTPRequestHandler':object, 'urlparse':urlparse, 'CFG':cfg,
+                     'l1':None, 'l2':None, 'L1_CHAIN':10200, 'L2_CHAIN':699169,
+                     'L1_RPC':'https://user:fixture-password@example.invalid/private-l1?key=fixture-api-key',
+                     'L2_FRONT':'https://private-composer.invalid/private-l2', 'SETTLEMENT':ADDRESS,
+                     'WETH':ADDRESS, 'WETH_L2':OTHER_ADDRESS, 'NATIVE_WETH_L2':None,
+                     'BRIDGE_L2':ADDRESS, 'vault_relayer':lambda: ADDRESS, 'catalog':catalog}
+        exec(compile(ast.Module(body=[handler],type_ignores=[]), '<api fixture>', 'exec'), namespace)
+        instance = namespace['Handler']()
+        instance.send_json = MagicMock()
+        instance.path = '/api/config'
+        instance.do_GET()
+        cfg.check_deployment.assert_called_once_with(l1=None, l2=None)
+        catalog.assert_called_once()
+        self.assertEqual(instance.send_json.call_args.args[0]['tokens'], tokens)
+        self.assertEqual(instance.send_json.call_args.args[0]['l1Rpc'], '/rpc/l1')
+        self.assertEqual(instance.send_json.call_args.args[0]['l2Front'], '/composer/l2')
+        self.assertNotIn('fixture-password', json.dumps(instance.send_json.call_args.args[0]))
+        values.update(COW_PUBLIC_L1_RPC='https://public.example/rpc/l1', COW_PUBLIC_L2_FRONT='/public/composer/l2')
+        instance.do_GET()
+        self.assertEqual(instance.send_json.call_args.args[0]['l1Rpc'], values['COW_PUBLIC_L1_RPC'])
+        self.assertEqual(instance.send_json.call_args.args[0]['l2Front'], values['COW_PUBLIC_L2_FRONT'])
+        # A later request must revalidate; this optimization is not a stale cache.
+        cfg.check_deployment.side_effect = ValueError('network reset')
+        instance.do_GET()
+        self.assertEqual(instance.send_json.call_args.args[1], 503)
+        self.assertEqual(catalog.call_count, 2)
+
+    def test_api_errors_do_not_expose_upstream_credentials(self):
+        from urllib.parse import urlparse, parse_qs
+        tree = ast.parse((ROOT / 'backend/server.py').read_text())
+        handler = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == 'Handler')
+        endpoint = 'https://user:fixture-password@example.invalid/private-rpc?key=fixture-api-key'
+        namespace = {'BaseHTTPRequestHandler':object, 'urlparse':urlparse, 'parse_qs':parse_qs, 'L1_RPC':endpoint}
+        exec(compile(ast.Module(body=[handler], type_ignores=[]), '<api fixture>', 'exec'), namespace)
+        instance = namespace['Handler']()
+        for message in (endpoint, '/private-rpc?key=fixture-api-key', 'fixture-password', 'fixture-api-key'):
+            for error in (ValueError(message), RuntimeError(message)):
+                self.assertNotIn(message, instance.error_message(error))
+        self.assertEqual(instance.error_message(ValueError('Token amount must be positive')), 'Token amount must be positive')
+        namespace['L1_RPC'] = 'https://user:fixture%2Dpassword@example.invalid/private-rpc'
+        self.assertNotIn('fixture-password', instance.error_message(ValueError('Authentication failed: fixture-password')))
 
     def test_allowance_normalizes_wallet_address_before_contract_calls(self):
         from urllib.parse import urlparse, parse_qs

@@ -49,13 +49,18 @@ export default defineConfig(() => {
     changeOrigin: false,
     rewrite: (url: string) => "/api" + url.slice(prefix.length),
   });
+  // Retained production chunks can still use /dashboard/ in a root dev tab.
+  // Both API paths must reach CoW rather than falling through to index.html.
+  const cowProxies = Object.fromEntries(
+    [...new Set([base + "cowdemo", "/cowdemo", "/dashboard/cowdemo"])].map(prefix => [prefix, {
+      target: process.env.EEZ_UI_COW_UPSTREAM || "http://127.0.0.1:8787",
+      changeOrigin: true,
+      rewrite: (url: string) => url.slice(prefix.length) || "/",
+    }]),
+  );
   const proxies = Object.fromEntries(
     Object.entries({
-      [base + "cowdemo"]: {
-        target: process.env.EEZ_UI_COW_UPSTREAM || "http://127.0.0.1:8787",
-        changeOrigin: true,
-        rewrite: (url: string) => url.slice((base + "cowdemo").length) || "/",
-      },
+      ...cowProxies,
       "/trace/api": traceProxy("/trace/api"),
       [base + "trace/api"]: traceProxy(base + "trace/api"),
       "/monitor/api": {

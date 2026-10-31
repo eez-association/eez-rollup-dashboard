@@ -47,6 +47,9 @@ export function TraceDiagram({ model, view, transaction, onSelect, selected, tok
   const steps = rows.map(row => ++chainSteps[row.node.chain]);
   const pages = Math.max(1, Math.ceil(rows.length / 100)), currentPage = Math.min(page, pages - 1);
   const visible = rows.slice(currentPage * 100, (currentPage + 1) * 100);
+  const visibleIds = new Set(visible.map(row => row.node.id));
+  const protocolLinks = protocol && !physical ? (model.protocolLinks ?? []).filter(link =>
+    visibleIds.has(link.from) && visibleIds.has(link.to) && (!collapsed.has(link.from) || !!search.trim())) : [];
   const visibleSteps = visible.map((_, index) => physical ? steps[currentPage * 100 + index]! : currentPage * 100 + index + 1);
   const toggle = (id: number) => setCollapsed(previous => {
     const next = new Set(previous); if (next.has(id)) next.delete(id); else next.add(id); return next;
@@ -98,6 +101,9 @@ export function TraceDiagram({ model, view, transaction, onSelect, selected, tok
     <p className={styles.muted}>{physical
       ? "Recorded call order within each transaction. The chains have independent sequences; this is not a shared timeline."
       : "Logical call order across both chains. Missing execution appears with a dashed border; settlement is shown separately."}</p>
+    {!physical && !transaction && model.nodes.some(node => node.flowAttempt === "other") && <p className={styles.muted}>
+      Unrelated L1 attempts are hidden. Select the settlement transaction below to inspect all attempts.
+    </p>}
     {view !== "sequence" && <div className={styles.legend} aria-label="Flow legend">
       <span><i className={styles.legendLine} />Caller → child</span>
       <span><i className={styles.legendCross} />Cross-chain call</span>
@@ -107,11 +113,11 @@ export function TraceDiagram({ model, view, transaction, onSelect, selected, tok
     </div>}
     {view === "map" ? <CallMap model={model} rows={visible} steps={visibleSteps} physical={physical}
       selected={selected} onSelect={onSelect} collapsed={collapsed} onToggle={toggle}
-      contractColor={contractColor} contractKey={contractKey} returnLabel={returnLabel} tokens={tokens} />
+      contractColor={contractColor} contractKey={contractKey} returnLabel={returnLabel} tokens={tokens} protocolLinks={protocolLinks} />
     : view === "flow" ? <div className={styles.flowScroller}>
       <div className={styles.flowHead}><strong><span className={styles.laneDot} />{model.chains.L1.name} · L1</strong><span>↓ Call order</span><strong><span className={styles.laneDot} />{model.chains.L2.name} · L2</strong></div>
       <div className={styles.flowBody} ref={flowBody} data-compact={compact}>
-      <FlowConnections container={flowBody} rows={visible} physical={physical} selected={selected} />
+      <FlowConnections container={flowBody} rows={visible} physical={physical} selected={selected} protocolLinks={protocolLinks} />
       {visible.map(({ node, depth, parent }, index) => {
         const parentNode = parent === null ? undefined : model.nodes[parent];
         const crossing = node.crossing;

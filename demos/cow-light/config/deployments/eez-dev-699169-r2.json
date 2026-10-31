@@ -1,0 +1,13 @@
+{
+  "COW_NETWORK": "chiado",
+  "WETH_L1": "0x234ccc757Bb2f0e9cc65818F2B6FDB18122Dc060",
+  "WETH_L2": "0x383d51A83510aD5DCb22Ab82131F2B50e7AC10Da",
+  "DETERMINISTIC_FACTORY_L1": "0x4e59b44847b379578588920ca78fbf26c0b4956c",
+  "COWSWAP_ARTIFACTS": "contracts/node_modules/@cowprotocol/contracts/lib/contracts",
+  "COW_FAUCET_L1": "0xBe2b5d161d0C3450080b020a29015C44da0Ac2f3",
+  "TOKEN_CATALOG": "config/token-catalog.eez-dev-699169-r2.json",
+  "COW_MANIFEST": "runtime/chiado/deployments/eez-dev-699169-r2/cow-deployment.json",
+  "ROUTE_MANIFEST": "runtime/chiado/deployments/eez-dev-699169-r2/route-deployment.json",
+  "ORDER_QUEUE": "runtime/chiado/deployments/eez-dev-699169-r2/ui-orders.jsonl",
+  "SOLVER_LOG": "runtime/chiado/deployments/eez-dev-699169-r2/solver.log"
+}

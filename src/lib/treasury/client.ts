@@ -1,11 +1,14 @@
-import { treasuryRpc } from "./rpcTransport.ts";
+import { treasuryReadRpc } from "./rpcTransport.ts";
 import pairedTestnet from './paired-testnet-network.json' with { type: 'json' };
 import { validatePairedPayments } from "./pairedPolicy.ts";
 import { readPaymentDeployment, paymentVersion, recordedPaymentTransaction, verifiesL1Initiation, verifiesReverseFunding } from "./savedPayments.ts";
 import type { RecordedPayment } from "./savedPayments.ts";
 import { verifyTransferHelper, transferRollup } from "./transfers.ts";
-import { parseMainnetBindings, validateMainnet } from "./mainnet.ts";
+import { parseMainnetBindings, validateMainnet, treasuryExplorerUrl } from "./mainnet.ts";
 import type { MainnetBindings } from "./mainnet.ts";
+import type { SetupNetwork } from './mainnetSetup.ts';
+import { validateDiscoveredNetwork } from './networkDiscovery.ts';
+import { readBridgeManager } from '../bridgeManager.ts';
 import { decodeSafeExecution, safeExecutionTopics } from "./safeEvents.ts";
 import { supportedSafeVersion } from "./safeSetup.ts";
 import { mirrorRelayOutcome } from "./mirrorRelay.ts";
@@ -33,7 +36,8 @@ function requireThat(value: unknown, message: string): asserts value { if (!valu
 
 export type TreasuryChain = { chainId: number; rpc: string; front?: string; genesis?: Hex; checkpoint?: { number: Hex; hash: Hex }; explorer?: string };
 export type TreasuryConfig = {
-  version: 1; environment: "isolated-devnet" | "dashboard-testnet" | "ethereum-mainnet"; instance: string;
+  version: 1; environment: "isolated-devnet" | "dashboard-testnet" | "ethereum-mainnet" | "dashboard-network"; instance: string;
+  network?: SetupNetwork;
   mainnet?: MainnetBindings;
   l1: TreasuryChain; l2: TreasuryChain & { front: string };
   fees?: { maxTotalWei: string; l1MaxTotalWei?: string };
@@ -49,18 +53,15 @@ export type TreasuryConfig = {
 };
 export function parseTreasuryConfig(value: unknown): TreasuryConfig {
   const c = value as TreasuryConfig;
-  requireThat(c && c.version === 1 && ["isolated-devnet", "dashboard-testnet", "ethereum-mainnet"].includes(c.environment) && hash(c.instance), "Unsupported treasury environment configuration");
+  requireThat(c && c.version === 1 && ["isolated-devnet", "dashboard-testnet", "ethereum-mainnet", "dashboard-network"].includes(c.environment) && hash(c.instance), "Unsupported treasury environment configuration");
   for (const key of ["registry", "manager", "safeL1", "safeL2", "adapter"] as const)
     requireThat(typeof c[key] === "string" && isAddress(c[key]) && BigInt(c[key]) !== 0n, `Invalid treasury ${key}`);
   requireThat(c.action === undefined ? !!c.payments : typeof c.action === "string" && isAddress(c.action) && BigInt(c.action) !== 0n, "Invalid treasury action");
   for (const chain of [c.l1, c.l2]) {
-    requireThat(chain && Number.isSafeInteger(chain.chainId) && (chain.chainId > 1 || c.environment === "ethereum-mainnet" && chain === c.l1 && chain.chainId === 1), "Invalid treasury chain identity");
+    requireThat(chain && Number.isSafeInteger(chain.chainId) && (chain.chainId > 1 || ['ethereum-mainnet', 'dashboard-network'].includes(c.environment) && chain === c.l1 && chain.chainId === 1), "Invalid treasury chain identity");
     requireThat(hash(chain.genesis) && !chain.checkpoint || c.environment !== "isolated-devnet" && !chain.genesis
       && chain.checkpoint && /^0x(?:0|[1-9a-f][0-9a-f]*)$/i.test(chain.checkpoint.number) && hash(chain.checkpoint.hash), "Invalid treasury chain reference");
-    if (chain.explorer !== undefined) {
-      const explorer = new URL(chain.explorer);
-      requireThat(explorer.protocol === "https:" && !explorer.username && !explorer.password && !explorer.search && !explorer.hash, "Invalid treasury explorer URL");
-    }
+    treasuryExplorerUrl(chain.explorer, c.environment === 'dashboard-network');
     for (const endpoint of [chain.rpc, ...(chain.front ? [chain.front] : [])]) {
       requireThat(typeof endpoint === "string", "Missing treasury RPC");
       const url = new URL(endpoint);
@@ -113,7 +114,7 @@ export function parseTreasuryConfig(value: unknown): TreasuryConfig {
         && c.code.some(b => b.chain === "l1" && same(b.address, p.bridgeExecutorL1!)), "Missing standard bridge executor identity");
     } else requireThat(p.pair === undefined && p.safeL2Alias === undefined && p.bridgeExecutorL1 === undefined, "Unexpected mirror relay identity");
     if (verifiesL1Initiation(p)) requireThat(c.l1.front && (!c.fees || /^[1-9]\d{0,77}$/.test(c.fees.l1MaxTotalWei ?? "")), "Missing L1 Composer or fee configuration");
-    requireThat(p.decimals === 6 && p.period === 600 && p.globalLimit === "150000000" && (c.environment === "isolated-devnet" ? p.assetLabel === "Devnet USDC" : c.environment === "ethereum-mainnet" ? p.assetLabel === "USDC" : p.assetLabel === "Test USDC"), "Unsupported payment configuration");
+    requireThat(p.decimals === 6 && p.period === 600 && p.globalLimit === "150000000" && (c.environment === 'dashboard-network' ? typeof p.assetLabel === 'string' && p.assetLabel.length > 0 && p.assetLabel.length <= 64 : c.environment === "isolated-devnet" ? p.assetLabel === "Devnet USDC" : c.environment === "ethereum-mainnet" ? p.assetLabel === "USDC" : p.assetLabel === "Test USDC"), "Unsupported payment configuration");
     for (const key of ["policy", "alias", "tokenL1", "tokenL2", "moduleL1", "moduleL2", "bridgeL1", "bridgeL2", "recipient"] as const)
       requireThat(isAddress(p[key]) && BigInt(p[key]) !== 0n, `Invalid payment ${key}`);
     for (const [chain, keys] of [["l1", ["alias", "tokenL1", "moduleL1", "bridgeL1"]], ["l2", ["policy", "tokenL2", "moduleL2", "bridgeL2"]]] as const)
@@ -140,6 +141,15 @@ export function parseTreasuryConfig(value: unknown): TreasuryConfig {
   }
   if (c.environment === "ethereum-mainnet") parseMainnetBindings(c);
   else requireThat(c.mainnet === undefined, "Mainnet bindings cannot be used on a test network");
+  if (c.environment === 'dashboard-network') {
+    const n = c.network, p = c.payments;
+    requireThat(n?.discovered && p?.pair && p.bridgeKind === 'standard' && Number.isSafeInteger(n.rollupId) && n.rollupId > 0
+      && ['demo', 'erc20'].includes(n.discovered.kind) && n.discovered.symbol === p.assetLabel
+      && same(n.registry, c.registry) && same(n.manager, c.manager)
+      && n.chains.l1.chainId === c.l1.chainId && n.chains.l2.chainId === c.l2.chainId
+      && same(n.contracts.usdcProxy.address, p.tokenL1) && same(n.contracts.wrappedUSDC.address, p.tokenL2)
+      && same(n.contracts.bridgeL1.address, p.bridgeL1) && same(n.contracts.bridgeL2.address, p.bridgeL2), 'Invalid discovered treasury network');
+  } else requireThat(c.network === undefined, 'Unexpected discovered network configuration');
   return c;
 }
 /** A shared-network manifest must match the dashboard's selected network and fee settings. */
@@ -203,7 +213,7 @@ export class TreasuryClient {
   readonly config: TreasuryConfig;
   constructor(config: TreasuryConfig) { this.config = config; }
   async rpc<T>(url: string, method: string, params: unknown[] = []): Promise<T> {
-    return treasuryRpc<T>(url, method, params);
+    return treasuryReadRpc<T>(url, method, params);
   }
   async read(url: string, address: Address, abi: typeof safeAbi | typeof actionAbi | typeof l1OwnersAbi, functionName: "getOwners" | "getThreshold" | "nonce" | "VERSION" | "safeL1" | "manager" | "safe" | "value", tag = "latest"): Promise<unknown> {
     const result = await this.rpc<Hex>(url, "eth_call", [{ to: address, data: encodeFunctionData({ abi, functionName }) }, tag]);
@@ -225,6 +235,13 @@ export class TreasuryClient {
     // Mainnet already checks code and proxy slots at fixed, reorg-checked
     // blocks. Avoid a second sweep at latest for the same identities.
     await Promise.all([
+      c.environment === 'dashboard-network' ? (async () => {
+        const { DeploymentIO } = await import('./deploymentIO.ts');
+        const { loadTreasuryArtifacts } = await import('./release.ts');
+        const io = new DeploymentIO({ l1: { rpc: c.l1.rpc, front: c.l1.front! }, l2: { rpc: c.l2.rpc, front: c.l2.front }, fees: { l1: c.fees!.l1MaxTotalWei!, l2: c.fees!.maxTotalWei } }, await loadTreasuryArtifacts());
+        io.rpc = (chain, method, params = [], front = false) => this.rpc(front ? c[chain].front! : c[chain].rpc, method, params);
+        await validateDiscoveredNetwork(io, c.network!);
+      })() : undefined,
       c.environment === "ethereum-mainnet" ? validateMainnet(this) : Promise.all([
         ...c.code.map(async binding => {
           const code = await this.rpc<Hex>(c[binding.chain].rpc, "eth_getCode", [binding.address, "latest"]);
@@ -312,7 +329,9 @@ export class TreasuryClient {
         const bridge = chain === "l1" ? p.bridgeL1 : p.bridgeL2;
         for (const [name, expected] of [...(p.bridgeKind === "standard" ? [] : [["canonicalToken", p.tokenL1]]), ["manager", chain === "l1" ? c.registry : c.manager],
           ["canonicalBridgeAddress", chain === "l1" ? p.bridgeL2 : p.bridgeL1]])
-          requireThat(same(await contractRead(this, chain, bridge, treasuryBridgeAbi, name!) as string, expected!), "Reverse route bridge bindings changed");
+          requireThat(same(name === 'manager' && p.bridgeKind === 'standard'
+            ? await readBridgeManager(data => this.rpc(c[chain].rpc, 'eth_call', [{ to: bridge, data }, 'latest']))
+            : await contractRead(this, chain, bridge, treasuryBridgeAbi, name!) as string, expected!), "Reverse route bridge bindings changed");
         requireThat((p.bridgeKind === "standard" || await contractRead(this, chain, bridge, treasuryBridgeAbi, "treasuryRollupId") === rollup)
           && await contractRead(this, chain, bridge, treasuryBridgeAbi, "rollupId") === (chain === "l1" ? 0n : rollup), "Reverse route rollup binding changed");
       }
@@ -360,7 +379,7 @@ export class TreasuryClient {
     // The testnet signs the immutable reviewed transaction without another
     // complete audit. Keep the production gate and delegatecall helper checks.
     await Promise.all([
-      this.config.environment === "ethereum-mainnet" ? this.validate() : undefined,
+      ['ethereum-mainnet', 'dashboard-network'].includes(this.config.environment) ? this.validate() : undefined,
       tx.message.operation === 1 ? verifyTransferHelper(this) : undefined,
     ]);
     requireThat((snapshot.source ?? "l2") === source && snapshot.nonce === tx.message.nonce,

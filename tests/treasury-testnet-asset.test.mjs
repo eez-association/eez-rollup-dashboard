@@ -147,3 +147,27 @@ test('L2 fixed claims require the exact canonical bridge call and wrapped mint',
   wrongToken=true; await assert.rejects(d.reconcile(journal),/exact 1,000-token mint/); wrongToken=false;
   omitted=true; await assert.rejects(d.reconcile(journal),/exact 1,000-token mint/);
 });
+
+
+test('confirmed token failures preserve exact evidence and require revalidation before retry',async()=>{
+ const d=fixture(),p={id:'deploy',kind:'deploy',chain:'l1',sender:a(3),nonce:'0x2',recipient:a(5),data:d.data('deploy',a(5)),l2StartBlock:'0x10',hash:h(9),build:release.build};
+ let canonical=true,missing=false,status='0x0',wrongInput=false;
+ d.trackPending=async s=>s;
+ d.rpc=async(_chain,method)=>{
+  if(method==='eth_getTransactionReceipt')return missing?null:{status,blockNumber:'0x20',blockHash:h(1)};
+  if(method==='eth_getBlockByNumber')return {hash:canonical?h(1):h(2)};
+  if(method==='eth_getTransactionByHash')return {from:p.sender,to:null,input:wrongInput?'0x1234':p.data,nonce:p.nonce,value:'0x0'};
+  assert.fail(method);
+ };
+ const state={pending:p};
+ const failed=await d.reconcile(state,{recordFailure:true});
+ assert.equal(failed.pending,undefined);assert.deepEqual(failed.failed,{request:p,blockNumber:'0x20',blockHash:h(1)});
+ assert.deepEqual(readAssetJournal(JSON.stringify(failed)),JSON.parse(JSON.stringify(failed)));
+ assert.deepEqual(await d.confirmFailure(failed),failed.failed);
+ assert.equal(state.pending,p,'The original journal is immutable');
+ canonical=false;assert.equal((await d.reconcile(state,{recordFailure:true})).pending,p);await assert.rejects(d.confirmFailure(failed),/no longer confirmed/);
+ canonical=true;missing=true;await assert.rejects(d.confirmFailure(failed),/no longer confirmed/);
+ missing=false;wrongInput=true;await assert.rejects(d.confirmFailure(failed),/different work/);
+ wrongInput=false;status='0x2';await assert.rejects(d.reconcile(state,{recordFailure:true}),/reverted/);
+ assert.throws(()=>readAssetJournal(JSON.stringify({...failed,pending:p})),/Invalid failed/);
+});

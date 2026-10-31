@@ -20,7 +20,7 @@ interface Props {
   onSetAsset: (asset: BridgeAsset) => void;
   onSetAmount: (amt: string) => void;
   onSetDestination: (addr: string) => void;
-  onSetTokenAddress: (addr: string) => void;
+  onSetTokenAddress: (addr: string, pair?: [TokenMeta, TokenMeta]) => void;
   onSetMax: () => void;
   onApprove: () => void;
   onBridge: () => void;
@@ -89,7 +89,7 @@ export function BridgePanel({
 
   const canBridge =
     !!walletAddress &&
-    !busy && !state.maxPending && !state.maxError &&
+    !busy && phase !== "confirmed" && !state.maxPending && !state.maxError &&
     sourceBridgeReady &&
     (gas.status === "estimated" || gas.status === "unsupported" && !!state.gasOverrideHex) &&
     amount &&
@@ -97,7 +97,7 @@ export function BridgePanel({
     !invalidRecipient &&
     !insufficientBalance &&
     !needsApproval &&
-    (asset === "eth" || tokenNeedsApproval !== null && sourceBalanceRaw !== null && /^0x[0-9a-fA-F]{40}$/.test(tokenAddress));
+    (asset === "eth" || tokenMeta !== null && !tokenMeta.predicted && tokenNeedsApproval !== null && sourceBalanceRaw !== null && /^0x[0-9a-fA-F]{40}$/.test(tokenAddress));
 
   const disabledReason = !walletAddress ? null :
     !canBridge && !busy && sourceBridgeReady && rawAmount > 0n ?
@@ -108,6 +108,15 @@ export function BridgePanel({
       gas.status === "idle" || gas.status === "estimating" ? "Waiting for a Composer gas estimate…" : null : null;
 
   const actionLabel = asset === "eth" ? `Bridge ${nativeSymbol}` : `Bridge ${tokenMeta?.symbol || "Tokens"}`;
+  const sourceSide = direction === "l1-to-l2" ? "l1" : "l2";
+  const destinationSide = sourceSide === "l1" ? "l2" : "l1";
+  const destinationChainId = Number(BigInt((destinationSide === "l1" ? L1_CHAIN : L2_CHAIN).chainId));
+  const destinationBridge = destinationSide === "l1" ? config.l1Bridge : config.l2Bridge;
+  const counterpart = tokenMeta?.counterpart;
+  const destinationToken = counterpart?.chainId === destinationChainId ? recentTokens.find(token =>
+    token.chainId === destinationChainId && token.address.toLowerCase() === counterpart.address.toLowerCase()
+    && token.bridgeAddress?.toLowerCase() === destinationBridge.toLowerCase()) : undefined;
+  const selectedTokens = { [sourceSide]: tokenMeta ?? undefined, [destinationSide]: destinationToken };
 
   return (
     <div className={styles.card}>
@@ -138,8 +147,26 @@ export function BridgePanel({
         direction={direction} asset={asset} amount={amount}
         received={rawAmount > 0n ? formatUnits(rawAmount, decimals) : ""}
         symbol={tokenMeta?.symbol || null} balance={sourceBalance} connected={!!walletAddress}
+        tokens={selectedTokens}
         disabled={busy} maxPending={state.maxPending} maxError={state.maxError}
-        onDirectionChange={onSetDirection} onAssetChange={onSetAsset}
+        onDirectionChange={onSetDirection}
+        renderTokenPicker={(chain, close) => <BridgeTokenPicker
+          key={chain} direction={chain === "l1" ? "l1-to-l2" : "l2-to-l1"} walletAddress={walletAddress} disabled={busy}
+          asset={asset} tokenAddress={chain === sourceSide ? tokenAddress : destinationToken?.address ?? ""} recentTokens={recentTokens}
+          onClose={close} onSelect={(address, pair) => {
+            if (!address) { if (asset !== "eth") onSetAsset("eth"); }
+            else {
+              // A picker resolves its clicked network first. Keep the form's
+              // source network fixed when selecting from the destination panel.
+              const sourcePair: [TokenMeta, TokenMeta] | undefined = chain === sourceSide ? pair : pair ? [pair[1], pair[0]] : undefined;
+              if (chain !== sourceSide && !sourcePair) return;
+              const sourceAddress = sourcePair?.[0].address ?? address;
+              if (asset !== "erc20" || sourceAddress.toLowerCase() !== tokenAddress.toLowerCase()) onSetAsset("erc20");
+              onSetTokenAddress(sourceAddress, sourcePair);
+            }
+            close();
+          }}
+        />}
         onAmountChange={onSetAmount} onMax={onSetMax}
         recipient={<div className={styles.recipientSection}>
           <div className={styles.recipientHeader}>
@@ -168,20 +195,14 @@ export function BridgePanel({
       </div>}
       />
 
-      {asset === "erc20" && (
-        <BridgeTokenPicker
-          direction={direction} walletAddress={walletAddress} disabled={busy}
-          tokenAddress={tokenAddress} tokenMeta={tokenMeta} recentTokens={recentTokens}
-          onAddressChange={onSetTokenAddress}
-        />
-      )}
+      {asset === "erc20" && tokenMeta?.predicted && <p className={styles.sectionHint}>This token will be deployed when it is first bridged to this network.</p>}
 
       {/* Gas settings are already collapsed; keep estimation errors visible. */}
       {gas.status === "unsupported" && gas.errorMessage && <div className={styles.validationHint} role="status">{gas.errorMessage}</div>}
-      {gas.status === "error" && gas.errorMessage && (
+      {!needsApproval && phase !== "confirmed" && gas.status === "error" && gas.errorMessage && (
         <div className={styles.errorBar} role="alert">Gas estimation failed: {gas.errorMessage}</div>
       )}
-      {feesEnabled && amount && rawAmount > 0n && sourceBridgeReady && (
+      {feesEnabled && phase !== "confirmed" && !needsApproval && amount && rawAmount > 0n && sourceBridgeReady && (
         <BridgeFeeQuote fees={state.fees} sentToWallet={phase === "sending" || phase === "tx-pending"}
           disabled={busy || gas.status !== "estimated" && !state.gasOverrideHex || needsApproval}
           onRefresh={onRefreshFees} />
