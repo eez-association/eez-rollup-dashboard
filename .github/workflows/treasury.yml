@@ -44,6 +44,7 @@ jobs:
           node src/monitor/tests/test_app.mjs
           node src/monitor/tests/test_live_app.mjs
           npm run test:contracts
+          node scripts/build-bridge-test-token.mjs --check
           forge fmt --check --root contracts
           npm run build:treasury-release
       - name: Isolated deployment and source verification
@@ -105,6 +106,7 @@ jobs:
           npm run test:falcon:browser
           node tests/bridge-asset-swap.cjs
           node tests/bridge-token-picker.cjs
+          node tests/bridge-test-token-browser.mjs
           node tests/bridge-gas-fees.cjs
           node tests/bridge-transfer-lifecycle.cjs
           node tests/cow-demo.cjs

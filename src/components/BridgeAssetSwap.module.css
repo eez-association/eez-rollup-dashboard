@@ -21,6 +21,8 @@
 .amountRow[data-long="true"] .assetPill { justify-self: end; max-width: 100%; }
 .assetPill { display: flex; align-items: center; gap: 10px; max-width: 45%; padding: 8px 12px; border: 1px solid var(--border); border-radius: 100px; background: transparent; color: var(--text); font: 500 13px/1.4 var(--mono); cursor: pointer; }
 .assetPill span:first-child { overflow-wrap: anywhere; min-width: 0; }
+.assetPill[data-proxy="true"] { max-width: 70%; gap: 6px; flex-shrink: 0; }
+.proxyBadge { flex-shrink: 0; padding: 1px 5px; border: 1px solid var(--border); border-radius: 4px; color: var(--text-dim); font: 500 12px/1.4 var(--sans); }
 .assetPill:hover:not(:disabled), .max:hover:not(:disabled) { border-color: var(--border-hover); color: var(--text-bright); }
 .balanceRow { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--text-dim); font: 400 12px/1.6 var(--mono); }
 .balanceRow span { min-width: 0; overflow-wrap: anywhere; }

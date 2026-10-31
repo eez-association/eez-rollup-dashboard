@@ -108,6 +108,15 @@ export function BridgePanel({
       gas.status === "idle" || gas.status === "estimating" ? "Waiting for a Composer gas estimate…" : null : null;
 
   const actionLabel = asset === "eth" ? `Bridge ${nativeSymbol}` : `Bridge ${tokenMeta?.symbol || "Tokens"}`;
+  const sourceSide = direction === "l1-to-l2" ? "l1" : "l2";
+  const destinationSide = sourceSide === "l1" ? "l2" : "l1";
+  const destinationChainId = Number(BigInt((destinationSide === "l1" ? L1_CHAIN : L2_CHAIN).chainId));
+  const destinationBridge = destinationSide === "l1" ? config.l1Bridge : config.l2Bridge;
+  const counterpart = tokenMeta?.counterpart;
+  const destinationToken = counterpart?.chainId === destinationChainId ? recentTokens.find(token =>
+    token.chainId === destinationChainId && token.address.toLowerCase() === counterpart.address.toLowerCase()
+    && token.bridgeAddress?.toLowerCase() === destinationBridge.toLowerCase()) : undefined;
+  const selectedTokens = { [sourceSide]: tokenMeta ?? undefined, [destinationSide]: destinationToken };
 
   return (
     <div className={styles.card}>
@@ -138,17 +147,23 @@ export function BridgePanel({
         direction={direction} asset={asset} amount={amount}
         received={rawAmount > 0n ? formatUnits(rawAmount, decimals) : ""}
         symbol={tokenMeta?.symbol || null} balance={sourceBalance} connected={!!walletAddress}
+        tokens={selectedTokens}
         disabled={busy} maxPending={state.maxPending} maxError={state.maxError}
         onDirectionChange={onSetDirection}
-        renderTokenPicker={close => <BridgeTokenPicker
-          direction={direction} walletAddress={walletAddress} disabled={busy}
-          asset={asset} tokenAddress={tokenAddress} recentTokens={recentTokens}
+        renderTokenPicker={(chain, close) => <BridgeTokenPicker
+          key={chain} direction={chain === "l1" ? "l1-to-l2" : "l2-to-l1"} walletAddress={walletAddress} disabled={busy}
+          asset={asset} tokenAddress={chain === sourceSide ? tokenAddress : destinationToken?.address ?? ""} recentTokens={recentTokens}
           onClose={close} onSelect={(address, pair) => {
             if (!address) { if (asset !== "eth") onSetAsset("eth"); }
-            else if (asset !== "erc20" || address.toLowerCase() !== tokenAddress.toLowerCase()) {
-              onSetAsset("erc20");
-              onSetTokenAddress(address, pair);
-            } else if (pair) onSetTokenAddress(address, pair);
+            else {
+              // A picker resolves its clicked network first. Keep the form's
+              // source network fixed when selecting from the destination panel.
+              const sourcePair: [TokenMeta, TokenMeta] | undefined = chain === sourceSide ? pair : pair ? [pair[1], pair[0]] : undefined;
+              if (chain !== sourceSide && !sourcePair) return;
+              const sourceAddress = sourcePair?.[0].address ?? address;
+              if (asset !== "erc20" || sourceAddress.toLowerCase() !== tokenAddress.toLowerCase()) onSetAsset("erc20");
+              onSetTokenAddress(sourceAddress, sourcePair);
+            }
             close();
           }}
         />}

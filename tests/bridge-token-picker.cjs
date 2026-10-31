@@ -81,7 +81,7 @@ async function fixture(browser, options = {}) {
       if (selector === toFunctionSelector('manager()') && options.modern) return route.fulfill({json:{jsonrpc:'2.0',id,error:{code:3,message:'execution reverted'}}});
       if (['0xb3f5aaab', '0x481c6a75'].includes(selector)) return reply('0x' + addr('3').slice(2).padStart(64,'0'));
       if (selector === '0x313ce567') return reply(word(18));
-      if (selector === '0x95d89b41') return reply(text(tx.to.toLowerCase() === l2Token ? 'ROLL' : tx.to.toLowerCase() === dai.toLowerCase() ? 'DAI' : 'CHI'));
+      if (selector === '0x95d89b41') return reply(text(options.symbol || (tx.to.toLowerCase() === l2Token ? 'ROLL' : tx.to.toLowerCase() === dai.toLowerCase() ? 'DAI' : 'CHI')));
       if (selector === '0x06fdde03') return reply(text('Verified token'));
       if (selector === '0x70a08231') return reply(word([l1Token,l2Token,dai.toLowerCase()].includes(tx.to.toLowerCase()) ? 10n**18n : 0));
       return reply(word(0));
@@ -133,8 +133,8 @@ async function saved(f, symbol, address) {
     const proxyRow=f.panel.getByRole('button',{name:'Select CHI '+storedPair.address,exact:true});
     await proxyRow.getByText('Proxy',{exact:true}).waitFor();
     await proxyRow.getByText('Chiado',{exact:true}).waitFor();
-    assert.equal(await proxyRow.locator('code').first().getAttribute('title'),l1Token);
-    assert.equal(await proxyRow.locator('code').last().getAttribute('title'),storedPair.address);
+    assert.equal(await proxyRow.locator('code').first().getAttribute('title'),storedPair.address);
+    assert.equal(await proxyRow.getByRole('group',{name:'Proxy origin'}).locator('code').getAttribute('title'),l1Token);
     assert.equal(storedPair.chainId,6290);
     for(const width of [320,390,1440]) {
       await f.page.setViewportSize({width,height:900});
@@ -163,7 +163,8 @@ async function saved(f, symbol, address) {
     await f.panel.getByLabel('Bridge amount',{exact:true}).locator('..').getByText('CHI',{exact:true}).waitFor();
     await f.page.reload(); await open(f); await saved(f,'CHI',custom);
     const restored=f.panel.getByRole('button',{name:'Select CHI '+custom,exact:true});
-    await restored.getByText('Chiado',{exact:true}).waitFor();
+    assert.equal(await restored.locator('code').first().getAttribute('title'),custom);
+    assert.equal(await restored.getByRole('group',{name:'Proxy origin'}).count(),0);
     assert.equal(await restored.getByText('Proxy',{exact:true}).count(),0);
     await f.panel.getByRole('button',{name:'Select CHI '+custom,exact:true}).click();
     await f.panel.getByLabel('Bridge amount',{exact:true}).locator('..').getByText('CHI',{exact:true}).waitFor();
@@ -207,12 +208,13 @@ async function saved(f, symbol, address) {
     await f.panel.getByLabel('Search tokens').fill(addr('4'));
     await f.panel.getByRole('button',{name:'Add token & select',exact:true}).waitFor();
     await f.panel.getByText('EEZ-X Devnet',{exact:true}).first().waitFor();
-    await f.panel.getByRole('group',{name:'Bridge asset choices',exact:true}).getByText('Chiado',{exact:true}).waitFor();
+    await f.panel.getByRole('group',{name:'Bridge asset choices',exact:true}).getByText('On Chiado',{exact:true}).waitFor();
     await f.panel.getByRole('button',{name:'Add token & select',exact:true}).click();
     await open(f);
     const wrappedRow=f.panel.getByRole('button',{name:'Select CHI '+addr('4'),exact:true});
     await wrappedRow.getByText('Proxy',{exact:true}).waitFor();
-    assert.equal(await wrappedRow.locator('code').first().getAttribute('title'),l2Token);
+    assert.equal(await wrappedRow.locator('code').first().getAttribute('title'),addr('4'));
+    assert.equal(await wrappedRow.getByRole('group',{name:'Proxy origin'}).locator('code').getAttribute('title'),l2Token);
     await f.close();
 
     // A current proxy exposing only EEZContract can import an unbridged
@@ -244,6 +246,70 @@ async function saved(f, symbol, address) {
     await f.panel.getByText('This bridge implementation does not support token address prediction yet.',{exact:true}).waitFor();
     assert.equal(await f.panel.getByRole('button',{name:'Add token & select',exact:true}).count(),0);
     await f.close();
+
+    // Token identity follows the clicked network, independent of From/To.
+    for (const originalSide of ['l1','l2']) for (const reverse of [false,true]) {
+      f=await fixture(browser,{symbol:'TEST'});
+      await f.page.evaluate(({l1Token,l2Token,bridge,originalSide})=>{
+        const origin={address:originalSide==='l1'?l1Token:l2Token,chainId:originalSide==='l1'?10200:6290,
+          networkName:originalSide==='l1'?'Chiado':'EEZ-X Devnet',rollupId:originalSide==='l1'?'0':'2'};
+        localStorage.setItem('bridgeRecentTokens',JSON.stringify([
+          {address:l1Token,chainId:10200,name:'Test token',symbol:'TEST',decimals:18,bridgeAddress:bridge,origin,isProxy:originalSide!=='l1',counterpart:{address:l2Token,chainId:6290}},
+          {address:l2Token,chainId:6290,name:'Test token',symbol:'TEST',decimals:18,bridgeAddress:bridge,origin,isProxy:originalSide!=='l2',counterpart:{address:l1Token,chainId:10200}},
+        ]));
+      },{l1Token,l2Token,bridge,originalSide});
+      await f.page.reload();
+      if(reverse)await f.panel.getByTitle('Swap direction').click();
+      const sourceSide=reverse?'l2':'l1';
+      for(const clickedSide of ['l1','l2']) {
+        const name=clickedSide==='l1'?'Chiado':'EEZ-X Devnet';
+        await f.panel.getByRole('button',{name:`Choose bridge asset on ${name}`,exact:true}).click();
+        const picker=f.panel.getByRole('group',{name:'Bridge asset choices',exact:true});
+        await picker.getByText(`On ${name}`,{exact:true}).waitFor();
+        const row=picker.getByRole('button',{name:`Select TEST ${clickedSide==='l1'?l1Token:l2Token}`,exact:true});
+        assert.equal(await row.getByText('Proxy',{exact:true}).count(),clickedSide!==originalSide?1:0);
+        assert.equal(await row.locator('code').first().getAttribute('title'),clickedSide==='l1'?l1Token:l2Token);
+        if(clickedSide!==originalSide) {
+          const provenance=row.getByRole('group',{name:'Proxy origin',exact:true});
+          assert.match(await provenance.textContent(),new RegExp(`Origin: ${originalSide==='l1'?'Chiado':'EEZ-X Devnet'}`));
+          assert.match(await provenance.textContent(),/Origin address:/);
+          assert.equal(await provenance.locator('code').getAttribute('title'),originalSide==='l1'?l1Token:l2Token);
+        } else assert.equal(await row.getByRole('group',{name:'Proxy origin'}).count(),0);
+        await row.click();
+        const source=f.panel.getByRole('group',{name:'Source network',exact:true});
+        const destination=f.panel.getByRole('group',{name:'Destination network',exact:true});
+        assert.equal(await source.getAttribute('data-chain'),sourceSide,'Choosing a destination asset must not switch direction');
+        assert.equal(await source.getByRole('button',{name:/^Choose bridge asset on/}).getByText('Proxy',{exact:true}).count(),sourceSide!==originalSide?1:0);
+        assert.equal(await destination.getByRole('button',{name:/^Choose bridge asset on/}).getByText('Proxy',{exact:true}).count(),sourceSide===originalSide?1:0);
+        await f.panel.getByLabel('Bridge amount',{exact:true}).fill('1');
+        // Reselecting the same pair from either side preserves the entered amount.
+        await f.panel.getByRole('button',{name:`Choose bridge asset on ${name}`,exact:true}).click();
+        await row.waitFor();assert.equal(await row.getAttribute('aria-pressed'),'true');await row.click();
+        assert.equal(await f.panel.getByLabel('Bridge amount',{exact:true}).inputValue(),'1');
+      }
+      await f.close();
+    }
+
+    // Import from To: store the pair in source/destination order without changing the route.
+    for(const reverse of [false,true]) {
+      f=await fixture(browser,{symbol:'TEST'});
+      await f.panel.getByRole('button',{name:'Close token picker',exact:true}).click();
+      if(reverse)await f.panel.getByTitle('Swap direction').click();
+      const destination=f.panel.getByRole('group',{name:'Destination network',exact:true});
+      await destination.getByRole('button',{name:/^Choose bridge asset on/}).click();
+      await f.panel.getByLabel('Search tokens').fill(addr('4'));
+      await f.panel.getByRole('button',{name:'Add token & select',exact:true}).click();
+      const source=f.panel.getByRole('group',{name:'Source network',exact:true});
+      assert.equal(await source.getAttribute('data-chain'),reverse?'l2':'l1');
+      await source.getByRole('button',{name:/^Choose bridge asset on/}).getByText('Proxy',{exact:true}).waitFor();
+      assert.equal(await destination.getByRole('button',{name:/^Choose bridge asset on/}).getByText('Proxy',{exact:true}).count(),0);
+      const original=await f.page.evaluate(({address,chainId})=>JSON.parse(localStorage.getItem('bridgeRecentTokens')).find(t=>t.address===address&&t.chainId===chainId),{address:addr('4'),chainId:reverse?10200:6290});
+      assert.equal(original.counterpart.chainId,reverse?6290:10200);
+      await source.getByRole('button',{name:/^Choose bridge asset on/}).click();
+      const selected=f.panel.getByRole('button',{name:`Select TEST ${original.counterpart.address}`,exact:true});
+      assert.equal(await selected.getAttribute('aria-pressed'),'true');
+      await f.close();
+    }
 
     // Corrupt local storage does not break the bridge.
     f = await fixture(browser);

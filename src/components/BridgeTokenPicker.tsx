@@ -5,6 +5,7 @@ import { useBridgeTokens } from "../hooks/useBridgeTokens";
 import { config, L1_CHAIN, L2_CHAIN } from "../config";
 import { resolveBridgeTokenPair } from "../lib/bridgeTokenPair";
 import { isTokenAddress, readBridgeToken } from "../lib/bridgeTokens";
+import { NetworkIcon } from "./NetworkIcon";
 import styles from "./BridgeTokenPicker.module.css";
 
 interface Props {
@@ -78,20 +79,32 @@ export function BridgeTokenPicker({ direction, walletAddress, asset, tokenAddres
   const shortAddress = (value: string) => `${value.slice(0, 6)}…${value.slice(-4)}`;
   const originName = (token: TokenMeta) => token.origin?.chainId === Number(BigInt(L1_CHAIN.chainId)) ? config.l1NetworkName
     : token.origin?.chainId === Number(BigInt(L2_CHAIN.chainId)) ? config.rollupName : token.origin?.networkName;
-  const identity = (token: TokenMeta, localNetwork: string, full = false) => <span className={styles.tokenText}>
-    <span className={styles.tokenTitle}><strong>{token.symbol}</strong>
-      {token.isProxy && <span className={styles.proxyBadge}>Proxy</span>}</span>
+  const originChain = (token: TokenMeta) => token.origin?.chainId === Number(BigInt(L1_CHAIN.chainId)) ? "l1"
+    : token.origin?.chainId === Number(BigInt(L2_CHAIN.chainId)) ? "l2" : null;
+  const identity = (token: TokenMeta, full = false) => <span className={styles.tokenText}>
+    <span className={styles.tokenTitle}><strong>{token.symbol}</strong></span>
     <span className={styles.tokenName}>{token.name}</span>
-    <span className={styles.provenance}>
-      {token.origin ? originName(token) : localNetwork}
-    </span>
-    <code className={full ? styles.address : undefined} title={token.origin?.address || token.address}>
-      {full ? token.origin?.address || token.address : shortAddress(token.origin?.address || token.address)}
+    <code className={full ? styles.address : undefined} title={token.address}>
+      {full ? token.address : shortAddress(token.address)}
     </code>
-    {token.isProxy && <>
-      <span className={styles.provenance}>{localNetwork}{token.predicted ? " · Not deployed yet" : ""}</span>
-      <code className={full ? styles.address : undefined} title={token.address}>{full ? token.address : shortAddress(token.address)}</code>
-    </>}
+    {token.predicted && <span className={styles.provenance}>Not deployed yet</span>}
+    {token.isProxy && <span className={styles.proxyDetails} role="group" aria-label="Proxy origin">
+      <span className={styles.proxyBadge}>
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" aria-hidden="true"><rect x="2" y="2" width="8" height="8" rx="2" /><path d="M6 11v1a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-1" /></svg>
+        Proxy
+      </span>
+      <span className={styles.proxyRows}>
+        <span className={styles.proxyLabel}>Origin:</span>{" "}
+        <span className={styles.proxyNetwork}>
+          {originChain(token) && <NetworkIcon chain={originChain(token)!} decorative className={styles.originIcon} />}
+          <span>{originName(token) || "Unknown"}</span>
+        </span>
+        <span className={styles.proxyLabel}>Origin address:</span>{" "}
+        <code className={styles.originAddress} title={token.origin?.address}>
+          {token.origin ? full ? token.origin.address : shortAddress(token.origin.address) : "Unknown"}
+        </code>
+      </span>
+    </span>}
   </span>;
 
   const row = (token: TokenMeta & { balance?: bigint }, isSaved: boolean) => <li key={token.address.toLowerCase()}>
@@ -100,14 +113,14 @@ export function BridgeTokenPicker({ direction, walletAddress, asset, tokenAddres
       aria-pressed={asset === "erc20" && token.address.toLowerCase() === tokenAddress.toLowerCase()}
       onClick={() => choose(token)}>
       <span className={styles.icon} aria-hidden="true">{token.symbol.slice(0, 2)}</span>
-      {identity(token, network)}
+      {identity(token)}
       <span className={styles.trailing}>{!isSaved ? "Add" : token.balance !== undefined ? formatUnits(token.balance, token.decimals) :
         asset === "erc20" && token.address.toLowerCase() === tokenAddress.toLowerCase() ? "✓" : ""}</span>
     </button>
   </li>;
 
   return <div className={styles.picker} role="group" aria-label="Bridge asset choices">
-    <div className={styles.header}><div><strong>Select a token</strong><p>From {network}</p></div>
+    <div className={styles.header}><div><strong>Select a token</strong><p>On {network}</p></div>
       <button type="button" className={styles.close} aria-label="Close token picker" onClick={onClose}>×</button></div>
     <input ref={input} className={styles.search} aria-label="Search tokens" placeholder="Search name or paste address"
       autoComplete="off" spellCheck={false} value={search} onChange={e => setSearch(e.target.value)} disabled={disabled} />
@@ -125,10 +138,10 @@ export function BridgeTokenPicker({ direction, walletAddress, asset, tokenAddres
     </ul>
     {needsLookup && <div className={styles.import}>
       {!result ? <p className={styles.hint} role="status">Looking up token…</p> : result.error ? <><p className={styles.error} role="status">{result.error}</p><button type="button" className={styles.add} onClick={() => setRetry(value => value + 1)}>Try again</button></> : result.pair && <>
-        {identity(result.pair[0], network, true)}
+        {identity(result.pair[0], true)}
         <div className={styles.counterpart}>
           <p className={styles.hint}>Also saved on {destinationName}</p>
-          {identity(result.pair[1], destinationName, true)}
+          {identity(result.pair[1], true)}
         </div>
         <button type="button" className={styles.add} disabled={disabled} onClick={() => onSelect(result.pair![0].address, result.pair)}>Add token & select</button>
       </>}

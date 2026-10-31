@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import type { BridgeAsset, BridgeDirection } from "../hooks/useBridge";
+import type { BridgeAsset, BridgeDirection, TokenMeta } from "../hooks/useBridge";
 import { config, L1_CHAIN, L2_CHAIN } from "../config";
 import { NetworkIcon } from "./NetworkIcon";
 import styles from "./BridgeAssetSwap.module.css";
@@ -10,6 +10,7 @@ interface Props {
   amount: string;
   received: string;
   symbol: string | null;
+  tokens?: Partial<Record<"l1" | "l2", TokenMeta>>;
   balance: string | null;
   connected: boolean;
   disabled: boolean;
@@ -17,7 +18,7 @@ interface Props {
   maxError: string | null;
   recipient: ReactNode;
   onDirectionChange: (direction: BridgeDirection) => void;
-  renderTokenPicker: (close: () => void) => ReactNode;
+  renderTokenPicker: (chain: "l1" | "l2", close: () => void) => ReactNode;
   onAmountChange: (amount: string) => void;
   onMax: () => void;
 }
@@ -39,7 +40,8 @@ export function BridgeAssetSwap(props: Props) {
       const from = chain === source;
       const name = chain === "l1" ? config.l1NetworkName : config.rollupName;
       const native = (chain === "l1" ? L1_CHAIN : L2_CHAIN).nativeCurrency.symbol;
-      const symbol = props.asset === "eth" ? native : props.symbol || "ERC20";
+      const token = props.tokens?.[chain];
+      const symbol = props.asset === "eth" ? native : token?.symbol || props.symbol || "ERC20";
       return <div key={from ? "source" : "destination"} className={styles.networkPanel} data-chain={chain} data-source={from}
         role="group" aria-label={from ? "Source network" : "Destination network"}
         onKeyDown={event => { if (event.key === "Escape" && (picker === chain || from && picker === "network")) { event.preventDefault(); event.stopPropagation(); closePicker(); } }}>
@@ -70,14 +72,15 @@ export function BridgeAssetSwap(props: Props) {
             onChange={event => props.onAmountChange(event.target.value)} placeholder="0.0" disabled={props.disabled} /> :
             <output className={styles.received} aria-label="Destination amount" title="Calculated from the From amount">{props.received || "—"}</output>}
           <button className={styles.assetPill} type="button" disabled={props.disabled}
+            data-proxy={props.asset === "erc20" && token?.isProxy || undefined}
             aria-label={`Choose bridge asset on ${name}`} aria-expanded={picker === chain}
             aria-controls={`bridge-asset-picker-${chain}`}
             onClick={event => { trigger.current = event.currentTarget; setPicker(picker === chain ? null : chain); }}>
-            <span>{symbol}</span><span aria-hidden="true">⌄</span>
+            <span>{symbol}</span>{props.asset === "erc20" && token?.isProxy && <span className={styles.proxyBadge}>Proxy</span>}<span aria-hidden="true">⌄</span>
           </button>
         </div>
         {picker === chain && <div id={`bridge-asset-picker-${chain}`}>
-          {props.renderTokenPicker(closePicker)}
+          {props.renderTokenPicker(chain, closePicker)}
         </div>}
         {from ? <div className={styles.balanceRow}>
           <span>{props.balance !== null ? <>Balance: <strong>{props.balance} {symbol}</strong></> :
