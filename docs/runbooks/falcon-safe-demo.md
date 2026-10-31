@@ -115,6 +115,11 @@ Safe discovery uses the Falcon public key, so another gas wallet can pay for
 the same Safe. Recovery checks the exact nonce as well as
 the transaction contents, so an older identical transfer is not accepted.
 Confirmation clears the pending record after verifying the canonical outcome.
+Owner additions track missing hashes and replacements automatically. If the RPC’s
+sender/nonce lookup fails on pruned genesis history, a bounded canonical nonce
+search uses the recorded submission block or recent retained history. Unavailable
+history never clears a request or permits automatic resubmission. A second tab
+cannot overwrite a different confirmed Safe attachment for the same Falcon key.
 Recovery remains available when the original hash was recorded: expand
 **Funding recovery** or **Earlier setup needs attention** to provide a speed-up
 or cancellation hash. A known hash cannot use the unsent-request clearing path.

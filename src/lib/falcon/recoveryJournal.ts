@@ -5,7 +5,7 @@ import type { CrossChainDeployment } from './crossChainDeployment.ts';
 export type RecoveryAttempt = {
   version: 1; id: string; kind: 'funding' | 'controller' | 'owner'; chainId: number;
   account: Address; to: Address; nonce: string; value: string; data: Hex;
-  publicKey: Hex; controller?: Address; safeNonce?: string; hash?: Hex;
+  publicKey: Hex; controller?: Address; safeNonce?: string; startBlock?: string; hash?: Hex;
 };
 export function recoveryKey(deployment: CrossChainDeployment, kind: RecoveryAttempt['kind']) {
   const identity = [deployment.l1.chainId, deployment.l1.anchor.blockHash, deployment.l1.registry,
@@ -46,6 +46,7 @@ export function readRecovery(raw: string | null): RecoveryAttempt | null {
     || typeof value.publicKey !== 'string' || !/^0x[\da-f]{1794}$/i.test(value.publicKey)
     || value.kind === 'funding' && (!isAddress(value.controller ?? '') || value.data !== '0x')
     || value.kind === 'owner' && (!isAddress(value.controller ?? '') || !/^(0|[1-9]\d*)$/.test(value.safeNonce ?? '') || value.value !== '0')
+    || value.startBlock !== undefined && (typeof value.startBlock !== 'string' || !/^(0|[1-9]\d*)$/.test(value.startBlock))
     || value.hash !== undefined && !/^0x[\da-f]{64}$/i.test(value.hash)) {
     throw new Error('Saved Falcon recovery details are invalid. Preserve this record and check wallet activity before sending again.');
   }

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { encodeAbiParameters, encodeEventTopics, decodeFunctionData, pad, toHex, zeroHash, type Address, type Hex } from 'viem';
-import { prepareOwnerAddition, ownerTransaction, readAttachment, attachmentKey, verifyOwnerAddition } from '../../src/lib/falcon/existingSafe.ts';
+import { prepareOwnerAddition, ownerTransaction, readAttachment, saveAttachment, attachmentKey, verifyOwnerAddition } from '../../src/lib/falcon/existingSafe.ts';
 import { safeAbi, loadRemoteSafe, prepareSafeTransfer, hasSafeExecution } from '../../src/lib/falcon/safe.ts';
 import { safeTransactionHash, encodeSafeExecution } from '../../src/lib/treasury/safeTransactions.ts';
 import { loadTreasuryArtifacts } from '../../src/lib/treasury/release.ts';
@@ -84,4 +84,16 @@ test('confirmed owner changes bind exact request, Safe success hash, nonce and r
  const key=attachmentKey(d,publicKey);assert.notEqual(key,attachmentKey({...d,l2:{...d.l2,rollupId:5n,manager:other}},publicKey));
  assert.deepEqual(readAttachment({getItem:()=>JSON.stringify({target,walletOwner:account})},key),{target,walletOwner:account});
  assert.throws(()=>readAttachment({getItem:()=> 'null'},key),/Saved Falcon Safe address is invalid/);
+});
+
+
+test('another tab cannot silently replace a confirmed Safe attachment', () => {
+ let saved: string | null = null;
+ const storage={getItem:()=>saved,setItem:(_key: string,value: string)=>{saved=value;}};
+ const first={target,walletOwner:account};
+ saveAttachment(storage,'safe',first);
+ saveAttachment(storage,'safe',first);
+ assert.throws(()=>saveAttachment(storage,'safe',{target:other,walletOwner:account}),/Another Safe was selected/);
+ assert.throws(()=>saveAttachment(storage,'safe',{target,walletOwner:other}),/Another Safe was selected/);
+ assert.deepEqual(JSON.parse(saved!),first);
 });

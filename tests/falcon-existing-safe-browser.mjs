@@ -33,14 +33,14 @@ async function rpc({method,params=[],chain}) {
  if(method==='eth_gasPrice')return '0x1';
  if(method==='eth_estimateGas')return '0x493e0';
  if(method==='eth_getLogs')return [];
- if(method==='eth_getTransactionBySenderAndNonce')return confirmed?{hash:txHash}:null;
- if(method==='eth_getTransactionCount')return '0x2';
+ if(method==='eth_getTransactionBySenderAndNonce')throw Object.assign(new Error('pruned history unavailable: earliest available '+(blockNumber-10n)),{code:4444});
+ if(method==='eth_getTransactionCount')return confirmed && (['latest','pending'].includes(params[1]) || BigInt(params[1])>=blockNumber)?'0x3':'0x2';
  if(method==='eth_getCode')return eq(params[0],safe)?artifacts.contracts.SafeProxy.runtime:eq(params[0],singleton)?artifacts.contracts.Safe.runtime:Object.values(code).find(c=>eq(c.address,params[0]))?.code??'0x';
  if(method==='eth_getStorageAt')return params[1]==='0x0'?pad(singleton):zeroHash;
  if(method==='eth_getBlockByNumber'){
   const side=BigInt(chain)===BigInt(d.l1.chainId)?d.l1:d.l2;
   const number=['latest','pending'].includes(params[0])?blockNumber:BigInt(params[0]);
-  return {number:toHex(number),hash:number===side.anchor.blockNumber?side.anchor.blockHash:blockHash,timestamp:'0x65000000',gasLimit:'0x1000000',gasUsed:'0x0',transactions:[]};
+  return {number:toHex(number),hash:number===side.anchor.blockNumber?side.anchor.blockHash:blockHash,timestamp:'0x65000000',gasLimit:'0x1000000',gasUsed:'0x0',transactions:confirmed && number===blockNumber && params[1]?[await rpc({method:'eth_getTransactionByHash',params:[txHash],chain})]:[]};
  }
  if(method==='eth_getTransactionReceipt')return confirmed?{transactionHash:txHash,from:account,to:safe,status:'0x1',blockHash,blockNumber:toHex(blockNumber),transactionIndex:'0x0',type:'0x0',gasUsed:'0x493e0',effectiveGasPrice:'0x1',cumulativeGasUsed:'0x493e0',logs:[{
   address:safe,topics:encodeEventTopics({abi:safeAbi,eventName:'ExecutionSuccess',args:{txHash:safeTransactionHash(ownerTx())}}),data:encodeAbiParameters([{type:'uint256'}],[0n]),blockHash,blockNumber:toHex(blockNumber),transactionHash:txHash,transactionIndex:'0x0',logIndex:'0x0',removed:false,
@@ -64,7 +64,7 @@ async function rpc({method,params=[],chain}) {
 }
 const browser=await chromium.launch({headless:true,chromiumSandbox:process.env.TREASURY_BROWSER_SANDBOX!=='0'});
 try {
- const f=await fixture(browser,{rpc:async request=>{try{return await rpc(request);}catch(error){console.error(request.method,error.message);throw error;}}}),{page}=f;
+ const f=await fixture(browser,{rpc}),{page}=f;
  await page.exposeFunction('existingSafeWalletRpc',async request=>{
   if(request.method==='eth_signTypedData_v4'){
    assert.equal(request.chain,toHex(d.l1.chainId));assert(eq(request.params[0],account));
@@ -117,8 +117,12 @@ try {
  const journalKey=scopedRecoveryKey(recoveryKey(d,'owner'),{account,publicKey});
  await page.waitForFunction(key=>!!localStorage.getItem(key),journalKey);
  assert.equal(sends.length,1);await page.waitForFunction(()=>document.querySelector('#falcon-existing-safe')?.disabled);
+ const savedRequest=await page.evaluate(key=>localStorage.getItem(key),journalKey);
+ await page.evaluate(({key,other})=>{const record=JSON.parse(localStorage.getItem(key));record.account=other;localStorage.setItem(key,JSON.stringify(record));},{key:journalKey,other:a(999)});
  await page.reload();await page.locator('#unlock-saved').waitFor();
  await page.getByLabel('Saved key password',{exact:true}).fill('existing-safe-test-password');await page.locator('#unlock-saved').click();
+ await status('Saved owner request belongs to another wallet');assert.equal(sends.length,1);
+ await page.evaluate(({key,raw})=>{localStorage.setItem(key,raw);window.dispatchEvent(new StorageEvent('storage',{key}));},{key:journalKey,raw:savedRequest});
  await status('Checking automatically');assert.equal(sends.length,1,'reload never resubmits');
  assert.equal(await page.getByText('Owner transaction recovery',{exact:true}).count(),0);
  assert.equal(await page.getByLabel('Owner transaction hash',{exact:true}).count(),0);

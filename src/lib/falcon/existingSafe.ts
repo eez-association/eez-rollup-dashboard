@@ -6,6 +6,7 @@ import { controllerOwner, inspectExistingSafe, loadRemoteSafe, safeAbi, safeCall
 import { buildSafeTransaction, safeTransactionHash } from '../treasury/safeTransactions.ts';
 import { decodeSafeExecution } from '../treasury/safeEvents.ts';
 import { loadMainnetManifest, type SetupNetwork } from '../treasury/mainnetSetup.ts';
+import { checkRecoveryOutcome, findRecoveryByNonce } from './recoveryChecks.ts';
 import { matchesRecoveryTransaction, recoveryKey, type RecoveryAttempt } from './recoveryJournal.ts';
 
 const adminAbi = parseAbi(['function addOwnerWithThreshold(address owner,uint256 threshold)']);
@@ -16,6 +17,15 @@ export function readAttachment(storage: Pick<Storage, 'getItem'>, key: string): 
   const value = JSON.parse(raw) as SafeAttachment;
   if (!value || !isAddress(value.target) || !isAddress(value.walletOwner)) throw new Error('Saved Falcon Safe address is invalid.');
   return { target: getAddress(value.target), walletOwner: getAddress(value.walletOwner) };
+}
+/** Caller holds the attachment Web Lock. A second tab must not silently replace
+ * the Safe selected for this controller after a different owner change confirms. */
+export function saveAttachment(storage: Pick<Storage, 'getItem' | 'setItem'>, key: string, next: SafeAttachment) {
+  const current = readAttachment(storage, key);
+  if (current && (!sameAddress(current.target, next.target) || !sameAddress(current.walletOwner, next.walletOwner))) {
+    throw new Error('Another Safe was selected for this Falcon key. The confirmed owner transaction remains saved for review.');
+  }
+  storage.setItem(key, JSON.stringify(next));
 }
 /** A completed, matching Treasury is an address suggestion, never an authorization. */
 export function treasurySafeSuggestion(storage: Pick<Storage, 'getItem' | 'key' | 'length'>, d: CrossChainDeployment): string {
@@ -77,4 +87,55 @@ export async function verifyOwnerAddition(client: EezClient, d: CrossChainDeploy
   const again = await canonicalReceipt(client, attempt.hash, signal);
   if (again.blockHash !== receipt.blockHash) throw new Error('Owner transaction confirmation changed.');
   return attachment;
+}
+
+
+/** Recover on RPCs whose sender/nonce extension searches unavailable genesis state.
+ * Canonical nonce history identifies a block; only the exact transaction and
+ * receipt can establish success or a mined replacement. Never infer failure
+ * from an absent hash, and never submit a transaction from this path.
+ */
+export async function findOwnerRecovery(client: EezClient, provider: Pick<EthereumProvider, 'request'>, attempt: RecoveryAttempt, signal: AbortSignal) {
+  if (attempt.kind !== 'owner' || await client.getChainId() !== attempt.chainId) throw new Error('Owner recovery RPC serves a different chain.');
+  try {
+    const found = await findRecoveryByNonce(client, provider, attempt, signal);
+    if (found) return found;
+  } catch { signal.throwIfAborted(); /* Use canonical recent history if the extension is unavailable. */ }
+  const head = await client.getBlock({ blockTag: 'latest' });
+  signal.throwIfAborted();
+  if (head.number === null || !head.hash) throw new Error('Canonical L1 history is unavailable.');
+  const nonce = BigInt(attempt.nonce);
+  const nonceAt = async (blockNumber: bigint) => {
+    signal.throwIfAborted();
+    const result = await client.getTransactionCount({ address: attempt.account, blockNumber });
+    signal.throwIfAborted();
+    return BigInt(result);
+  };
+  let high = head.number;
+  if (await nonceAt(high) <= nonce) return null;
+  let low = attempt.startBlock !== undefined ? BigInt(attempt.startBlock) : high > 8192n ? high - 8192n : 0n;
+  if (low > high) throw new Error('L1 is behind this owner request. Waiting for network history.');
+  if (low > 0n) low--;
+  let before: bigint;
+  try { before = await nonceAt(low); }
+  catch (error) {
+    signal.throwIfAborted();
+    const earliest = /earliest available (\d+)/i.exec(error instanceof Error ? error.message : '');
+    if (!earliest || BigInt(earliest[1]!) <= low || BigInt(earliest[1]!) > high) throw error;
+    low = BigInt(earliest[1]!);
+    before = await nonceAt(low);
+  }
+  if (before > nonce) throw new Error('This owner transaction is older than the available L1 history. Its pending record is preserved.');
+  while (high - low > 1n) {
+    const middle = (low + high) / 2n;
+    if (await nonceAt(middle) > nonce) high = middle; else low = middle;
+  }
+  const block = await client.getBlock({ blockNumber: high, includeTransactions: true });
+  if (block.number !== high || !block.hash) throw new Error('Owner transaction block is unavailable.');
+  const tx = block.transactions.find(tx => typeof tx !== 'string' && sameAddress(tx.from, attempt.account) && BigInt(tx.nonce) === nonce);
+  if (!tx || typeof tx === 'string') throw new Error('Owner transaction history is incomplete. Checking again.');
+  const again = await client.getBlock({ blockNumber: head.number });
+  signal.throwIfAborted();
+  if (again.hash !== head.hash) throw new Error('L1 history changed during owner recovery. Checking again.');
+  return { hash: tx.hash, outcome: await checkRecoveryOutcome(client, attempt, tx.hash, signal) };
 }

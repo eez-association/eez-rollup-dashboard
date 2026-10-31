@@ -7,9 +7,8 @@ import type { CrossChainDeployment } from '../../lib/falcon/crossChainDeployment
 import { eezClient } from '../../lib/falcon/eez';
 import { falconReadProvider, confirmationDelay } from '../../lib/falcon/readOnly';
 import { checkChain, FalconTransactionReverted, sameAddress, type ControllerState } from '../../lib/falcon/l1Controller';
-import { attachmentKey, prepareOwnerAddition, treasurySafeSuggestion, verifyOwnerAddition } from '../../lib/falcon/existingSafe';
+import { attachmentKey, findOwnerRecovery, prepareOwnerAddition, saveAttachment, treasurySafeSuggestion, verifyOwnerAddition } from '../../lib/falcon/existingSafe';
 import { recoveryKey, type RecoveryAttempt } from '../../lib/falcon/recoveryJournal';
-import { findRecoveryByNonce } from '../../lib/falcon/recoveryChecks';
 import { encodeSafeExecution, packEOAApprovals, safeTransactionHash, safeTypedDataJSON } from '../../lib/treasury/safeTransactions';
 import { UnknownFeeSubmission } from '../../lib/falcon/l2Fees';
 import type { SafeAttachment } from '../../lib/falcon/safe';
@@ -20,7 +19,9 @@ type Props = { wallet: FalconWallet; deployment: CrossChainDeployment; controlle
 /** L1 owner administration only; the L2 mirror is never a transaction target. */
 export function ExistingFalconSafe({ wallet, deployment, controller, publicKey, disabled, visible, isCurrent, onAttached, onPending, onBack }: Props) {
   const journal = useFalconRecovery(recoveryKey(deployment, 'owner'), wallet.address ? { account: wallet.address, publicKey } : null);
-  const [address, setAddress] = useState(() => treasurySafeSuggestion(localStorage, deployment));
+  const [address, setAddress] = useState(() => {
+    try { return treasurySafeSuggestion(localStorage, deployment); } catch { return ''; }
+  });
   const [busy, setBusy] = useState(false), [message, setMessage] = useState('');
   const active = useRef(false), currentAddress = useRef(address); currentAddress.current = address;
   const abortRef = useRef<AbortController | null>(null);
@@ -29,7 +30,10 @@ export function ExistingFalconSafe({ wallet, deployment, controller, publicKey, 
   useEffect(() => { onPending(busy || !!journal.attempt || !!journal.error); }, [busy, journal.attempt, journal.error, onPending]);
   const clientFor = (signal: AbortSignal) => eezClient(falconReadProvider(config.l1Rpc, signal, deployment.l1.chainName));
   function assertAttempt(attempt: RecoveryAttempt) {
-    if (attempt.kind !== 'owner' || attempt.chainId !== deployment.l1.chainId || !sameAddress(attempt.controller ?? '', controller.controller)) throw new Error('Saved owner request belongs to another controller or network.');
+    if (attempt.kind !== 'owner' || attempt.chainId !== deployment.l1.chainId || !sameAddress(attempt.controller ?? '', controller.controller)
+      || !wallet.address || !sameAddress(attempt.account, wallet.address) || attempt.publicKey.toLowerCase() !== publicKey.toLowerCase()) {
+      throw new Error('Saved owner request belongs to another wallet, Falcon key, controller or network.');
+    }
   }
   useEffect(() => {
     const attempt = journal.attempt;
@@ -41,9 +45,14 @@ export function ExistingFalconSafe({ wallet, deployment, controller, publicKey, 
           assertAttempt(attempt);
           const provider = falconReadProvider(config.l1Rpc, abort.signal, deployment.l1.chainName), client = eezClient(provider);
           await checkChain(client, deployment.l1);
-          if (!attempt.hash) {
-            const found = await findRecoveryByNonce(client, provider, attempt, abort.signal);
-            if (found) {
+          let receiptKnown = false;
+          if (attempt.hash) {
+            try { receiptKnown = !!await client.getTransactionReceipt({ hash: attempt.hash }); }
+            catch (error) { if (!(error instanceof Error) || error.name !== 'TransactionReceiptNotFoundError') throw error; }
+          }
+          if (!receiptKnown) {
+            const found = await findOwnerRecovery(client, provider, attempt, abort.signal);
+            if (found && (found.outcome === 'replaced' || found.hash !== attempt.hash)) {
               if (found.outcome === 'matching') await journal.selectHash(attempt, found.hash);
               else { await journal.resolve(attempt); setMessage('The owner transaction was replaced or cancelled. You can review a new request.'); }
               return;
@@ -53,7 +62,11 @@ export function ExistingFalconSafe({ wallet, deployment, controller, publicKey, 
             const attachment = await verifyOwnerAddition(client, deployment, attempt, abort.signal);
             abort.signal.throwIfAborted();
             // Store before clearing recovery, so a storage failure never loses the confirmed Safe.
-            localStorage.setItem(attachmentKey(deployment, publicKey), JSON.stringify(attachment));
+            const key = attachmentKey(deployment, publicKey);
+            await navigator.locks.request(key, () => {
+              abort.signal.throwIfAborted();
+              saveAttachment(localStorage, key, attachment);
+            });
             await journal.finish(attempt.id);
             if (!abort.signal.aborted && callbacks.current.isCurrent()) callbacks.current.onAttached(attachment);
             return;
@@ -99,10 +112,11 @@ export function ExistingFalconSafe({ wallet, deployment, controller, publicKey, 
       const data = encodeSafeExecution(review.transaction, signatures);
       const gas = await client.estimateGas({ account: session.account, to: target, data });
       const nonce = await walletClient.getTransactionCount({ address: session.account, blockTag: 'pending' });
+      const startBlock = await client.getBlockNumber();
       session.assertCurrent();
       if (!current()) throw new Error('Wallet, key or Safe changed. Review again.');
       const attempt: RecoveryAttempt = { version: 1, kind: 'owner', id: crypto.randomUUID(), chainId: deployment.l1.chainId,
-        account: session.account, to: target, nonce: String(nonce), value: '0', data, publicKey, controller: controller.controller, safeNonce: String(review.transaction.message.nonce) };
+        account: session.account, to: target, nonce: String(nonce), value: '0', data, publicKey, controller: controller.controller, safeNonce: String(review.transaction.message.nonce), startBlock: String(startBlock) };
       await journal.begin(attempt);
       try {
         setMessage('Confirm the owner addition transaction on L1.');
