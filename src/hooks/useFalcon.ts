@@ -42,6 +42,8 @@ export function useFalcon() {
   const [signatureInfo, setSignatureInfo] = useState('Padded Falcon-512 signature');
   const [savedKey, setSavedKey] = useState<SavedKey>({ kind: 'empty' });
   const savedText = useRef<string | null>(null);
+  const displayState = useRef({ publicKeyHex, busy });
+  displayState.current = { publicKeyHex, busy };
 
   const refreshSavedKey = useCallback(() => {
     let text: string | null;
@@ -74,6 +76,7 @@ export function useFalcon() {
     key.current?.secretKey.fill(0);
     key.current = undefined;
     running.current = false;
+    displayState.current = { publicKeyHex: '', busy: false };
     setBusy(false);
     setPublicKeyHex('');
     setSignature('');
@@ -84,7 +87,21 @@ export function useFalcon() {
 
   useEffect(() => {
     mounted.current = true;
-    refreshSavedKey();
+    const resume = () => {
+      // A remount/development refresh can preserve render state after cleanup
+      // has wiped the secret. Never leave an unlocked-looking UI without a key.
+      if (!key.current && !running.current) {
+        const staleDisplay = !!displayState.current.publicKeyHex || displayState.current.busy;
+        displayState.current = { publicKeyHex: '', busy: false };
+        running.current = false;
+        setBusy(false); setPublicKeyHex(''); setSignature('');
+        if (staleDisplay) { setKeyNotice(initialKey); setSignatureNotice(initialSignature); }
+        setSignatureInfo('Padded Falcon-512 signature');
+      }
+      refreshSavedKey();
+    };
+    resume();
+    const visible = () => { if (document.visibilityState === 'visible') resume(); };
     const storageChanged = (event: StorageEvent) => {
       if (event.key !== null && event.key !== BROWSER_KEYSTORE_KEY) return;
       try { if (event.storageArea !== window.localStorage) return; } catch { return; }
@@ -94,16 +111,19 @@ export function useFalcon() {
     };
     window.addEventListener('pagehide', lock);
     window.addEventListener('storage', storageChanged);
-    window.addEventListener('pageshow', refreshSavedKey);
+    window.addEventListener('pageshow', resume);
+    document.addEventListener('visibilitychange', visible);
     return () => {
       mounted.current = false;
       epoch.current += 1;
       keyRevision.current += 1;
       key.current?.secretKey.fill(0);
       key.current = undefined;
+      running.current = false;
       window.removeEventListener('pagehide', lock);
       window.removeEventListener('storage', storageChanged);
-      window.removeEventListener('pageshow', refreshSavedKey);
+      window.removeEventListener('pageshow', resume);
+      document.removeEventListener('visibilitychange', visible);
     };
   }, [lock, refreshSavedKey]);
 
@@ -274,13 +294,19 @@ export function useFalcon() {
 
   async function signActionDigest(digest: Hex, isCurrent: () => boolean): Promise<Hex> {
     if (running.current) throw new Error('Wait for the current key operation to finish.');
+    if (!key.current) throw new Error('Your Falcon key is locked. Unlock it in Key manager before signing.');
+    const signingKey = key.current, signingRevision = keyRevision.current;
     const revision = ++epoch.current;
     running.current = true;
     setBusy(true);
     try {
       await new Promise(resolve => setTimeout(resolve, 20));
-      if (!isCurrent() || !key.current || epoch.current !== revision) throw new Error('Falcon key changed. Review the action and sign again.');
-      return `0x${toHex(signMessage(fromHex(digest, MESSAGE_BYTES), key.current.secretKey))}`;
+      if (!mounted.current || !key.current || key.current !== signingKey || keyRevision.current !== signingRevision) {
+        throw new Error('Your Falcon key was locked or switched. Unlock the intended key and sign again.');
+      }
+      if (epoch.current !== revision) throw new Error('Signing was interrupted. Review the action and sign again.');
+      if (!isCurrent()) throw new Error('Transaction details changed. Review the action and sign again.');
+      return `0x${toHex(signMessage(fromHex(digest, MESSAGE_BYTES), signingKey.secretKey))}`;
     } finally {
       if (mounted.current && epoch.current === revision) { running.current = false; setBusy(false); }
     }

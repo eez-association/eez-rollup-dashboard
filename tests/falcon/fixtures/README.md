@@ -16,11 +16,15 @@ private keys are ephemeral and are never committed.
   POC for independent calldata/blob and accounting regressions. See the
   [model provenance](../../../docs/falcon/cost-comparison.md).
 - `deployed-code.json`: public `eth_getCode` responses captured 2026-10-30 from
-  EEZ-X 916969 (`https://eez.asuscomm.com/composer/l2`) and Chiado 10200
-  (`https://rpc.chiadochain.net`). Every address/runtime hash is checked against
+  EEZ-X 916969 and Chiado 10200 through their configured read RPCs.
+  Every address/runtime hash is checked against
   the feature deployment bindings before using the fixture. These let wallet
   tests retain bytecode checks without making external RPC requests. They do
   not execute an EVM; RPC, receipts and cross-chain transport remain mocks.
+- `testnet-deployed-code.json`: verifier and controller factory runtime code
+  captured after deployment and full explorer verification on eez.dev chain
+  699169 on 2026-10-30. Chiado Safe contracts are shared with the original
+  deployment. Both networks' wallet scenarios check their respective code hashes.
 
 The verifier uses ETHFALCON's pinned SHAKE256 implementation under the included
 [MIT license](ETHFALCON-LICENSE.txt), wrapped by the demo's strict padded-format

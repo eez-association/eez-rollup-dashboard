@@ -7,6 +7,7 @@ import type { FalconWallet } from '../../hooks/useFalconWallet.ts';
 import { FalconSafe } from './FalconSafe.tsx';
 import type { FeeConfig } from '../../lib/falcon/l2Fees.ts';
 import { WalletIcon } from '../WalletIcon';
+import { WalletNetworkSetup } from '../WalletNetworkSetup';
 import { type CrossChainDeployment } from '../../lib/falcon/crossChainDeployment.ts';
 
 function Status({ notice, id }: { notice: Notice; id: string }) {
@@ -26,6 +27,7 @@ export function FalconPanel({ wallet, crossChain, fees }: { wallet: FalconWallet
   const hasSavedKey = falcon.savedKey.kind === 'saved' || falcon.savedKey.kind === 'invalid';
   const activeSaved = falcon.savedKey.kind === 'saved' && falcon.savedKey.publicKeyHex === falcon.publicKeyHex;
   const canVerify = hasKey && falcon.signature.trim() !== '' && !falcon.busy;
+  const setupNetwork = wallet.networkSetup && wallet.networkSetup.status !== 'ready' ? wallet.networkSetup.network : crossChain?.l2;
 
   function backup(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -174,17 +176,25 @@ export function FalconPanel({ wallet, crossChain, fees }: { wallet: FalconWallet
     <div className={styles.card}>
       {wallet.address ? <span className={styles.walletAccount}><WalletIcon name={wallet.name} className={styles.walletIcon} />Gas wallet · {wallet.name} · {wallet.address.slice(0, 8)}…{wallet.address.slice(-6)}</span>
         : <p className={styles.hint}>Connect your wallet in the dashboard header to use the on-chain demo.</p>}
+      {wallet.address && crossChain && <div className={styles.safeStats} aria-label="Gas wallet balances">
+        <div><span className={styles.label}>{crossChain.l1.chainName} · L1</span>
+          <strong data-testid="falcon-wallet-l1-balance">{wallet.l1Balance ?? 'Loading…'} {crossChain.l1.safe?.nativeSymbol}</strong></div>
+        <div><span className={styles.label}>{crossChain.l2.chainName} · L2</span>
+          <strong data-testid="falcon-wallet-l2-balance">{wallet.l2Balance ?? 'Loading…'} {fees?.nativeSymbol}</strong></div>
+      </div>}
+      {setupNetwork && <WalletNetworkSetup address={wallet.address} chainId={wallet.chainId}
+        network={setupNetwork} setup={wallet.networkSetup} knownNetwork={wallet.hasNetwork(setupNetwork.chainId)} onConnect={() => void wallet.connectNetwork(setupNetwork)} />}
     </div>
     {crossChain && fees ? <FalconSafe signer={falcon} wallet={wallet} deployment={crossChain} fees={fees} /> : <section className={styles.card}>
       <h2>Your Falcon Safe</h2>
       <p className={styles.hint}>On-chain actions are unavailable for this dashboard configuration. You can still create a key and verify signatures in the browser.</p>
     </section>}
-    <section className={styles.card} aria-labelledby={id('sign-heading')}>
-      <header className={styles.header}>
-        <p className={styles.eyebrow}>[ 03 / SIGN &amp; VERIFY ]</p>
+    <details id="signature-playground" className={`${styles.card} ${styles.playground}`}>
+      <summary className={styles.playgroundSummary}>
         <h2 id={id('sign-heading')}>Signature playground</h2>
-        <p>Sign a message, then change a byte to see verification fail.</p>
-      </header>
+      </summary>
+      <div className={styles.playgroundBody}>
+      <p className={styles.hint}>Sign a message, then change a byte to see verification fail.</p>
       <fieldset className={styles.fields} disabled={falcon.busy}>
         <label className={styles.label} htmlFor={id('message')}>Message · 32 bytes</label>
         <textarea id={id('message')} data-testid="message" className={styles.input} rows={3} spellCheck={false} autoCapitalize="off" value={falcon.message} onChange={event => falcon.editMessage(event.target.value)} aria-describedby={id('message-help')} />
@@ -201,8 +211,9 @@ export function FalconPanel({ wallet, crossChain, fees }: { wallet: FalconWallet
         </div>
       </fieldset>
       <Status id="signature-status" notice={falcon.signatureNotice} />
-      {crossChain && <L2Verification message={falcon.message} signature={falcon.signature} publicKey={falcon.publicKeyHex} disabled={!canVerify} wallet={wallet} />}
-    </section>
+      {crossChain && <L2Verification key={crossChain.l2.chainId} deployment={crossChain} message={falcon.message} signature={falcon.signature} publicKey={falcon.publicKeyHex} disabled={!canVerify} wallet={wallet} />}
+      </div>
+    </details>
     </div>
   </div>;
 }

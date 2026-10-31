@@ -2,7 +2,7 @@
 // Mocked Rabby and RPCs: records the wallet request and never broadcasts it.
 const assert = require('node:assert/strict');
 const { chromium } = require('playwright');
-const { keccak256, toHex } = require('viem');
+const { keccak256, toHex, toFunctionSelector } = require('viem');
 
 const origin = (process.env.EEZ_UI_URL || 'http://127.0.0.1:18777').replace(/\/$/, '');
 const RAW_GAS = 422319n;
@@ -29,6 +29,7 @@ async function fixture(browser, options = {}) {
   const page = await context.newPage();
   if (options.clock) await page.clock.install();
   const errors = [], rpcRequests = [];
+  let tokenInfoReads = 0;
   const feeQuote = { failure: !!options.quoteFailure, gasPrice: '9000000007', priorityFee: '9000000000', hold: null };
   const receipt = { result: null };
   const estimation = { unsupported: options.unsupported ?? false, error: options.estimateError ?? null, result: options.estimateResult ?? "0x671af", transient: options.transientEstimates ?? 0 };
@@ -133,13 +134,16 @@ async function fixture(browser, options = {}) {
       if (estimation.error) return reject(estimation.error);
       return reply(options.gasForValue ? options.gasForValue(BigInt(params[0].value)) : estimation.result);
     }
+    if (method === 'eth_call' && params[0]?.data === toFunctionSelector('rollupId()')) return reply('0x' + BigInt(path.endsWith('l1') ? 0 : 2).toString(16).padStart(64,'0'));
+    if (method === 'eth_call' && params[0]?.data.startsWith(toFunctionSelector('getWrappedToken(address,uint64)'))) return reply('0x'+token.slice(2).padStart(64,'0'));
     if (method === 'eth_call' && params[0]?.to?.toLowerCase() === bridge && params[0]?.data.startsWith('0x3e38ac74')) {
-      if (options.tokenInfoError) return reject('Token information unavailable');
+      if (options.tokenInfoError && tokenInfoReads++ > 0) return reject('Token information unavailable');
       return reply('0x' + (options.wrapped ? '6b175474e89094c44da98b954eedeac495271d0f' : '').padStart(64, '0') + '0'.repeat(64));
     }
-    if (method === 'eth_call' && params[0]?.to?.toLowerCase() === token) {
-      if (params[0].data === '0x313ce567') return reply('0x' + '0'.repeat(62) + '12');
-      if (params[0].data === '0x95d89b41' && options.symbol) return reply(encodeString(options.symbol));
+    if (method === 'eth_call' && [token,'0x6b175474e89094c44da98b954eedeac495271d0f'].includes(params[0]?.to?.toLowerCase())) {
+      if (params[0].data === '0x06fdde03') return reply(encodeString('Test token'));
+      if (params[0].data === '0x313ce567') return reply('0x' + BigInt(options.decimals ?? 18).toString(16).padStart(64,'0'));
+      if (params[0].data === '0x95d89b41') return reply(encodeString(options.symbol || '???'));
       if (params[0].data.startsWith('0x70a08231')) return reply('0x' + BigInt(options.balance ?? '0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff').toString(16).padStart(64, '0'));
       if (params[0].data.startsWith('0xdd62ed3e')) return reply('0x' + BigInt(options.allowance ?? '0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff').toString(16).padStart(64, '0'));
       return reply('0x');
@@ -178,8 +182,8 @@ async function fixture(browser, options = {}) {
   if (options.reverse) await page.getByTitle('Swap direction').click();
   if (options.erc20) {
     await page.getByRole('button', { name: /^Choose bridge asset on/ }).first().click();
-    await page.getByRole('button', { name: 'ERC20', exact: true }).click();
-    await page.getByPlaceholder('0x... (ERC20 token address)', { exact: true }).fill(token);
+    await page.getByLabel('Search tokens').fill(token);
+    await page.getByRole('button', {name: 'Add token & select', exact: true}).click();
     await until(async () => (await page.getByLabel('Bridge amount', { exact: true }).locator('..').locator('span').first().textContent()) === (options.symbol || '???'), 'token metadata did not load');
   }
   if (options.destination) {
@@ -323,7 +327,7 @@ if (require.main === module) (async () => {
       const source = f.page.getByRole('group', { name: 'Source network', exact: true });
       await f.page.getByRole('button', { name: 'Switch wallet to EEZ-X Devnet', exact: true }).click();
       await source.getByText('EEZ-X Devnet', { exact: true }).waitFor();
-      assert.equal(await f.page.getByPlaceholder('0x... (ERC20 token address)').inputValue(), token);
+      await until(() => f.rpcRequests.some(r => r.method === 'eth_call' && r.params[0]?.to?.toLowerCase() === token.toLowerCase()), 'selected token must still be read');
       await until(() => f.button.isEnabled(), 'reverse estimate did not finish');
       assert.equal(f.rpcRequests.filter(r => r.method === 'eth_estimateGas').at(-1).path, '/composer/l2');
       await f.page.evaluate(() => { window.rejectSwitch = true; });
@@ -333,7 +337,7 @@ if (require.main === module) (async () => {
       await f.page.evaluate(() => { window.rejectSwitch = false; });
       await f.page.getByRole('button', { name: 'Switch wallet to Chiado', exact: true }).click();
       await source.getByText('Chiado', { exact: true }).waitFor();
-      assert.equal(await f.page.getByPlaceholder('0x... (ERC20 token address)').inputValue(), token);
+      await until(() => f.rpcRequests.some(r => r.method === 'eth_call' && r.params[0]?.to?.toLowerCase() === token.toLowerCase()), 'selected token must still be read');
       const definitions = await f.page.evaluate(() => window.walletChains);
       assert.ok(definitions.every(chain => chain.nativeCurrency.symbol === 'xDAI'));
       assert.deepEqual(await f.page.evaluate(() => window.walletRequests), []);

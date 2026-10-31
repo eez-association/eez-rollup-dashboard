@@ -10,9 +10,19 @@ from deployment.bootstrap_chiado import Journal, require_chiado, validate_identi
 from network_config import load_config
 from deployment.verify_chiado import compiler_input
 from deployment.bootstrap_chiado import quote_transaction, validate_fee_quote
+from deployment.bootstrap_chiado import validate_bridge_peer
 
 
 class BootstrapTests(unittest.TestCase):
+    def test_zero_peer_means_same_address_not_any_peer(self):
+        local, other, zero = ('0x' + value * 20 for value in ('12', '34', '00'))
+        validate_bridge_peer(local, zero, local)
+        validate_bridge_peer(local, other, other)
+        with self.assertRaisesRegex(ValueError, 'Bridge peer mismatch'):
+            validate_bridge_peer(local, zero, other)
+        with self.assertRaisesRegex(ValueError, 'Bridge peer mismatch'):
+            validate_bridge_peer(local, other, local)
+
     def test_cross_chain_quote_is_bound_capped_and_unexpired(self):
         tx = quote_transaction({'type': 2, 'chainId': 10200, 'nonce': 3, 'gas': 6000000,
             'from': '0x'+'12'*20, 'to': '0x'+'34'*20, 'data': '0x1234'})

@@ -12,7 +12,7 @@ import { buildSafeTransaction, encodeSafeExecution, packEOAApprovals, packOwnerA
 import { TreasuryClient, parseTreasuryConfig } from "./client.ts";
 import type { Approval, TreasuryConfig } from "./client.ts";
 import { decodeSafeExecution } from "./safeEvents.ts";
-import { EIP1967_IMPLEMENTATION_SLOT, USDC_IMPLEMENTATION_SLOT } from "./mainnet.ts";
+import { EIP1967_IMPLEMENTATION_SLOT, USDC_IMPLEMENTATION_SLOT, treasuryExplorerUrl } from "./mainnet.ts";
 import { quoteCrossChainFees } from "../fees/payment.mjs";
 import { probeComposer } from "../composerDiscovery.ts";
 import { readBridgeManager } from "../bridgeManager.ts";
@@ -20,6 +20,8 @@ import official from "./official-safe-deployments.json" with { type: "json" };
 import network from "./mainnet-network.json" with { type: "json" };
 import rollupxNetwork from "./rollupx-mainnet-network.json" with { type: "json" };
 import sharedContracts from "./mainnet-shared-contracts.json" with { type: "json" };
+import { validateDiscoveredNetwork } from './networkDiscovery.ts';
+import type { DiscoveredAsset } from './networkDiscovery.ts';
 
 const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 function check(ok: unknown, message: string): asserts ok { if (!ok) throw new Error(message); }
@@ -28,8 +30,9 @@ async function readInBatches<T>(items: readonly T[], read: (item: T) => Promise<
 }
 const digest = (x: unknown): x is Hex => typeof x === "string" && /^0x[\da-f]{64}$/i.test(x);
 export type SetupNetwork = typeof network & {
+  discovered?: DiscoveredAsset;
   testnet?: boolean;
-  bridgeImplementations?: Record<Chain, { kind: "eip1967"; address: string; hash: string }>;
+  bridgeImplementations?: Partial<Record<Chain, { kind: "eip1967"; address: string; hash: string }>>;
   assetProvisioning?: { name: string; symbol: string; decimals: number; description: string };
 };
 export const setupIdentity = (selected: SetupNetwork) => keccak256(toHex(JSON.stringify(selected)));
@@ -117,6 +120,10 @@ export class MainnetSetup {
   readonly network: SetupNetwork;
   constructor(target: MainnetTarget, artifacts: DeploymentArtifacts, network: SetupNetwork = networkDefault) { this.network = network; this.target = target; this.artifacts = artifacts; this.io = new DeploymentIO(target, artifacts); }
   async validate() {
+    if (this.network.discovered) {
+      for (const chain of ['l1', 'l2'] as const) treasuryExplorerUrl(this.target[chain].explorer, true);
+      return validateDiscoveredNetwork(this.io, this.network);
+    }
     await Promise.all((["l1", "l2"] as const).map(async chain => {
       const expected = this.network.chains[chain], protocol = this.network.protocol.find(x => x.chain === chain)!;
       const [id, block, slot] = await Promise.all([this.io.rpc<Hex>(chain, "eth_chainId"),
@@ -180,11 +187,12 @@ export class MainnetSetup {
     const addresses: Record<string, Address> = l1 ? { safeL1: l1.address, singletonL1: l1.singleton } : {};
     const code: TreasuryConfig["code"] = l1 ? [{ chain: "l1", address: l1.address, hash: l1.proxyHash }, { chain: "l1", address: l1.singleton, hash: l1.singletonHash }] : [];
     const salt = toHex(crypto.getRandomValues(new Uint8Array(32)));
+    check(!this.network.discovered || safeL1 || options.matching, "New Safes require matching addresses through the Arachnid deployer on both chains");
     check(!options.matching || !safeL1 && !safeL2, "Matching addresses require two new Safes");
     const matching = options.matching ? matchingSafePlan(getAddress(deployer), salt, this.artifacts) : undefined;
     if (matching) await Promise.all((["l1", "l2"] as const).map(async chain => {
       const bytes = await this.io.rpc<Hex>(chain, "eth_getCode", [matchingDeployer, "latest"]);
-      check(keccak256(bytes) === matchingDeployerHash, "Matching Safe creation requires the verified deterministic deployer on both chains");
+      check(keccak256(bytes) === matchingDeployerHash, `Deploy the Arachnid deterministic deployer at ${matchingDeployer} on ${chain.toUpperCase()} before creating matching Safes`);
       code.push({ chain, address: matchingDeployer, hash: matchingDeployerHash });
       check(await this.io.rpc<Hex>(chain, "eth_getCode", [matching.safe, "latest"]) === "0x", "The planned Safe address is already occupied; start a new setup");
     }));
@@ -217,7 +225,7 @@ export class MainnetSetup {
       "Creating both Safes requires the verified Safe singleton and factory on L1. This network does not have the supported deployment contracts.");
     // Ethereum reuses its pinned shared module. Testnet deploys the current module
     // or discovers current Safe infrastructure on its own network.
-    if (!this.network.testnet) {
+    if (!this.network.testnet && !this.network.discovered) {
       check(sharedContracts.chainId === this.network.chains.l1.chainId && same(sharedContracts.registry, this.network.registry), "Shared Ethereum contracts belong to a different network");
       const block = await this.io.rpc<{ number: Hex; hash: Hex }>("l1", "eth_getBlockByNumber", ["latest", false]);
       check(block?.number && block.hash, "Shared Ethereum contracts are unavailable");
@@ -521,21 +529,22 @@ export class MainnetSetup {
       if (implementation) code.push({ chain, address: getAddress(implementation.address), hash: implementation.hash as Hex });
     }
     for (const p of this.network.protocol) for (const [address, hash] of [[p.proxy, p.proxyHash], [p.implementation, p.implementationHash]]) code.push({ chain: p.chain as Chain, address: getAddress(address!), hash: hash as Hex });
-    const c = parseTreasuryConfig({ version: 1, environment: this.network.testnet ? "dashboard-testnet" : "ethereum-mainnet", instance: keccak256(toHex(`${s.salt}:${a.safeL1}:${a.safeL2}`)),
-      l1: { ...this.target.l1, chainId: this.network.chains.l1.chainId, checkpoint: { number: this.network.chains.l1.number, hash: this.network.chains.l1.hash } },
-      l2: { ...this.target.l2, chainId: this.network.chains.l2.chainId, checkpoint: { number: this.network.chains.l2.number, hash: this.network.chains.l2.hash } },
+    const c = parseTreasuryConfig({ version: 1, environment: this.network.discovered ? "dashboard-network" : this.network.testnet ? "dashboard-testnet" : "ethereum-mainnet", instance: keccak256(toHex(`${s.salt}:${a.safeL1}:${a.safeL2}`)),
+      ...(this.network.discovered ? { network: this.network } : {}),
+      l1: { ...this.target.l1, explorer: treasuryExplorerUrl(this.target.l1.explorer, !!this.network.discovered), chainId: this.network.chains.l1.chainId, checkpoint: { number: this.network.chains.l1.number, hash: this.network.chains.l1.hash } },
+      l2: { ...this.target.l2, explorer: treasuryExplorerUrl(this.target.l2.explorer, !!this.network.discovered), chainId: this.network.chains.l2.chainId, checkpoint: { number: this.network.chains.l2.number, hash: this.network.chains.l2.hash } },
       fees: { maxTotalWei: this.target.fees.l2, l1MaxTotalWei: this.target.fees.l1 }, registry: this.network.registry, manager: this.network.manager,
       safeL1: a.safeL1, safeL2: a.safeL2, adapter: a.adapter, safeImplementations: { l1: a.singletonL1, l2: a.singletonL2 }, ownerLabels: {},
-      safeAppUrl: `https://app.safe.global/home?safe=${this.network.testnet ? "chiado" : "eth"}:${a.safeL1}`, code: [...new Map(code.map(b => [`${b.chain}:${b.address.toLowerCase()}`, b])).values()],
+      ...(!this.network.discovered ? { safeAppUrl: `https://app.safe.global/home?safe=${this.network.testnet ? "chiado" : "eth"}:${a.safeL1}` } : {}), code: [...new Map(code.map(b => [`${b.chain}:${b.address.toLowerCase()}`, b])).values()],
       protocol: this.network.protocol.map(p => ({ chain: p.chain, proxy: p.proxy, implementation: p.implementation })),
-      mainnet: this.network.testnet ? undefined : { rollupId: this.network.rollupId, usdcImplementation: this.network.contracts.usdcImplementation.address,
+      mainnet: this.network.testnet || this.network.discovered ? undefined : { rollupId: this.network.rollupId, usdcImplementation: this.network.contracts.usdcImplementation.address,
         bridgeImplementations: Object.fromEntries((["l1", "l2"] as const).map(chain => [chain, this.network.bridgeImplementations?.[chain]
           ? { kind: "eip1967", address: this.network.bridgeImplementations[chain].address } : { kind: "immutable" }])) },
       payments: { bridgeKind: "standard", policy: a.policy, alias: a.alias, safeL2Alias: a.safeL2Alias,
         pair,
         moduleL1: a.moduleL1, moduleL2: a.moduleL2, tokenL1: this.network.contracts.usdcProxy.address, tokenL2: this.network.contracts.wrappedUSDC.address,
         bridgeL1: this.network.contracts.bridgeL1.address, bridgeL2: this.network.contracts.bridgeL2.address, recipient: s.deployer,
-        version: 2, decimals: 6, period: 600, globalLimit: "150000000", assetLabel: this.network.testnet ? "Test USDC" : "USDC" } });
+        version: 2, decimals: 6, period: 600, globalLimit: "150000000", assetLabel: this.network.discovered?.symbol ?? (this.network.testnet ? "Test USDC" : "USDC") } });
     await new TreasuryClient(c).validate(); return c;
   }
 }

@@ -50,8 +50,8 @@ export async function mount(mode = 'test') {
   const deployment = { version: 1, instance: a(99), environment: mode === 'real' ? 'ethereum-mainnet' : 'dashboard-testnet',
     safeL1: a(10), safeL2: a(11), l1: target.l1, l2: target.l2, fees: { maxTotalWei: '100', l1MaxTotalWei: '100' },
     payments: { pair: { version: 1 }, bridgeKind: 'standard', tokenL1: a(30), tokenL2: a(31), bridgeL1: a(1), bridgeL2: a(2) } } as any;
-  function Harness() {
-    const faucet = useTreasuryFaucet(deployment, wallet as any, async () => { w.refreshes++; });
+  function Harness({ configuration }: { configuration: typeof deployment }) {
+    const faucet = useTreasuryFaucet(configuration, wallet as any, async () => { w.refreshes++; });
     const [fromL1, setFromL1] = useState(20_000_000n), [review, setReview] = useState(false);
     return <main style={{ maxWidth: 900, margin: '30px auto', padding: 20 }}>
       {(['l1', 'l2'] as const).map(chain => <section key={chain} aria-label={`${chain} Safe`}><h2>{chain} Safe</h2><code>{deployment[chain === 'l1' ? 'safeL1' : 'safeL2']}</code>
@@ -61,13 +61,18 @@ export async function mount(mode = 'test') {
       <output data-testid="l1-contribution">{String(fromL1)}</output><button onClick={() => setReview(!review)}>{review ? 'Edit split' : 'Review split'}</button>
     </main>;
   }
+  function Parent() {
+    const [, rerender] = useState(0);
+    w.rerenderFixture = () => rerender(value => value + 1);
+    return <Harness configuration={JSON.parse(JSON.stringify(deployment))} />;
+  }
   const root = createRoot(document.getElementById('root')!); w.unmountFixture = () => root.unmount();
   if (mode === 'setup' || mode === 'unconfigured') {
     const network = { ...networkDefault, testnet: true, chains: { ...networkDefault.chains, l1: { ...networkDefault.chains.l1, chainId: 10200 } } };
     TestnetAsset.prototype.network = async () => network;
     MainnetSetup.prototype.configure = async () => { throw new Error('Fixture stopped before deployment'); };
     root.render(<TreasuryTestnet wallet={wallet as any} target={target} bridgeL1={a(1)} bridgeL2={a(2)} token={mode === 'setup' ? a(30) : ''} />);
-  } else root.render(<Harness />);
+  } else root.render(<Parent />);
 }
 export function mountLegacy() {
   const container = document.createElement('div'); document.body.append(container);

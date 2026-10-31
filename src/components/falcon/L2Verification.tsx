@@ -1,18 +1,22 @@
 import { useEffect, useRef, useState } from 'react';
 import { BaseError, toHex, type Address, type Hex } from 'viem';
 import { fromHex, MESSAGE_BYTES, PUBLIC_KEY_BYTES, SIGNATURE_BYTES } from '../../lib/falcon/falcon.ts';
-import { EEZ, eezClient, recordData, simulateL2, waitForVerification, type EezClient, type PublicSample } from '../../lib/falcon/eez.ts';
+import { eezClient, recordData, simulateL2, waitForVerification, verifierDeployment, type PublicSample } from '../../lib/falcon/eez.ts';
+import { config } from '../../config';
+import { falconReadProvider } from '../../lib/falcon/readOnly.ts';
+import type { CrossChainDeployment } from '../../lib/falcon/crossChainDeployment.ts';
 import { WalletConnectionError, type FalconWallet } from '../../hooks/useFalconWallet.ts';
 import type { Notice } from '../../hooks/useFalcon.ts';
 import styles from './FalconPanel.module.css';
 
 type Submitted = { hash: Hex; sample: PublicSample; account: Address };
-const initial: Notice = { kind: 'neutral', text: 'Sign a message to verify it on EEZ-X Devnet.' };
+const initial: Notice = { kind: 'neutral', text: 'Sign a message to verify it on L2.' };
 
 /** Public inputs and an injected wallet interface keep this panel portable to the dashboard. */
-export function L2Verification({ message, signature, publicKey, disabled, wallet }: {
-  message: string; signature: string; publicKey: string; disabled: boolean; wallet: FalconWallet;
+export function L2Verification({ message, signature, publicKey, disabled, wallet, deployment }: {
+  message: string; signature: string; publicKey: string; disabled: boolean; wallet: FalconWallet; deployment: CrossChainDeployment;
 }) {
+  const network = verifierDeployment(deployment);
   const [notice, setNotice] = useState<Notice>(initial);
   const [busy, setBusy] = useState(false);
   const [submitted, setSubmitted] = useState<Submitted | null>(null);
@@ -56,10 +60,10 @@ export function L2Verification({ message, signature, publicKey, disabled, wallet
     }
   }
 
-  async function checkReceipt(tx: Submitted, signal: AbortSignal, existingClient?: EezClient) {
+  async function checkReceipt(tx: Submitted, signal: AbortSignal) {
     setNotice({ kind: 'pending', text: 'Submitted to L2. Waiting for the verification receipt…' });
-    const client = existingClient ?? eezClient((await wallet.getSession(signal)).provider);
-    const receipt = await waitForVerification(client, tx.hash, tx.sample, tx.account, signal);
+    const client = eezClient(falconReadProvider(config.l2Rpc, signal, network.chainName));
+    const receipt = await waitForVerification(client, tx.hash, tx.sample, tx.account, signal, network);
     if (!mounted.current) return;
     setNotice({ kind: 'valid', text: `Submitted sample verified on L2 · ${receipt.gasUsed.toLocaleString()} gas used.` });
     setDetails(`Block ${receipt.blockNumber} · matching SignatureVerified event. L1 settlement has not been checked.`);
@@ -74,11 +78,11 @@ export function L2Verification({ message, signature, publicKey, disabled, wallet
         publicKey: toHex(fromHex(publicKey, PUBLIC_KEY_BYTES)),
       };
       setSubmitted(null); setDetails('');
-      setNotice({ kind: 'pending', text: 'Checking the signature on EEZ-X Devnet…' });
-      const session = await wallet.getSession(signal);
+      setNotice({ kind: 'pending', text: `Checking the signature on ${network.chainName}…` });
+      const session = await wallet.getSession(signal, network);
       const client = eezClient(session.provider);
       const account = session.account;
-      const result = await simulateL2(client, sample, signal, account);
+      const result = await simulateL2(client, sample, signal, account, network);
       signal.throwIfAborted();
       const isCurrent = () => mounted.current && !signal.aborted && enabled.current && currentInput.current === snapshot;
       if (!isCurrent()) throw new Error('Signature or key changed. Review and try again.');
@@ -92,26 +96,26 @@ export function L2Verification({ message, signature, publicKey, disabled, wallet
         return;
       }
       setNotice({ kind: 'pending', text: `Review the transaction in ${wallet.name ?? 'your wallet'}. Locking the Falcon key does not dismiss a wallet request.` });
-      const hash = await session.sendTransaction({ to: EEZ.address, data: recordData(sample), gas: toHex((result.gas * 120n + 99n) / 100n) }, isCurrent);
+      const hash = await session.sendTransaction({ to: network.address, data: recordData(sample), gas: toHex((result.gas * 120n + 99n) / 100n) }, isCurrent);
       if (!mounted.current) return;
       const tx = { hash, sample, account };
       setSubmitted(tx);
-      await checkReceipt(tx, signal, client);
+      await checkReceipt(tx, signal);
     });
   }
 
   return <div className={styles.section}>
-    <div className={styles.titleRow}><h3>Verify on EEZ-X Devnet</h3><span className={styles.badge}>L2 · {EEZ.chainId}</span></div>
-    <p className={styles.hint}>Your Falcon key signs the message. Verification uses the devnet connection configured in your selected wallet.</p>
-    <a className={`${styles.hint} ${styles.contractDetails}`} href={`${EEZ.explorer}/address/${EEZ.address}`} target="_blank" rel="noreferrer">Verifier · {EEZ.address}</a>
+    <div className={styles.titleRow}><h3>Verify on {network.chainName}</h3><span className={styles.badge}>L2 · {network.chainId}</span></div>
+    <p className={styles.hint}>Your Falcon key signs the message. Verification uses the network connection configured in your selected wallet.</p>
+    <a className={`${styles.hint} ${styles.contractDetails}`} href={`${network.explorer}/address/${network.address}`} target="_blank" rel="noreferrer">Verifier · {network.address}</a>
     <div className={styles.actions}>
-      <button id="simulate-l2" className={`btn btn-outline ${styles.action}`} disabled={disabled || busy || !wallet.address} onClick={() => void verify(false)}>Simulate on L2</button>
-      <button id="send-l2" className={`btn btn-solid ${styles.action}`} disabled={disabled || busy || !wallet.address} onClick={() => void verify(true)}>Verify on L2 <span aria-hidden="true">→</span></button>
+      <button id="simulate-l2" className={`btn btn-outline ${styles.action}`} disabled={disabled || busy || wallet.networkSetup?.status === 'connecting' || !wallet.address} onClick={() => void verify(false)}>Simulate on L2</button>
+      <button id="send-l2" className={`btn btn-solid ${styles.action}`} disabled={disabled || busy || wallet.networkSetup?.status === 'connecting' || !wallet.address} onClick={() => void verify(true)}>Verify on L2 <span aria-hidden="true">→</span></button>
     </div>
     <p id="l2-status" className={styles.status} data-result={notice.kind} role="status" aria-live="polite">{notice.text}</p>
     {submitted && <div className={styles.transaction}>
-      <a id="l2-transaction" className={styles.contractDetails} href={`${EEZ.explorer}/tx/${submitted.hash}`} target="_blank" rel="noreferrer">Transaction · {submitted.hash}</a>
-      <button id="check-l2-receipt" className={`btn btn-outline ${styles.action}`} disabled={busy || !wallet.address} onClick={() => void run(signal => checkReceipt(submitted, signal))}>Check receipt</button>
+      <a id="l2-transaction" className={styles.contractDetails} href={`${network.explorer}/tx/${submitted.hash}`} target="_blank" rel="noreferrer">Transaction · {submitted.hash}</a>
+      <a id="l2-trace" className={`btn btn-outline ${styles.action}`} href={`#/visualizer?mode=trace&chain=l2&tx=${submitted.hash}`} target="_blank" rel="noreferrer">See in trace decoder</a>
     </div>}
     {details && <p className={`${styles.hint} ${styles.contractDetails}`}>{details}</p>}
   </div>;

@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { TraceRow } from "../../../trace-decoder/flow/rows.mjs";
-import type { TraceChain, TraceModel, TraceNode } from "../../../trace-decoder/service/types";
+import type { TraceChain, TraceModel, TraceNode, TraceProtocolLink } from "../../../trace-decoder/service/types";
 import { TokenNotes, tokenNotesHeight } from "./TokenTransfers";
 import styles from "./CallMap.module.css";
 
@@ -34,12 +34,13 @@ function roundPath(points: [number, number][], radius = 9) {
   return d + ` L${p[p.length - 1]![0]} ${p[p.length - 1]![1]}`;
 }
 
-export function CallMap({ model, rows, steps, physical, selected, onSelect, collapsed, onToggle, contractColor, contractKey, returnLabel, tokens }: {
+export function CallMap({ model, rows, steps, physical, selected, onSelect, collapsed, onToggle, contractColor, contractKey, returnLabel, tokens, protocolLinks }: {
   model: TraceModel; rows: TraceRow[]; steps: number[]; physical: boolean;
   selected: number | null; onSelect: (id: number) => void;
   collapsed: Set<number>; onToggle: (id: number) => void;
   contractColor: Map<string, number>; contractKey: (node: TraceNode) => string;
   returnLabel: (node: TraceNode) => string; tokens: boolean;
+  protocolLinks: TraceProtocolLink[];
 }) {
   const marker = "map-" + useId().replace(/[^a-zA-Z0-9_-]/g, "");
   const scroller = useRef<HTMLDivElement>(null);
@@ -59,11 +60,24 @@ export function CallMap({ model, rows, steps, physical, selected, onSelect, coll
 
   const layout = useMemo(() => {
     const visibleIds = new Set(rows.map(row => row.node.id));
+    // Place a joined L1 target beside its recorded proxy. The logical L2 caller
+    // still gets its own arrow to that one box; only the layout parent changes.
+    const layoutParents = new Map(rows.map(row => [row.node.id, row.parent]));
+    for (const link of protocolLinks) {
+      if (!visibleIds.has(link.from) || !visibleIds.has(link.to)) continue;
+      const ancestors = new Set([link.to]);
+      let ancestor: number | null = link.from;
+      while (ancestor !== null && !ancestors.has(ancestor)) {
+        ancestors.add(ancestor); ancestor = layoutParents.get(ancestor) ?? null;
+      }
+      if (ancestor === null) layoutParents.set(link.to, link.from);
+    }
     const children = new Map<number, TraceRow[]>();
     const roots: { row: TraceRow; index: number }[] = [];
     rows.forEach((row, index) => {
-      if (row.parent !== null && visibleIds.has(row.parent)) {
-        const list = children.get(row.parent) ?? []; list.push(row); children.set(row.parent, list);
+      const parent = layoutParents.get(row.node.id) ?? null;
+      if (parent !== null && visibleIds.has(parent)) {
+        const list = children.get(parent) ?? []; list.push(row); children.set(parent, list);
       } else roots.push({ row, index });
     });
     const stepOf = new Map(rows.map((row, index) => [row.node.id, steps[index]!]));
@@ -105,13 +119,24 @@ export function CallMap({ model, rows, steps, physical, selected, onSelect, coll
 
     // One trunk lane per parent in the corridor right of its column, so sibling arrows never overlap.
     const columns = Math.max(1, ...items.map(item => item.col + 1)), lanesIn = Array<number>(columns).fill(0);
-    const parents = new Set(items.map(item => item.parent));
+    const byNode = new Map(items.filter(item => item.node).map(item => [item.node!.id, item]));
+    const connections = rows.flatMap(row => {
+      const item = byNode.get(row.node.id);
+      const parent = row.parent === null ? undefined : byNode.get(row.parent);
+      const caller = parent ?? (item?.parent?.sender ? item.parent : undefined);
+      return item && caller ? [{ parent: caller, item, protocol: false }] : [];
+    });
+    connections.push(...protocolLinks.flatMap(link => {
+      const parent = byNode.get(link.from), item = byNode.get(link.to);
+      return parent && item ? [{ parent, item, protocol: true }] : [];
+    }));
+    const parents = new Set(connections.map(connection => connection.parent));
     for (const item of items) if (parents.has(item)) item.lane = lanesIn[item.col]!++;
     const corridor = (col: number) => F.gap + Math.max(0, lanesIn[col]! - 1) * 7;
     const colX: number[] = [];
     let x = F.side;
     for (let col = 0; col < columns; col++) { colX[col] = x; x += (col === 0 ? F.senderW : F.w) + corridor(col); }
-    const width = x - corridor(columns - 1) + F.side;
+    const width = x - corridor(columns - 1) + F.side + Math.max(0, lanesIn[columns - 1]! - 1) * 7;
 
     const first = roots[0]?.row.node.chain ?? "L1";
     const bands = (first === "L1" ? ["L1", "L2"] : ["L2", "L1"]).filter(chain => items.some(item => item.chain === chain)) as TraceChain[];
@@ -134,17 +159,24 @@ export function CallMap({ model, rows, steps, physical, selected, onSelect, coll
     }
     const boundary = bands.length > 1 ? bandTop[bands[1]!] : null;
 
-    const edges = items.filter(item => item.parent && item.node).map(item => {
-      const parent = item.parent!, node = item.node!;
+    const edges = connections.map(({ parent, item, protocol }) => {
+      const node = item.node!;
       const trunk = parent.x + parent.w + 18 + parent.lane * 7, py = parent.y + parent.h / 2, cy = item.y + item.h / 2;
       const crosses = parent.chain !== item.chain;
-      const crossing = node.crossing;
+      const crossing = protocol ? undefined : node.crossing;
       const uncertain = node.kind === "ghost" || !!crossing && crossing.status !== "matched";
+      let points: [number, number][] = [[parent.x + parent.w, py], [trunk, py], [trunk, cy], [item.x - 2, cy]];
+      if (parent.col + 1 !== item.col) {
+        // Cross the chain boundary before entering the target's column, so the
+        // L2 arrow does not pass through the newly aligned L1 proxy box.
+        const railY = crosses && boundary !== null ? boundary : rowTop[item.chain][item.row]! - F.row / 2;
+        points = [[parent.x + parent.w, py], [trunk, py], [trunk, railY], [item.x - 12, railY], [item.x - 12, cy], [item.x - 2, cy]];
+      }
       return {
-        item, trunk, crosses, uncertain, failed: node.failed || node.reverted,
+        item, parent, trunk, crosses, uncertain, failed: node.failed || node.reverted, protocol,
         // Recorded traces never connect independent transactions across chains.
         hidden: physical && (crosses || !!parent.node && parent.node.tx !== node.tx),
-        d: roundPath([[parent.x + parent.w, py], [trunk, py], [trunk, cy], [item.x - 2, cy]]),
+        d: roundPath(points),
       };
     });
     // Neighbouring trunks sit only a few pixels apart, so crossings closer than a badge's width
@@ -155,7 +187,7 @@ export function CallMap({ model, rows, steps, physical, selected, onSelect, coll
       if (last && edge.trunk - last.x < 90) last.edges.push(edge); else badges.push({ x: edge.trunk, edges: [edge] });
     }
     return { items, edges, badges, bands, bandTop, bandHeight, boundary, width, height: y };
-  }, [rows, steps, model, physical, tokens]);
+  }, [rows, steps, model, physical, tokens, protocolLinks]);
 
   const { items, edges, badges, bands, bandTop, bandHeight, boundary, width, height } = layout;
   // Fit never shrinks below 40%, where labels stop being readable; wider maps scroll instead.
@@ -195,13 +227,14 @@ export function CallMap({ model, rows, steps, physical, selected, onSelect, coll
               </linearGradient>}
             </defs>
             {edges.filter(edge => !edge.hidden).map(edge => {
-              const node = edge.item.node!, parentNode = edge.item.parent?.node;
+              const node = edge.item.node!, parentNode = edge.parent.node;
               const active = selected === node.id || selected === parentNode?.id;
               const tone = edge.failed ? "failed" : edge.uncertain ? "uncertain" : node.chain;
               const verified = edge.crosses && tone === node.chain;
-              return <g key={edge.item.id} data-active={active} data-dimmed={selected !== null && !active}>
+              return <g key={`${edge.parent.id}:${edge.item.id}`} data-active={active} data-dimmed={selected !== null && !active}>
                 {verified && <path d={edge.d} className={styles.glow} style={{ stroke: `url(#${marker}-cross)` }} />}
                 <path d={edge.d} className={styles.edge} data-from={parentNode?.id} data-to={node.id} data-tone={tone} data-crossing={edge.crosses} data-uncertain={edge.uncertain}
+                  data-protocol-link={edge.protocol || undefined}
                   style={verified ? { stroke: `url(#${marker}-cross)` } : undefined} markerEnd={`url(#${marker}-${tone})`} />
               </g>;
             })}
@@ -233,7 +266,7 @@ export function CallMap({ model, rows, steps, physical, selected, onSelect, coll
             </div>;
           })}
           {boundary !== null && badges.map(({ x, edges: group }) => {
-            const from = group[0]!.item.parent!.chain, to = group[0]!.item.chain;
+            const from = group[0]!.parent.chain, to = group[0]!.item.chain;
             const mixed = group.some(edge => edge.item.chain !== to);
             const uncertain = group.some(edge => edge.uncertain);
             return <div key={x} className={styles.badge} data-uncertain={uncertain} style={{ left: x + (group[group.length - 1]!.trunk - x) / 2, top: boundary }}>

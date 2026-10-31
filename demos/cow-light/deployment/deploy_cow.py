@@ -20,6 +20,16 @@ def artifact(name):
     return d["abi"], b
 
 
+def deployment_record(config, deployer, solver, identity, authenticator, settlement, relayer, transactions):
+    """Export public deployment evidence without transport or signing settings."""
+    return {"network": config['NETWORK'], "l1ChainId": config['L1_CHAIN_ID'],
+            "chainId": config['L2_CHAIN_ID'], "deployer": deployer,
+            "authenticator": authenticator, "settlement": settlement,
+            "manager": deployer, "solver": solver, "deploymentIdentity": identity,
+            "vaultRelayer": relayer,
+            "deploymentTxs": {name: row['hash'] for name, row in transactions.items()}}
+
+
 def main():
     check_infrastructure(CFG)
     w3 = Web3(Web3.HTTPProvider(RPC, request_kwargs={"timeout": 60}))
@@ -52,11 +62,9 @@ def main():
     settlement = sr['contractAddress']
     # These pure L2 deployments only require canonical L2 receipts. The
     # eventual cross-chain swap must separately prove its canonical L1 posting.
-    out = {"network": CFG['NETWORK'], "l1ChainId": CFG['L1_CHAIN_ID'], "chainId": CHAIN_ID, "rpc": RPC, "deployer": acct.address,
-           "authenticator": auth, "settlement": settlement, "manager": acct.address, "solver": solver,
-           "deploymentIdentity": deployment_identity,
-           "vaultRelayer": w3.eth.contract(settlement, abi=set_abi).functions.vaultRelayer().call(),
-           "deploymentTxs": {name: row['hash'] for name, row in sender.journal.data['transactions'].items()}}
+    out = deployment_record(CFG, acct.address, solver, deployment_identity, auth, settlement,
+        w3.eth.contract(settlement, abi=set_abi).functions.vaultRelayer().call(),
+        sender.journal.data['transactions'])
     OUT.parent.mkdir(parents=True, exist_ok=True)
     if CFG.deployment_identity(w3) != deployment_identity:
         raise ValueError('Network identity changed during deployment; manifest not published')

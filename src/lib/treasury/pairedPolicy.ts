@@ -44,27 +44,30 @@ export async function validatePairedPayments(client: TreasuryClient) {
     const module = onL1 ? p.moduleL1 : p.moduleL2, token = onL1 ? p.tokenL1 : p.tokenL2;
     const peerPolicy = onL1 ? p.policy : pair.policyL1, peerProxy = onL1 ? p.alias : pair.peerProxyL2;
     const read = (method: string) => contractRead(client, chain, policy, pairedPolicyAbi, method, [], tag);
-    const cfg = await read("configuration") as Configuration;
+    const [configuration, local, grantState] = await Promise.all([
+      read("configuration"),
+      Promise.all([read("PAIR_VERSION"), read("active"), read("PERIOD"), read("GLOBAL_LIMIT"), read("token"),
+        read("allowanceModule"), read("manager"), read("peerSafe"), read("localAliasOnPeer")]),
+      Promise.all([
+        contractRead(client, chain, safe, moduleAbi, "isModuleEnabled", [module], tag),
+        contractRead(client, chain, token, tokenAbi, "decimals", [], tag),
+        contractRead(client, chain, module, allowanceAbi, "getTokenAllowance", [safe, policy, token], tag),
+      ]),
+      registered(chain, peerProxy, peerPolicy, onL1 ? rollup : 0n, tag),
+    ]);
+    const cfg = configuration as Configuration;
     check(same(cfg.safe, safe) && same(cfg.canonicalToken, p.tokenL1)
       && same(cfg.bridge, onL1 ? p.bridgeL1 : p.bridgeL2) && same(cfg.remoteBridge, onL1 ? p.bridgeL2 : p.bridgeL1)
       && cfg.localRollupId === (onL1 ? 0n : rollup) && cfg.l2RollupId === rollup
       && same(cfg.peerPolicy, peerPolicy) && same(cfg.peerProxy, peerProxy), "Paired policy configuration changed");
-    const [version, active, period, limit, asset, allowance, manager, peerSafe, ownAlias] = await Promise.all([
-      read("PAIR_VERSION"), read("active"), read("PERIOD"), read("GLOBAL_LIMIT"), read("token"),
-      read("allowanceModule"), read("manager"), read("peerSafe"), read("localAliasOnPeer"),
-    ]);
+    const [version, active, period, limit, asset, allowance, manager, peerSafe, ownAlias] = local;
     check(version === BigInt(pair.version) && active === true && period === 600n && limit === 150_000_000n
       && same(asset as string, token) && same(allowance as string, module) && same(manager as string, onL1 ? c.registry : c.manager)
       && same(peerSafe as string, onL1 ? c.safeL2 : c.safeL1) && same(ownAlias as string, onL1 ? pair.peerProxyL2 : p.alias), "Paired policy activation or local bindings changed");
-    const [enabled, decimals, grant] = await Promise.all([
-      contractRead(client, chain, safe, moduleAbi, "isModuleEnabled", [module], tag),
-      contractRead(client, chain, token, tokenAbi, "decimals", [], tag),
-      contractRead(client, chain, module, allowanceAbi, "getTokenAllowance", [safe, policy, token], tag),
-    ]);
+    const [enabled, decimals, grant] = grantState;
     const a = grant as readonly bigint[];
     check(enabled === true && decimals === 6 && a[0] === 100_000_000n && a[2] === 10n && a[3]! % 10n === 0n,
       "Paired Safe allowance configuration changed");
-    await registered(chain, peerProxy, peerPolicy, onL1 ? rollup : 0n, tag);
   }));
   await registered("l1", p.safeL2Alias!, c.safeL2, rollup, blocks[0]!.number);
   await Promise.all((["l1", "l2"] as const).map(async (chain, i) => {

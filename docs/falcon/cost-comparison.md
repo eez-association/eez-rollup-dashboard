@@ -1,46 +1,62 @@
 # Falcon Safe cost comparison
 
-The imported POC model compares direct Ethereum execution with observed EEZ-X
-work repriced under editable assumptions. It is displayed after a transfer,
-separately from the compact fee quote that authorizes the wallet reservation.
-It does not estimate live mainnet prices or add a second settlement charge.
+The comparison is shown only for subsequent Falcon-authorized transactions
+from the Safe. Controller deployment, Safe creation, funding and read-only
+discovery do not produce comparison figures. Signing alone also has no paid
+transaction cost.
 
-The [reference record](safe-cost-reference.json) retains the public benchmark
-inputs, runtime/compiler identity, price sources and blob observations from
-2026-10-14. A temporary controller replaced cross-chain forwarding with a
-direct Safe call while preserving Falcon authorization. Three first transfers
-on Anvil 1.7.1 (Osaka), using Solidity 0.8.34/runs 1/via-IR/Cancun and SafeL2
-1.4.1 release bytecode, measured 5,384,699–5,650,196 execution gas excluding
-transaction base gas and calldata. This is a sample range, not a worst-case
-bound or a fresh simulation. The temporary adapted benchmark source/runner
-was not retained; the reference's hashes do not make it reproducible here.
+Both cards start with the measured gas cost in the network's native token:
 
-Ethereum adds 21,000 base gas and current calldata (4 gas per zero byte, 16 per
-nonzero byte), applying the transaction-level calldata floor as a maximum.
-EEZ-X uses observed L2 gas at its source block base fee, plus the entire L1
-settlement's execution/calldata repriced at the chosen Ethereum gas price.
-Its proportional blob share is
-`ceil(encodedBytes × 131072 × blobGasPrice / 126976)` wei, assuming a full shared
-blob. Encoding includes the signed source transaction, outbound Safe call,
-return and framing, plus the reference batch's 38 shared carrier bytes. New
-batch metadata/unused capacity can change the actual allocation. Whole L1
-execution costs are not divided among other batch transactions.
+- **Actual cost:** verified L2 receipt `gasUsed × effectiveGasPrice`.
+- **Estimated cost without EEZ:** the **same L2 gas used** multiplied by the
+  L1 RPC `eth_gasPrice` suggestion fetched once when the comparison is first
+  calculated. Keep this price snapshot for that transaction.
 
-The actual L2 wallet fee remains `gasUsed × effectiveGasPrice`. Its priority
-fee already recovers settlement and is excluded from modeled L2 resource cost
-to avoid double counting modeled L1 costs. The breakdown separately reports
-observed native wallet/whole-settlement fees. Deployment, operator margins and
-separately charged proving fees are excluded from the resource model.
+The comparison is explicitly labelled as estimated. Its initial price is retained
+through confirmation and wallet switches; it is not polled, refreshed, or replaced
+by the settlement receipt price. The RPC suggestion can exclude tips paid by
+individual transactions. A failed estimate read displays as unavailable and does
+not block settlement checks. Both comparisons use gas used, never
+gas limit or a separately benchmarked L1 gas count. A real direct L1 execution
+could consume different gas; this remains a same-gas estimate.
 
-Source observations require the exact signed calldata, receipt and canonical
-block; reconstructing the signed transaction must reproduce its hash. The
-EEZ-X total stays **Needs L1 check** until the Safe operation and canonical
-settlement are verified. Missing gas/blob metadata remains **Unavailable**,
-never zero. Positive amounts under one millionth of a dollar use scientific
-notation. The UI's read-only retry reuses the selected wallet; it does not
-contact an external price feed or beacon API.
+## Currency conversion
 
-The arithmetic and evidence checks live in
-[`safeCosts.ts`](../../src/lib/falcon/safeCosts.ts), with public-data regression
-fixtures in [`tests/falcon`](../../tests/falcon). Historical POC validations do
-not establish a new live dashboard transfer or current mainnet fee levels.
+Divide the computed wei by 10^18 to obtain native tokens, then convert to cents:
+
+- **xDAI:** fixed **1 xDAI = $1**, with no ETH price lookup.
+- **ETH:** use the public Coinbase ETH/USD spot quote.
+- If token metadata is unavailable, **Gnosis 100** and **Chiado 10200** select
+  xDAI; other chain IDs default to ETH. The rollup inherits the L1 native asset,
+  so its configured token symbol is used first and its parent L1 ID is the fallback.
+- Explicit ETH or xDAI metadata takes priority over the fallback.
+
+For example, 0.000409435472882184 xDAI is **0.040944 cents** under the fixed
+conversion. The same-gas L1 estimate of 0.005447193038130351 xDAI is **0.544719
+cents**. Chiado testnet tokens have no cash value; these are nominal testnet costs.
+
+For ETH-denominated costs, both cards use the same ETH/USD quote. The public
+price endpoint receives no wallet, signature or transaction data. Quotes refresh
+once per minute while visible, with stale/error handling. Without a quote, ETH
+amounts remain visible rather than inventing USD values. Price/source details are
+inside Details, not a banner. xDAI-only networks never request ETH/USD.
+
+## Included fees
+
+Cost evidence and transaction links are shown only for the sending wallet,
+Falcon key, and deployment. Switching context hides the previous transaction;
+returning to its context can show it again. Discovering an existing Safe does
+not create cost evidence. The **Transaction costs** panel measures the entire
+user-paid L2 transaction, including EEZ settlement, and compares the same L2 gas
+usage at L1 prices. It does not isolate the verifier call's execution gas.
+
+The full L2 receipt fee includes the charged base fee, priority fee and EEZ
+settlement charge. Calldata and intrinsic gas are already part of gas used.
+Whole L1 batch execution and blob fees remain in Details and are never added
+to the user's L2 fee again. The transferred asset amount is not a gas fee.
+
+The older [POC reference record](safe-cost-reference.json), direct-execution
+benchmark and proportional blob-allocation helpers remain historical research
+materials; they do not drive the current UI. Calculations live in
+[`safeCosts.ts`](../../src/lib/falcon/safeCosts.ts), with price validation in
+[`ethPrice.ts`](../../src/lib/falcon/ethPrice.ts).

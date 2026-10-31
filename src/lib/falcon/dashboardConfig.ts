@@ -1,4 +1,4 @@
-import { crossChainDeployment } from './crossChainDeployment.ts';
+import { crossChainDeployments } from './crossChainDeployment.ts';
 import type { FeeConfig } from './l2Fees.ts';
 
 type DashboardBinding = {
@@ -11,17 +11,19 @@ type DashboardBinding = {
  * Wallet reads still independently check chain checkpoints, code and controller routing.
  */
 export function falconDashboardConfig(host: DashboardBinding) {
-  const deployment = crossChainDeployment;
+  let deployment;
   try {
-    if (!host.l1ChainId || !host.l2ChainId
-      || BigInt(host.l1ChainId) !== BigInt(deployment.l1.chainId)
-      || BigInt(host.l2ChainId) !== BigInt(deployment.l2.chainId)
-      || host.registry.toLowerCase() !== deployment.l1.registry.toLowerCase()
-      || host.manager.toLowerCase() !== deployment.l2.manager.toLowerCase()
-      || BigInt(host.rollupId) !== deployment.l2.rollupId) throw new Error('deployment mismatch');
+    if (!host.l1ChainId || !host.l2ChainId || !host.rollupId.trim()) throw new Error('missing network');
+    deployment = crossChainDeployments.find(candidate =>
+      BigInt(host.l1ChainId!) === BigInt(candidate.l1.chainId)
+      && BigInt(host.l2ChainId!) === BigInt(candidate.l2.chainId)
+      && host.registry.toLowerCase() === candidate.l1.registry.toLowerCase()
+      && host.manager.toLowerCase() === candidate.l2.manager.toLowerCase()
+      && BigInt(host.rollupId) === candidate.l2.rollupId);
+    if (!deployment) throw new Error('deployment mismatch');
   } catch {
     return { deployment: null, fees: null,
-      message: 'On-chain demo requires the verified EEZ-X devnet (916969, rollup 4) and Chiado (10200). Browser signing remains available.' };
+      message: 'On-chain demo requires the verified EEZ-X Testnet (699169, rollup 2) or EEZ-X Devnet (916969, rollup 4), paired with Chiado (10200). Browser signing remains available.' };
   }
   if (!host.feesEnabled) return { deployment, fees: null,
     message: 'Enable L2 fee quotes in the dashboard configuration to use the Falcon Safe.' };

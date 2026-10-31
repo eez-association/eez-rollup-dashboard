@@ -20,6 +20,7 @@ import { ProxyDeploySection } from "./components/ProxyDeploySection";
 import { CrossChainCallBuilder } from "./components/CrossChainCallBuilder";
 import { CrossChainTransactionDialog } from "./components/CrossChainTransactionDialog";
 import { BridgePanel } from "./components/BridgePanel";
+import { BridgeTestToken } from "./components/BridgeTestToken";
 import { TxHistoryPanel } from "./components/TxHistoryPanel";
 import { QuoteDebugger } from "./components/QuoteDebugger";
 import styles from "./App.module.css";
@@ -468,6 +469,8 @@ export function App() {
                       {" "}App fee cap: {formatUnits(BigInt(bridgeFeeCap), bridgeSourceChain.nativeCurrency.decimals)} {bridgeSourceChain.nativeCurrency.symbol}, excluding the amount sent.
                     </p>
                   )}
+                  <BridgeTestToken wallet={wallet} direction={bridgeHook.state.direction}
+                    disabled={!configLoaded || !['idle','confirmed','failed'].includes(bridgeHook.state.phase)} />
                 </section>
 
                 <section className={styles.proxyColumn} aria-label="Cross-chain contracts">

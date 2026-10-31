@@ -11,21 +11,19 @@ import { getEip1559Fees } from '../lib/gasEstimation';
 import { cowScope, displayAmount, hasMinimumWethReserve, minimumOutput, nativeWrapIsSellAsset, orderData, orderTypes, requireFreshQuote, sellAmount,
   type CowConfig, type CowOrder, type CowQuote, type CowToken } from '../lib/cowLight';
 import styles from './CowLightDemo.module.css';
+import { cowApi as api } from '../lib/cowApi';
+import { useWalletNetworkSetup } from '../hooks/useWalletNetworkSetup';
+import { WalletNetworkSetup } from './WalletNetworkSetup';
 
-const apiRoot = `${import.meta.env.BASE_URL}cowdemo/api`;
-async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(apiRoot + path, init);
-  const data = await response.json();
-  if (!response.ok) throw new Error(data.status === 'deployment_required'
-    ? 'CoW Light needs a verified deployment for the current network. Trading is disabled.'
-    : data.error || 'CoW Light is not available for this network yet.');
-  return data as T;
-}
 type Wallet = ReturnType<typeof useWallet>;
 type Allowance = { balance: string; allowance: string };
 type Pending = { signature: string; validTo: number };
 
 export function CowLightDemo({ ready, wallet }: { ready: boolean; wallet: Wallet }) {
+  const networkConnection = useWalletNetworkSetup(wallet);
+  const sourceChainId = ready && DISCOVERED_CHAIN_IDS.l2 ? Number(BigInt(DISCOVERED_CHAIN_IDS.l2)) : null;
+  const sourceNetwork = sourceChainId !== null && sourceChainId > 0 && Number.isSafeInteger(sourceChainId)
+    ? { chainId: sourceChainId, chainName: L2_CHAIN.chainName } : null;
   const [cfg, setCfg] = useState<CowConfig | null>(null);
   const [tokens, setTokens] = useState<CowToken[]>([]);
   const [loadError, setLoadError] = useState('');
@@ -38,14 +36,16 @@ export function CowLightDemo({ ready, wallet }: { ready: boolean; wallet: Wallet
     setCfg(null); setLoadError('');
     void (async () => {
       try {
-        const demo = await api<CowConfig>('/config', { signal: controller.signal });
+        const demo = await api<CowConfig & { tokens?: CowToken[] }>('/config', { signal: controller.signal });
         if (!DISCOVERED_CHAIN_IDS.l1 || !DISCOVERED_CHAIN_IDS.l2
           || BigInt(demo.l1ChainId) !== BigInt(DISCOVERED_CHAIN_IDS.l1)
           || BigInt(demo.l2ChainId) !== BigInt(DISCOVERED_CHAIN_IDS.l2)) {
           throw new Error('CoW Light is configured for a different network. It cannot be opened on this dashboard.');
         }
-        const catalog = await api<{ tokens: CowToken[] }>('/tokens', { signal: controller.signal });
-        const eligible = catalog.tokens.filter(hasMinimumWethReserve);
+        // Older API deployments still expose the catalog separately.
+        const catalog = Array.isArray(demo.tokens) ? demo.tokens
+          : (await api<{ tokens: CowToken[] }>('/tokens', { signal: controller.signal })).tokens;
+        const eligible = catalog.filter(hasMinimumWethReserve);
         if (!eligible.length) throw new Error('No swap tokens meet the minimum catalog reserve of 0.01 WETH.');
         if (active && !controller.signal.aborted) { setTokens(eligible); setCfg(demo); }
       } catch (e) { if (active && !controller.signal.aborted) setLoadError((e as Error).message); }
@@ -53,17 +53,36 @@ export function CowLightDemo({ ready, wallet }: { ready: boolean; wallet: Wallet
     })();
     return () => { active = false; controller.abort(); clearTimeout(timer); };
   }, [ready, attempt]);
+  useEffect(() => {
+    if (!loadError) return;
+    // Recover an already-open tab after the API or local proxy restarts.
+    // Only availability reads are retried; order submission stays user-driven.
+    const retry = () => { if (!document.hidden) setAttempt(x => x + 1); };
+    const timer = setTimeout(retry, 5000);
+    window.addEventListener('focus', retry);
+    window.addEventListener('online', retry);
+    document.addEventListener('visibilitychange', retry);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('focus', retry);
+      window.removeEventListener('online', retry);
+      document.removeEventListener('visibilitychange', retry);
+    };
+  }, [loadError]);
   return <section className={styles.demo} aria-label="CoW Light demo">
     <header className={styles.heading}><div><span className={styles.eyebrow}>[ CROSS-CHAIN SWAP ]</span>
       <h2>CoW Light</h2><p>Swap assets on {L2_CHAIN.chainName} using liquidity on {L1_CHAIN.chainName}.</p></div>
       <span className={styles.badge}>{cfg?.network || 'Network configuration'}</span></header>
-    {cfg ? <Trading key={cowScope(cfg)} cfg={cfg} tokens={tokens} wallet={wallet} />
-      : <div className={styles.card}><p role="status">{loadError || 'Checking CoW Light availability…'}</p>
-        {loadError && <button type="button" onClick={() => setAttempt(x => x + 1)}>Retry</button>}</div>}
+    {cfg ? <Trading key={cowScope(cfg)} cfg={cfg} tokens={tokens} wallet={wallet} networkConnection={networkConnection} />
+      : <>{sourceNetwork && <WalletNetworkSetup address={wallet.address} chainId={wallet.chainId} network={sourceNetwork}
+          setup={networkConnection.setup} knownNetwork={networkConnection.hasNetwork(sourceNetwork.chainId)} onConnect={() => void networkConnection.connect(sourceNetwork)} />}
+        <div className={styles.card}><p role="status">{loadError || 'Checking CoW Light availability…'}</p>
+          {loadError && <button type="button" onClick={() => setAttempt(x => x + 1)}>Retry</button>}</div></>}
   </section>;
 }
 
-function Trading({ cfg, tokens, wallet }: { cfg: CowConfig; tokens: CowToken[]; wallet: Wallet }) {
+function Trading({ cfg, tokens, wallet, networkConnection }: { cfg: CowConfig; tokens: CowToken[]; wallet: Wallet; networkConnection: ReturnType<typeof useWalletNetworkSetup> }) {
+  const sourceNetwork = { chainId: cfg.l2ChainId, chainName: L2_CHAIN.chainName };
   const [tokenAddress, setTokenAddress] = useState(tokens[0]!.address);
   const selected = tokens.find(t => t.address === tokenAddress)!;
   const [amount, setAmount] = useState('0.001');
@@ -149,7 +168,7 @@ function Trading({ cfg, tokens, wallet }: { cfg: CowConfig; tokens: CowToken[]; 
   const insufficient = !!allowance && BigInt(allowance.balance) < amountWei;
   const needsApproval = !!allowance && BigInt(allowance.allowance) < amountWei;
   const wrongChain = wallet.isConnected && BigInt(wallet.chainId || '0') !== BigInt(cfg.l2ChainId);
-  const locked = !!busy || !!pending || unresolved || faucetPending;
+  const locked = !!busy || !!pending || unresolved || faucetPending || networkConnection.busy;
   const sellSymbol = cfg.network === 'chiado' && cfg.l1ChainId === 10200 ? 'ctWETH' : 'Bridged WETH';
 
   async function action(kind: 'quote' | 'approve' | 'sign' | 'wrap') {
@@ -238,6 +257,8 @@ function Trading({ cfg, tokens, wallet }: { cfg: CowConfig; tokens: CowToken[]; 
   }
 
   return <>
+    <WalletNetworkSetup address={wallet.address} chainId={wallet.chainId} network={sourceNetwork}
+      setup={networkConnection.setup} knownNetwork={networkConnection.hasNetwork(sourceNetwork.chainId)} disabled={locked} onConnect={() => void networkConnection.connect(sourceNetwork)} />
     <div className={styles.layout}>
       <section className={styles.card} aria-label="Swap form"><h3>Swap</h3>
         <fieldset disabled={locked} className={styles.fields}>
@@ -287,7 +308,7 @@ function Trading({ cfg, tokens, wallet }: { cfg: CowConfig; tokens: CowToken[]; 
           if (address !== tokenAddress) { setTokenAddress(address); setQuote(null); }
         }} />
         {cfg.network === 'chiado' && cfg.l1ChainId === 10200 && <CowTestTokens cfg={cfg} wallet={wallet}
-          disabled={!!busy || !!pending || unresolved} onPending={setFaucetPending} onDelivered={() => setRefresh(x => x + 1)} />}
+          disabled={!!busy || !!pending || unresolved || networkConnection.busy} onPending={setFaucetPending} onDelivered={() => setRefresh(x => x + 1)} />}
         <details><summary>How the swap settles</summary>
         <ol className={styles.route}><li><span>{L2_CHAIN.chainName}</span><p>Approve the sell amount, then sign your swap order.</p></li>
           <li><span>{L1_CHAIN.chainName}</span><p>The solver swaps through the selected liquidity pool.</p></li>

@@ -1,0 +1,402 @@
+{
+  "version": 1,
+  "observedAt": "2026-10-30T21:53:37.951891+00:00",
+  "status": "contracts-deployed-and-verified",
+  "network": "chiado",
+  "identity": {
+    "L1_CHAIN_ID": 10200,
+    "L2_CHAIN_ID": 699169,
+    "L2_ROLLUP_ID": 2,
+    "BRIDGE_L1": "0xe993715bE7a0F60d484C5D19c4f008Ba79df1D4E",
+    "BRIDGE_L2": "0xe993715bE7a0F60d484C5D19c4f008Ba79df1D4E",
+    "EEZ_MANAGER_L2": "0x4B2760F84B83d6b3829E30A7573B0172B6d6402C",
+    "WETH_L1": "0x234ccc757Bb2f0e9cc65818F2B6FDB18122Dc060",
+    "WETH_L2": "0x383d51A83510aD5DCb22Ab82131F2B50e7AC10Da",
+    "L2_GENESIS_HASH": "0x283b471b65276c23867b5351fe1973fc9438310d865b6f833d1cd6666478ccb0"
+  },
+  "deployer": "0x94c9Fe37A19d262A31B89a2763bBea023b99cd4E",
+  "officialBridgesReused": true,
+  "cowManifest": {
+    "network": "chiado",
+    "l1ChainId": 10200,
+    "chainId": 699169,
+    "deployer": "0x94c9Fe37A19d262A31B89a2763bBea023b99cd4E",
+    "authenticator": "0xDdc005BC05DBb5e3e6918EB904Bc34ffF8fC2a6C",
+    "settlement": "0xb5BB5bCaD6B8f3f11e9Ae441723C90942810687C",
+    "manager": "0x94c9Fe37A19d262A31B89a2763bBea023b99cd4E",
+    "solver": "0x94c9Fe37A19d262A31B89a2763bBea023b99cd4E",
+    "deploymentIdentity": {
+      "L1_CHAIN_ID": 10200,
+      "L2_CHAIN_ID": 699169,
+      "L2_ROLLUP_ID": 2,
+      "BRIDGE_L1": "0xe993715bE7a0F60d484C5D19c4f008Ba79df1D4E",
+      "BRIDGE_L2": "0xe993715bE7a0F60d484C5D19c4f008Ba79df1D4E",
+      "EEZ_MANAGER_L2": "0x4B2760F84B83d6b3829E30A7573B0172B6d6402C",
+      "WETH_L1": "0x234ccc757Bb2f0e9cc65818F2B6FDB18122Dc060",
+      "WETH_L2": "0x383d51A83510aD5DCb22Ab82131F2B50e7AC10Da",
+      "L2_GENESIS_HASH": "0x283b471b65276c23867b5351fe1973fc9438310d865b6f833d1cd6666478ccb0"
+    },
+    "vaultRelayer": "0x160A04eAdb5428D57b01906d0b8E74678058A79B",
+    "deploymentTxs": {
+      "authenticator": "0x0bb524048126c87fa7ea72741af871906f75e2d7698fe5abbc431d0545c42e9d",
+      "initializeManager": "0x0cc1987fd80d48ac658d276c8570f00f0a091d19c2d20da904db617c550210bb",
+      "addSolver": "0x02655f7d1138e222e3f55842690127b3d23c3a233f0035c70698633c9a3e6b00",
+      "settlement": "0x6404b2458c7b68cea2445c4c3d6bd94caca515077d5e255a6dd969e6d83e7b6f"
+    }
+  },
+  "routeManifest": {
+    "network": "chiado",
+    "l1ChainId": 10200,
+    "chainId": 699169,
+    "settlement": "0xb5BB5bCaD6B8f3f11e9Ae441723C90942810687C",
+    "routeL2": "0xBfe9F1c501ee5688A52998B673CbB4bbD2000dB7",
+    "l1Helper": "0x700cB602B2617d95372973936ac4dBA85a236e0E",
+    "authorizedL1Caller": "0xABF03ee5C4f801628241e64a92C2c598c4388a27",
+    "l2HelperProxy": "0x258140Eada4A5e0A6D254A1A0D8c1544c7359265",
+    "factoryProxyL2": "0xF412887781a39C67CCf5e5DCEfC9E35030826ceD",
+    "deploymentTx": "0xdfee5aaea2ff61771d89b6c744afa1af3ac0a3a2412d2736ead78e5a6b2c58f8",
+    "deploymentTxs": {
+      "route": "0xdfee5aaea2ff61771d89b6c744afa1af3ac0a3a2412d2736ead78e5a6b2c58f8",
+      "helperProxy": "0x2d225ed1103eef0530f5a9a822fe0721ecaa176eb9b6fe5945fbd13950b071a8",
+      "helper": "0x14bc93492ef0c1b7559d1657bc496209a52d261769d12f7197fe373163dfcbc8",
+      "configure": "0x9f6e33c088f9f873a41685ded4c5e81ca562659dd6b9671026538416578344e5"
+    },
+    "deploymentIdentity": {
+      "L1_CHAIN_ID": 10200,
+      "L2_CHAIN_ID": 699169,
+      "L2_ROLLUP_ID": 2,
+      "BRIDGE_L1": "0xe993715bE7a0F60d484C5D19c4f008Ba79df1D4E",
+      "BRIDGE_L2": "0xe993715bE7a0F60d484C5D19c4f008Ba79df1D4E",
+      "EEZ_MANAGER_L2": "0x4B2760F84B83d6b3829E30A7573B0172B6d6402C",
+      "WETH_L1": "0x234ccc757Bb2f0e9cc65818F2B6FDB18122Dc060",
+      "WETH_L2": "0x383d51A83510aD5DCb22Ab82131F2B50e7AC10Da",
+      "L2_GENESIS_HASH": "0x283b471b65276c23867b5351fe1973fc9438310d865b6f833d1cd6666478ccb0"
+    }
+  },
+  "faucet": {
+    "address": "0xBe2b5d161d0C3450080b020a29015C44da0Ac2f3",
+    "deploymentIdentity": {
+      "L1_CHAIN_ID": 10200,
+      "L2_CHAIN_ID": 699169,
+      "L2_ROLLUP_ID": 2,
+      "BRIDGE_L1": "0xe993715bE7a0F60d484C5D19c4f008Ba79df1D4E",
+      "BRIDGE_L2": "0xe993715bE7a0F60d484C5D19c4f008Ba79df1D4E",
+      "EEZ_MANAGER_L2": "0x4B2760F84B83d6b3829E30A7573B0172B6d6402C",
+      "WETH_L1": "0x234ccc757Bb2f0e9cc65818F2B6FDB18122Dc060",
+      "WETH_L2": "0x383d51A83510aD5DCb22Ab82131F2B50e7AC10Da",
+      "L2_GENESIS_HASH": "0x283b471b65276c23867b5351fe1973fc9438310d865b6f833d1cd6666478ccb0"
+    },
+    "deployer": "0x94c9Fe37A19d262A31B89a2763bBea023b99cd4E",
+    "funding": {
+      "ctWETH": "0.5",
+      "native": "0.01"
+    },
+    "transactions": {
+      "deploy": "0x418f7fe1fe28fd8bf77b02a195095761b89390e91c434c61ececd97f4d3611ec",
+      "fundTokens": "0x01d1119dd9c3f219ffab44043daafbf6a643e212044774094a2e6e5b33fcf886",
+      "fundGas": "0x91267fd33ae1e80142ffdcfdf470d9028a05282e97eac6c55ba4362e10eb1c5a"
+    }
+  },
+  "assets": {
+    "factory": {
+      "address": "0x24236687b73c1496dd16af46209380cc8f0974d5",
+      "codeHash": "0xbab145d02e7005f0d84c6c1639d39b799b0ea16df99ebbdaf5a14d9da820b4e0"
+    },
+    "liquidity": {
+      "address": "0x5894df0f1ed734c0b948d80b19d5efa5b601b769",
+      "codeHash": "0x8a66eaa115c0b80b9d1738e49523043f3f8e92faf57974513b40cfa22c9a719a"
+    },
+    "weth": {
+      "address": "0x234ccc757bb2f0e9cc65818f2b6fdb18122dc060",
+      "codeHash": "0x0a4542c015355d8b702ee08a6b9acdf687d570a20203bb1faad4fa41e9600d32"
+    },
+    "token": {
+      "address": "0xd318f55e12518efde24ec7feac4441e8b5a3f1a7",
+      "codeHash": "0x0a4542c015355d8b702ee08a6b9acdf687d570a20203bb1faad4fa41e9600d32"
+    },
+    "pair": {
+      "address": "0x33ac8b5919b2429a36fabe47c6292574fd686aa8",
+      "codeHash": "0x5b83bdbcc56b2e630f2807bbadd2b0c21619108066b92a58de081261089e9ce5"
+    }
+  },
+  "wrappers": [
+    "0x383d51A83510aD5DCb22Ab82131F2B50e7AC10Da",
+    "0x80A2F93309A73aB274161005c492f0AE03D7B85E"
+  ],
+  "verification": [
+    {
+      "chain": "l2",
+      "address": "0x383d51A83510aD5DCb22Ab82131F2B50e7AC10Da",
+      "name": "EEZBridgedToken",
+      "verified": true
+    },
+    {
+      "chain": "l2",
+      "address": "0x80A2F93309A73aB274161005c492f0AE03D7B85E",
+      "name": "EEZBridgedToken",
+      "verified": true
+    },
+    {
+      "chain": "l2",
+      "address": "0xDdc005BC05DBb5e3e6918EB904Bc34ffF8fC2a6C",
+      "name": "GPv2AllowListAuthentication",
+      "verified": true
+    },
+    {
+      "chain": "l2",
+      "address": "0xb5BB5bCaD6B8f3f11e9Ae441723C90942810687C",
+      "name": "GPv2Settlement",
+      "verified": true
+    },
+    {
+      "chain": "l2",
+      "address": "0x160A04eAdb5428D57b01906d0b8E74678058A79B",
+      "name": "GPv2VaultRelayer",
+      "verified": true
+    },
+    {
+      "chain": "l2",
+      "address": "0xBfe9F1c501ee5688A52998B673CbB4bbD2000dB7",
+      "name": "L2UniversalV2Route",
+      "verified": true
+    },
+    {
+      "chain": "l1",
+      "address": "0x700cB602B2617d95372973936ac4dBA85a236e0E",
+      "name": "L1UniversalV2BridgeHelper",
+      "verified": true
+    },
+    {
+      "chain": "l2",
+      "address": "0xF412887781a39C67CCf5e5DCEfC9E35030826ceD",
+      "name": "CrossChainProxy",
+      "verified": true
+    },
+    {
+      "chain": "l2",
+      "address": "0x258140Eada4A5e0A6D254A1A0D8c1544c7359265",
+      "name": "CrossChainProxy",
+      "verified": true
+    },
+    {
+      "chain": "l1",
+      "address": "0xBe2b5d161d0C3450080b020a29015C44da0Ac2f3",
+      "name": "ChiadoCowFaucet",
+      "verified": true
+    }
+  ],
+  "assetVerification": {
+    "factory": {
+      "address": "0x24236687b73c1496Dd16AF46209380CC8f0974d5",
+      "verified": true
+    },
+    "liquidity": {
+      "address": "0x5894df0F1ED734C0b948D80B19D5eFa5b601b769",
+      "verified": true
+    },
+    "weth": {
+      "address": "0x234ccc757Bb2f0e9cc65818F2B6FDB18122Dc060",
+      "verified": true
+    },
+    "token": {
+      "address": "0xD318f55e12518EfdE24ec7FEac4441e8B5A3F1a7",
+      "verified": true
+    },
+    "pair": {
+      "address": "0x33ac8b5919B2429a36FabE47c6292574fD686AA8",
+      "verified": true
+    }
+  },
+  "transactions": [
+    {
+      "stage": "bootstrap.json",
+      "name": "factory",
+      "chain": "l1",
+      "hash": "0x23dc547bed2d19e2360610201c16dfec87729e543c6bfc7f4d7d9d4335cabeed",
+      "block": 23767950,
+      "gasUsed": 3051511,
+      "feeWei": "3051511021360577"
+    },
+    {
+      "stage": "bootstrap.json",
+      "name": "liquidity",
+      "chain": "l1",
+      "hash": "0xe3e17d05ca6a51ce480b5a0f07c45a69e94c078cd7220b81f2ab497d147e5493",
+      "block": 23767987,
+      "gasUsed": 3963298,
+      "feeWei": "3963298027743086"
+    },
+    {
+      "stage": "bootstrap.json",
+      "name": "bridge-weth",
+      "chain": "l1",
+      "hash": "0x95bd343a8687bf446983909485c065e228ffff7295d2840d09951ff8639bf7eb",
+      "block": 23768031,
+      "gasUsed": 172038,
+      "feeWei": "422670669659274"
+    },
+    {
+      "stage": "bootstrap.json",
+      "name": "bridge-token",
+      "chain": "l1",
+      "hash": "0x7ad4e098cfe90167e94ba42ab91e0184b242b3dcf88f13bbb328e736e1c7e0b5",
+      "block": 23768077,
+      "gasUsed": 172085,
+      "feeWei": "422670669749680"
+    },
+    {
+      "stage": "cow-deployment.journal.json",
+      "name": "authenticator",
+      "chain": "l2",
+      "hash": "0x0bb524048126c87fa7ea72741af871906f75e2d7698fe5abbc431d0545c42e9d",
+      "block": 202511,
+      "gasUsed": 828217,
+      "feeWei": "123404333"
+    },
+    {
+      "stage": "cow-deployment.journal.json",
+      "name": "initializeManager",
+      "chain": "l2",
+      "hash": "0x0cc1987fd80d48ac658d276c8570f00f0a091d19c2d20da904db617c550210bb",
+      "block": 202512,
+      "gasUsed": 46179,
+      "feeWei": "6880671"
+    },
+    {
+      "stage": "cow-deployment.journal.json",
+      "name": "addSolver",
+      "chain": "l2",
+      "hash": "0x02655f7d1138e222e3f55842690127b3d23c3a233f0035c70698633c9a3e6b00",
+      "block": 202513,
+      "gasUsed": 47083,
+      "feeWei": "7015367"
+    },
+    {
+      "stage": "cow-deployment.journal.json",
+      "name": "settlement",
+      "chain": "l2",
+      "hash": "0x6404b2458c7b68cea2445c4c3d6bd94caca515077d5e255a6dd969e6d83e7b6f",
+      "block": 202516,
+      "gasUsed": 4578418,
+      "feeWei": "682184282"
+    },
+    {
+      "stage": "route-deployment.journal.json",
+      "name": "route",
+      "chain": "l2",
+      "hash": "0xdfee5aaea2ff61771d89b6c744afa1af3ac0a3a2412d2736ead78e5a6b2c58f8",
+      "block": 202538,
+      "gasUsed": 346930,
+      "feeWei": "51692570"
+    },
+    {
+      "stage": "route-deployment.journal.json",
+      "name": "helperProxy",
+      "chain": "l2",
+      "hash": "0x2d225ed1103eef0530f5a9a822fe0721ecaa176eb9b6fe5945fbd13950b071a8",
+      "block": 202541,
+      "gasUsed": 316347,
+      "feeWei": "47135703"
+    },
+    {
+      "stage": "route-deployment.journal.json",
+      "name": "helper",
+      "chain": "l2",
+      "hash": "0x14bc93492ef0c1b7559d1657bc496209a52d261769d12f7197fe373163dfcbc8",
+      "block": 202545,
+      "gasUsed": 156373,
+      "feeWei": "1100367614292296"
+    },
+    {
+      "stage": "route-deployment.journal.json",
+      "name": "configure",
+      "chain": "l2",
+      "hash": "0x9f6e33c088f9f873a41685ded4c5e81ca562659dd6b9671026538416578344e5",
+      "block": 202581,
+      "gasUsed": 66695,
+      "feeWei": "9937555"
+    },
+    {
+      "stage": "faucet.journal.json",
+      "name": "deploy",
+      "chain": "l1",
+      "hash": "0x418f7fe1fe28fd8bf77b02a195095761b89390e91c434c61ececd97f4d3611ec",
+      "block": 23768080,
+      "gasUsed": 462571,
+      "feeWei": "462571003237997"
+    },
+    {
+      "stage": "faucet.journal.json",
+      "name": "fundTokens",
+      "chain": "l1",
+      "hash": "0x01d1119dd9c3f219ffab44043daafbf6a643e212044774094a2e6e5b33fcf886",
+      "block": 23768081,
+      "gasUsed": 51512,
+      "feeWei": "51512000360584"
+    },
+    {
+      "stage": "faucet.journal.json",
+      "name": "fundGas",
+      "chain": "l1",
+      "hash": "0x91267fd33ae1e80142ffdcfdf470d9028a05282e97eac6c55ba4362e10eb1c5a",
+      "block": 23768082,
+      "gasUsed": 21055,
+      "feeWei": "21055000147385"
+    },
+    {
+      "stage": "validation.journal.json",
+      "name": "approve-simulation",
+      "chain": "l2",
+      "hash": "0x8a49e9c54ad800db1fac2d6010cd7184a3669149f132378d40d3d52bbaab30c0",
+      "block": 202902,
+      "gasUsed": 56602,
+      "feeWei": "8433698"
+    },
+    {
+      "stage": "validation.journal.json",
+      "name": "revoke-simulation",
+      "chain": "l2",
+      "hash": "0x6b656e0754ae5a9032e98f2625b16078069215c89f343a95c50b2b90118b93f2",
+      "block": 202904,
+      "gasUsed": 34630,
+      "feeWei": "5159870"
+    }
+  ],
+  "liveSwapTested": false,
+  "composerSimulation": {
+    "amountIn": "1000000000000000",
+    "quotedAmountOut": "99699900599199102",
+    "swapBroadcast": false,
+    "orderQueued": false,
+    "success": true,
+    "approvalTx": "0x8a49e9c54ad800db1fac2d6010cd7184a3669149f132378d40d3d52bbaab30c0",
+    "options": [
+      {
+        "estimatedFee": "0x358209cd6f5b4",
+        "gas": "0x6f2d3",
+        "maxFeePerGas": "0x9a19cbff",
+        "maxPriorityFeePerGas": "0x9a19cbb5",
+        "requestHash": "0x843381d5c2fec858034cc818005b25188186b145e16bdf49c1d09c10cd066dfa",
+        "type": "0x2"
+      }
+    ],
+    "error": null,
+    "diagnosticErrors": [],
+    "revokeTx": "0x6b656e0754ae5a9032e98f2625b16078069215c89f343a95c50b2b90118b93f2",
+    "allowanceAfter": "0"
+  },
+  "spending": {
+    "l1": {
+      "feesWei": "8395288392258583",
+      "faucetFundingWei": "10000000000000000",
+      "totalNative": "0.018395288392258583",
+      "approvedLimitNative": "0.18"
+    },
+    "l2": {
+      "feesWei": "1100368556136345",
+      "faucetFundingWei": "0",
+      "totalNative": "0.001100368556136345",
+      "approvedLimitNative": "0.05"
+    }
+  }
+}

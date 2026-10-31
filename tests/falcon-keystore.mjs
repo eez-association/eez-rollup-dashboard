@@ -33,6 +33,7 @@ try {
     }
   });
   await open();
+  await page.locator('#signature-playground > summary').click();
   const waitResult = (id, kind) => page.waitForFunction(([id, kind]) => document.getElementById(id)?.dataset.result === kind, [id, kind]);
   const waitText = (id, text) => page.waitForFunction(([id, text]) => document.getElementById(id)?.textContent.includes(text), [id, text]);
   const password = 'browser test password — disposable';
@@ -96,6 +97,7 @@ try {
 
   // Reload loses the plaintext session; the encrypted download restores the same public key.
   await page.reload();
+  await page.locator('#signature-playground > summary').click();
   assert.equal(await page.locator('#sign').isDisabled(), true);
   const chooseBackup = async (buffer = backupBytes, remember = false) => {
     await page.getByLabel('Encrypted key file', { exact: true }).setInputFiles({ name: 'test.keystore.json', mimeType: 'application/json', buffer });
@@ -189,6 +191,7 @@ try {
 
   // Import remembers the encrypted file by default, without changing its password or key.
   await page.reload();
+  await page.locator('#signature-playground > summary').click();
   assert.equal(await page.getByLabel('Remember this key in this browser', { exact: true }).isChecked(), true);
   await chooseBackup(backupBytes, true);
   await backupPassword().fill(password);
@@ -200,6 +203,7 @@ try {
   assert.equal(await keyValue(), originalPublicKey);
 
   await page.reload();
+  await page.locator('#signature-playground > summary').click();
   await page.locator('#unlock-saved').waitFor();
   assert.equal(await page.getByLabel('Encrypted key file', { exact: true }).isVisible(), false);
   assert.equal(await page.locator('#sign').isDisabled(), true);
@@ -342,6 +346,7 @@ try {
   assert.deepEqual(await page.evaluate(() => Object.keys(localStorage)), [BROWSER_KEYSTORE_KEY]);
   assert.deepEqual(await page.evaluate(() => Object.keys(sessionStorage)), [visibilityKey]);
   await page.reload();
+  await page.locator('#signature-playground > summary').click();
   await page.locator('#unlock-saved').waitFor();
   assert.equal(await page.locator('#sign').isDisabled(), true);
   await page.setViewportSize({ width: 1440, height: 1000 });
@@ -368,6 +373,7 @@ try {
 
   await page.evaluate(key => localStorage.setItem(key, '{broken'), BROWSER_KEYSTORE_KEY);
   await page.reload();
+  await page.locator('#signature-playground > summary').click();
   await waitResult('key-status', 'error');
   assert.match(await page.locator('#key-status').textContent(), /saved key could not be read/);
   assert.equal(await savedText(), '{broken');

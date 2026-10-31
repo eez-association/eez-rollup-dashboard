@@ -9,6 +9,7 @@
 .titleRow { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; justify-content: space-between; }
 .header h2 { color: var(--text-bright); font: 600 17.5px/1.35 var(--sans); letter-spacing: -.01em; }
 .header > p:last-child, .hint { color: var(--text-dim); font: 13px/1.55 var(--sans); max-width: 75ch; }
+.hint { overflow-wrap: anywhere; }
 .header > p:last-child { margin-top: 8px; }
 .badge { color: var(--text-dim); border: 1px solid var(--border); padding: 3px 9px; border-radius: 100px; font: 400 12px/1.5 var(--mono); }
 .badge[data-unlocked="true"] { color: var(--green); border-color: var(--green-border); }
@@ -42,6 +43,8 @@ input.input { font-family: var(--sans); }
 .status[data-result="valid"] { color: var(--green); border-color: var(--green-border); background: var(--green-dim); }
 .status[data-result="error"], .status[data-result="invalid"] { color: var(--red); border-color: var(--red-border); background: var(--red-dim); }
 .status[data-result="pending"] { color: var(--text-bright); }
+.unlockNotice { color: var(--red); border-color: var(--red-border); background: var(--red-dim); border-left: 4px solid var(--red); }
+.unlockNotice strong { font-size: 17px; font-weight: 650; }
 @media (max-width: 1000px) { .grid { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 640px) {
   .card { padding: 20px; }
@@ -51,6 +54,40 @@ input.input { font-family: var(--sans); }
 }
 
 .workflow { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.setupProgress { display: flex; flex-direction: column; gap: 16px; }
+.setupRunning:global(.btn):disabled { opacity: 1; background: var(--green-dim); color: var(--green); border-color: var(--green-border); cursor: progress; }
+.setupSteps { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }
+.setupSteps li { display: flex; align-items: center; gap: 12px; min-height: 84px; padding: 16px; border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text-dim); background: var(--bg-inset); }
+.setupSteps strong { display: block; font: 600 15px/1.4 var(--sans); }
+.setupSteps p { margin: 4px 0 0; min-height: 2.9em; font: 13px/1.45 var(--sans); }
+.setupNumber { display: grid; place-items: center; flex: 0 0 30px; height: 30px; border: 1px solid currentColor; border-radius: 50%; font: 600 14px/1 var(--mono); }
+.setupSteps li[data-state="active"] { border-color: var(--green); background: var(--green-dim); color: var(--text-bright); box-shadow: inset 3px 0 var(--green); }
+.setupSteps li[data-state="active"] .setupNumber { color: var(--green); }
+.setupSteps li[data-state="complete"] strong { text-decoration: line-through; }
+.setupSteps li[data-state="pending"] { opacity: .6; }
+.setupComplete { margin-left: auto; color: var(--green); font-size: 20px; }
+.card.playground { display: block; padding: 0; }
+.playgroundSummary { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 20px; cursor: pointer; list-style: none; }
+.playgroundSummary::-webkit-details-marker { display: none; }
+.playgroundSummary h2 { color: var(--text-bright); font: 600 15px/1.4 var(--sans); }
+.playgroundSummary::after { content: '+'; color: var(--text-dim); font: 20px/1 var(--mono); }
+.playground[open] > .playgroundSummary::after { content: '−'; }
+.playgroundSummary:focus-visible { outline: 2px solid var(--accent); outline-offset: -4px; border-radius: var(--radius-sm); }
+.playgroundBody { display: flex; flex-direction: column; gap: 16px; padding: 0 20px 20px; }
 .safeStats { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; padding: 16px 0; border-block: 1px solid var(--border); }
 .safeStats > div { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .safeStats strong { font: 500 32px/1.2 var(--mono); color: var(--text-bright); overflow-wrap: anywhere; }
+.safeFundingControls { display: flex; align-items: stretch; gap: 8px; }
+.safeFundingControls > .input { flex: 1; width: 0; }
+.safeFundingControls > .action { flex: none; }
+.fundingLinks { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; min-width: 0; }
+.accountIdentity { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: 18px; }
+.accountAddress { color: var(--text-bright); font: 500 clamp(18px, 2vw, 25px)/1.4 var(--mono); text-decoration: none; overflow-wrap: anywhere; }
+.copyNotice { color: var(--green); font: 12px/1.5 var(--mono); overflow-wrap: anywhere; margin-top: 8px; }
+.sendBox { display: flex; flex-direction: column; gap: 16px; min-width: 0; padding: 20px; border: 1px solid var(--border-bright); border-radius: var(--radius-sm); background: var(--bg-inset); }
+.sendBox h3 { margin: 0; color: var(--text-bright); font: 600 18px/1.4 var(--sans); }
+.sendBox .details { padding-top: 0; }
+.transactionHashes { display: flex; flex-wrap: wrap; gap: 8px 16px; }
+.traceAction { align-self: stretch; justify-content: center; }
+.actions button.signedAction:global(.btn-outline), .actions button.signedAction:global(.btn-outline):hover { color: var(--text-dim); background: var(--bg-inset); border-color: var(--border); }
+@media (max-width: 600px) { .safeStats { grid-template-columns: minmax(0, 1fr); } }

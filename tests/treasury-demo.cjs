@@ -22,14 +22,17 @@ async function fixture(browser, blockedStorage = false) {
       l1FrontUrl: '/composer/l1', l2FrontUrl: '/composer/l2',
     } });
     if (request.method() !== 'POST') return route.continue();
-    const { id, method } = request.postDataJSON();
-    methods.push(method);
-    const result = method === 'eth_chainId' ? (path.endsWith('l1') ? '0x27d8' : '0x1892')
-      : method === 'eth_getBlockByNumber' ? { number: '0x10', timestamp: '0x65000000', gasUsed: '0x0', gasLimit: '0x1036640', transactions: [] }
-      : method === 'eth_getLogs' ? [] : method === 'eth_getBalance' ? '0x0' : null;
-    return route.fulfill({ json: { jsonrpc: '2.0', id, result } });
+    const payload = request.postDataJSON();
+    const respond = ({ id, method }) => {
+      methods.push(method);
+      const result = method === 'eth_chainId' ? (path.endsWith('l1') ? '0x27d8' : '0x1892')
+        : method === 'eth_getBlockByNumber' ? { number: '0x10', timestamp: '0x65000000', gasUsed: '0x0', gasLimit: '0x1036640', transactions: [] }
+        : method === 'eth_getLogs' ? [] : method === 'eth_getBalance' ? '0x0' : null;
+      return { jsonrpc: '2.0', id, result };
+    };
+    return route.fulfill({ json: Array.isArray(payload) ? payload.map(respond) : respond(payload) });
   });
-  const treasury = page.getByText('Connect a configured paired treasury for this network.', { exact: true });
+  const treasury = page.getByRole('region', { name: 'Treasury network readiness', exact: true });
   const tab = page.getByRole('navigation', { name: 'Dashboard sections' }).getByRole('button', { name: 'Treasury Demo', exact: true });
   const toggle = async (keys = shortcut) => { await page.locator('body').click({ position: { x: 1, y: 1 } }); await page.keyboard.press(keys); };
   const hidden = async () => {

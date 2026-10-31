@@ -76,3 +76,28 @@ test("failed reads, prepared results, top-level reads and explicit search stay v
   assert.equal(traceRows(data, { localReads: false })[0].node.id, 0);
   assert.deepEqual(traceRows(data, { localReads: false, search: "LocalReader" }).map(row => row.node.id), [1]);
 });
+
+test("related execution table loads precede an L2 trigger in recorded chain order", () => {
+  const data = {
+    origin: { chain: 'L2' },
+    transactions: [
+      { chain: 'L2', hash: 'source', requested: true, block: 20, index: 2, inFlow: true },
+      { chain: 'L2', hash: 'load-same-block', role: 'table-load', block: 20, index: 0, inFlow: true },
+      { chain: 'L2', hash: 'load-earlier-block', role: 'table-load', block: 19, index: 8, inFlow: true },
+      { chain: 'L2', hash: 'load-later', role: 'table-load', block: 20, index: 3, inFlow: true },
+      { chain: 'L2', hash: 'load-unrelated', role: 'table-load', block: 19, index: 1, inFlow: false },
+    ],
+  };
+  data.roots = data.transactions.map((tx, node) => ({ node, chain: tx.chain, tx: tx.hash }));
+  data.nodes = data.transactions.map((tx, id) => ({ id, chain: tx.chain, tx: tx.hash, protocol: !tx.requested, children: [] }));
+  const original = structuredClone(data);
+  for (const mode of ['combined', 'physical']) {
+    assert.deepEqual(traceRows({ ...data, mode }, { protocol: true }).map(row => row.node.id), [2, 1, 0, 3, 4]);
+  }
+  assert.deepEqual(traceRows(data, { protocol: false }).map(row => row.node.id), [0]);
+  assert.deepEqual(traceRows(data, { protocol: true, transaction: 'L2:source' }).map(row => row.node.id), [0]);
+  assert.deepEqual(traceRows({ ...data, origin: { chain: 'L1' } }, { protocol: true }).map(row => row.node.id), [0, 1, 2, 3, 4]);
+  assert.deepEqual(data, original, 'view ordering does not mutate the decoded model');
+  data.transactions[1].index = null;
+  assert.deepEqual(traceRows(data, { protocol: true }).map(row => row.node.id), [2, 0, 1, 3, 4], 'unknown same-block order is not guessed');
+});
