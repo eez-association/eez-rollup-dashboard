@@ -60,8 +60,9 @@ export function CallMap({ model, rows, steps, physical, selected, onSelect, coll
 
   const layout = useMemo(() => {
     const visibleIds = new Set(rows.map(row => row.node.id));
-    // Place a joined L1 target beside its recorded proxy. The logical L2 caller
-    // still gets its own arrow to that one box; only the layout parent changes.
+    // Place a joined target beside its recorded proxy on either chain. Its
+    // logical cross-chain caller still gets its own arrow to that one box; only
+    // the layout parent changes.
     const layoutParents = new Map(rows.map(row => [row.node.id, row.parent]));
     for (const link of protocolLinks) {
       if (!visibleIds.has(link.from) || !visibleIds.has(link.to)) continue;

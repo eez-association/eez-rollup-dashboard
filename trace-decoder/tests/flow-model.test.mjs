@@ -65,9 +65,59 @@ test('L2-started repeated calls retain their exact L1 proxy callers without dupl
   assert.deepEqual(buildFlowModel(trace, { mode: 'physical' }).protocolLinks, [], 'recorded trees already contain these edges');
 });
 
-test('proxy connections do not infer remote execution or change L1-started flows', async () => {
-  const { trace: l1 } = await decode({ deep: true });
-  assert.deepEqual(buildFlowModel(l1).protocolLinks, []);
+test('L1-started reentrant calls retain both chains’ recorded proxy callers', async () => {
+  const { trace } = await decode({ deep: true });
+  const model = buildFlowModel(trace), frames = new Map(trace.frames.map(frame => [frame.id, frame]));
+  assert.equal(model.protocolLinks.length, 3, 'initial delivery, L1 reentry and nested L2 reentry are connected');
+  assert.deepEqual(model.protocolLinks.map(link => model.nodes[link.from].chain).sort(), ['L1', 'L2', 'L2']);
+  const shown = traceRows(model, { protocol: true });
+  for (const link of model.protocolLinks) {
+    const caller = model.nodes[link.from], target = model.nodes[link.to];
+    assert.equal(caller.role, 'incoming-proxy');
+    assert.match(caller.fn, /^executeOnBehalf\(/);
+    assert.equal(caller.chain, target.chain);
+    assert.equal(caller.tx, target.tx);
+    assert.equal(frames.get(target.frameId).parentId, caller.frameId);
+    assert.equal(target.crossing.status, 'matched');
+    assert.equal(shown.filter(row => row.node.id === target.id).length, 1);
+    assert(shown.some(row => row.node.id === caller.id));
+    assert(!caller.children.includes(target.id), 'preserve logical parentage');
+    assert.notEqual(model.nodes.find(node => node.children.includes(target.id)).chain, target.chain);
+  }
+  physicalLinks(trace);
+  assert.deepEqual(buildFlowModel(trace, { mode: 'physical' }).protocolLinks, []);
+});
+
+test('static incoming proxy calls remain visible as cross-chain evidence when local reads are hidden', async () => {
+  const { trace } = await decode({ direction: 'L2', isStatic: true });
+  const model = buildFlowModel(trace);
+  assert.equal(model.protocolLinks.length, 1);
+  const caller = model.nodes[model.protocolLinks[0].from];
+  assert.equal(caller.isStatic, true);
+  assert.equal(caller.crossChainRead, true);
+  const rows = traceRows(model, { protocol: true, localReads: false });
+  assert(rows.some(row => row.node.id === caller.id));
+  assert(rows.some(row => row.node.id === model.protocolLinks[0].to));
+});
+
+test('L1 proxy links require the exact observed parent and matching execution', async () => {
+  const { trace } = await decode({ deep: true });
+  const model = buildFlowModel(trace);
+  const targetFrame = model.nodes[model.protocolLinks[0].to].frameId;
+  const changed = structuredClone(trace);
+  changed.frames.find(frame => frame.id === targetFrame).parentId = changed.logicalRoots[0];
+  const changedModel = buildFlowModel(changed);
+  assert(!changedModel.protocolLinks.some(link => changedModel.nodes[link.to].frameId === targetFrame));
+  for (const status of ['unresolved', 'ambiguous']) {
+    const unlinked = structuredClone(trace);
+    const outgoing = unlinked.outgoing.find(out => out.remoteFrameId === targetFrame);
+    outgoing.status = status;
+    const unlinkedModel = buildFlowModel(unlinked);
+    assert(!unlinkedModel.protocolLinks.some(link => unlinkedModel.nodes[link.to].frameId === targetFrame));
+  }
+});
+
+test('proxy connections do not infer ambiguous or unavailable remote execution', async () => {
   const { trace: ambiguous } = await decode({ direction: 'L2', repeat: 2, ambiguous: true });
   assert.deepEqual(buildFlowModel(ambiguous).protocolLinks, []);
   const { trace: missing } = await decode({ direction: 'L2' }, f => {

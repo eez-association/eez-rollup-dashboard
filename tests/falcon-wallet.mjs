@@ -22,7 +22,7 @@ const controllerTxHash = '0x'+'c1'.repeat(32);
 const oldFundingHash = '0x'+'f0'.repeat(32);
 const settlementHash = '0x'+'ee'.repeat(32), l1BlockHash = '0x'+'ef'.repeat(32), fundingHash = '0x'+'fa'.repeat(32);
 const same = (a,b) => a.toLowerCase() === b.toLowerCase();
-const browser = await chromium.launch({ headless: true, chromiumSandbox: true });
+const browser = await chromium.launch({ headless: true, chromiumSandbox: process.env.TREASURY_BROWSER_SANDBOX !== '0' });
 try {
   for (const d of crossChainDeployments) for (const [name, type] of [['Rabby','0x0'], ['MetaMask','0x2']]) for (const missingNetwork of [false, true]) {
     const blockNumber = d.l1.anchor.blockNumber + 100n;
@@ -212,7 +212,7 @@ try {
     await page.getByRole('button', { name: 'Connect Wallet', exact: true }).click();
     await page.getByRole('button', { name, exact: true }).click();
     await f.toggle(); await f.tab.click(); await page.locator('#generate').waitFor();
-    await page.getByText(new RegExp(`Gas wallet · ${name}`)).waitFor();
+    assert.equal(await page.getByText(/Gas wallet ·/).count(), 0, 'gas wallet stays in the dashboard header');
     const status = text => page.waitForFunction(text => document.querySelector('#safe-status')?.textContent.includes(text), text);
     const setup = page.getByRole('group', { name: `${d.l2.chainName} wallet connection`, exact: true });
     const connectNetwork = setup.getByRole('button');
@@ -237,11 +237,12 @@ try {
     await page.locator('#generate').click();
     await page.waitForFunction(() => document.querySelector('#key-status')?.textContent.includes('Key generated'));
     publicKey = await page.getByTestId('public-key').inputValue();
-    await status(needsController ? 'No Safe exists' : 'Controller ready');
+    await status(needsController ? 'Create your Falcon controller' : 'Controller ready');
     const setupSteps = page.locator('#safe-setup-progress');
     await setupSteps.waitFor();
     assert.equal(await setupSteps.locator('li').nth(0).getAttribute('data-state'), needsController ? 'active' : 'complete');
-    assert.equal(await setupSteps.locator('li').nth(1).getAttribute('data-state'), needsController ? 'pending' : 'active');
+    if (needsController) assert.equal(await setupSteps.locator('li').count(), 1);
+    else assert.equal(await setupSteps.locator('li').nth(1).getAttribute('data-state'), 'active');
     assert.equal(await page.locator('#safe-status').isVisible(), false, 'setup uses fixed steps instead of changing status messages');
     if (needsController && name === 'MetaMask') {
       await page.setViewportSize({ width: 390, height: 900 });
@@ -251,25 +252,25 @@ try {
     }
     assert.equal(await page.locator('#safe-load').count(), 0, 'key installation automatically loads the Safe');
     assert.equal(sends.length + controllerSends.length, 0, 'automatic loading never creates or sends a transaction');
-    assert.match(await page.locator('#safe-status').textContent(), needsController ? /No Safe exists/ : /Controller ready/, 'late switch events must not break Safe loading');
+    assert.match(await page.locator('#safe-status').textContent(), needsController ? /Create your Falcon controller/ : /Controller ready/, 'late switch events must not break Safe loading');
     assert.equal(await page.locator('#safe-balance, #safe-nonce, #safe-sign, #safe-send').count(), 0, 'before creation show one Create Safe action, not empty balances or signing steps');
-    await page.getByRole('button', { name: 'Create Safe', exact: true }).waitFor();
+    await page.getByRole('button', { name: needsController ? 'Create Falcon controller' : 'Create a Safe', exact: true }).waitFor();
     // A structured option failure never falls through to an unquoted send.
     optionFailure = true;
     if (needsController) {
       await page.evaluate(() => { const w = window.falconWalletTest; w.loseNextSendReply = true; w.holdSend = true; w.release = null; });
-      await page.locator('#safe-create').click();
+      await page.locator('#controller-create').click();
       await page.waitForFunction(() => !!window.falconWalletTest.release);
       assert.equal(await page.locator('#controller-recovery-hash').count(), 0, 'normal wallet approval never shows a recovery textbox');
       assert.equal(await setupSteps.locator('li[aria-current="step"] strong').textContent(), 'Create Falcon controller');
-      assert.match(await setupSteps.locator('li[aria-current="step"]').textContent(), /bound to your Falcon public key/);
+      assert.match(await setupSteps.locator('li[aria-current="step"]').textContent(), /Deploy your controller/);
       if (name === 'MetaMask') {
         await page.evaluate(() => {
           const w = window.falconWalletTest; w.loseNextSendReply = false;
           w.account = '0x'+'99'.repeat(20); w.emit('accountsChanged', [w.account]);
         });
-        await status('No Safe exists');
-        await page.waitForFunction(() => !document.querySelector('#safe-create')?.disabled);
+        await status('Create your Falcon controller');
+        await page.waitForFunction(() => !document.querySelector('#controller-create')?.disabled);
         assert.equal(await page.locator('#controller-recovery-hash').count(), 0, 'wallet B does not inherit wallet A recovery');
       }
       await page.evaluate(() => window.falconWalletTest.release());
@@ -285,16 +286,18 @@ try {
         await page.getByText('Earlier setup needs attention', { exact: true }).click();
         const recovery = page.getByRole('group', { name: 'Recover controller setup', exact: true });
         assert.equal(controllerSends.length, 1);
-        assert.equal(await page.locator('#safe-create').isDisabled(), true, 'unknown setup submission blocks another controller');
+        assert.equal(await page.locator('#controller-create').isDisabled(), true, 'unknown setup submission blocks another controller');
         await page.locator('#controller-recovery-hash').fill(controllerTxHash);
         await recovery.getByRole('button', { name: 'Recover controller setup', exact: true }).click();
       }
-      await status('Safe setup confirmed');
+      await status('Controller confirmed');
       assert.equal(await setupSteps.locator('li').nth(0).getAttribute('data-state'), 'complete');
       assert.equal(await setupSteps.locator('li').nth(0).locator('strong').evaluate(element => getComputedStyle(element).textDecorationLine), 'line-through');
       assert.equal(await setupSteps.locator('li').nth(1).getAttribute('aria-current'), 'step');
       if (name === 'MetaMask') await setupSteps.screenshot({ path: '/tmp/falcon-setup-step-2.png' });
       assert.equal(controllerSends.length, 1, 'recovery never creates another controller');
+      assert.equal(sends.length, 0, 'controller confirmation never creates a Safe automatically');
+      await page.getByRole('button', { name: 'Add to existing Safe', exact: true }).waitFor();
       assert.equal(await page.locator('#controller-recovery-hash').count(), 0);
     }
     await page.locator('#safe-create').click(); await status('quote_limit');
@@ -413,8 +416,8 @@ try {
       assert.equal(BigInt(fundingSends[0].value), 20000000000000000n);
       assert.equal(fundingSends[0].to.toLowerCase(), safe.toLowerCase());
       assert.equal(await page.locator('#safe-balance').textContent(), '0.02');
-      assert.match(await page.getByTestId('falcon-wallet-l1-balance').textContent(), /xDAI/);
-      assert.match(await page.getByTestId('falcon-wallet-l2-balance').textContent(), /xDAI/);
+      assert.equal(await page.getByTestId('falcon-wallet-l1-balance').count(), 0);
+      assert.equal(await page.getByTestId('falcon-wallet-l2-balance').count(), 0);
       assert.equal(await page.evaluate(() => window.falconWalletTest.chain), toHex(d.l1.chainId), 'funding was sent on L1');
       assert.equal(await setup.count(), 0, 'funding must not bring back setup for an already confirmed L2 network');
       await page.screenshot({ path: '/tmp/falcon-safe-funded.png', fullPage: true });
@@ -441,7 +444,15 @@ try {
         delete document.visibilityState;
       });
       assert.equal(await page.getByTestId('public-key').inputValue(), publicKey, 'backgrounding alone keeps the unlocked key');
-      await page.locator('#safe-sign').click(); await status('Falcon signature ready');
+      await page.evaluate(() => { window.falconWalletTest.holdRead = true; window.falconWalletTest.release = null; });
+      await page.locator('#safe-sign').click();
+      await page.waitForFunction(() => !!window.falconWalletTest.release);
+      assert.equal(await page.locator('#safe-sign').textContent(), 'Signing…');
+      assert(await page.locator('#safe-sign').isDisabled());
+      assert(await page.locator('#safe-send').isVisible());
+      assert(await page.locator('#safe-recipient').isDisabled());
+      await page.evaluate(() => window.falconWalletTest.release());
+      await status('Falcon signature ready');
       await page.locator('#safe-fee-total').waitFor();
       const outer = decodeFunctionData({abi:l1ControllerAbi,data:quotes.at(-1).tx.data});
       const inner = decodeFunctionData({abi:safeAbi,data:outer.args[1]});
@@ -449,16 +460,35 @@ try {
       assert.equal(await page.locator('#safe-cost-comparison').count(), 0, 'signing alone has no paid transaction cost');
       holdSettlement = true;
       const l1PriceReadsBefore = observationCalls.filter(call => call.method === 'eth_gasPrice' && call.path.endsWith('/rpc/l1')).length;
+      const beforeSendBalance = await page.locator('#safe-balance').textContent();
+      await page.evaluate(() => { window.falconWalletTest.holdSend = true; window.falconWalletTest.release = null; });
       await page.locator('#safe-send').click();
+      await page.waitForFunction(() => !!window.falconWalletTest.release);
+      assert.match(await page.locator('#safe-send').textContent(), /Sending transaction/);
+      assert(await page.locator('#safe-send').isDisabled());
+      assert(await page.locator('#safe-recipient').isVisible());
+      assert(await page.locator('#safe-sign').isDisabled());
+      await page.evaluate(() => window.falconWalletTest.release());
       await page.getByText('Estimated cost without EEZ', { exact: true }).waitFor();
-      await page.waitForFunction(() => document.querySelector('[data-testid="cost-without-eez"]')?.textContent === '3.85e-9¢');
+      await page.waitForFunction(() => document.querySelector('[data-testid="cost-without-eez"]')?.textContent === 'Waiting for L1 settlement…');
       assert.equal(await page.getByTestId('cost-without-eez').getAttribute('data-estimated'), 'true');
       assert.equal(await page.getByTestId('cost-actual').textContent(), '2.20e-9¢', 'the actual cost still uses the paid L2 receipt fee');
-      assert(observationCalls.some(call => call.method === 'eth_gasPrice' && call.path.endsWith('/rpc/l1')), 'pending comparison uses the current L1 RPC gas price');
+      assert.equal(observationCalls.filter(call => call.method === 'eth_gasPrice' && call.path.endsWith('/rpc/l1')).length, l1PriceReadsBefore, 'cost comparison never substitutes the 7-wei RPC suggestion');
       assert.equal(await setupSteps.count(), 0, 'a normal transaction does not re-show setup steps');
+      assert.match(await page.locator('#safe-send').textContent(), /Waiting for confirmation/);
+      assert.equal(await page.locator('#safe-send').getAttribute('aria-busy'), 'true');
+      assert(await page.locator('#safe-send').isDisabled());
+      assert(await page.locator('#safe-sign').isDisabled());
+      assert(await page.locator('#safe-recipient').isVisible());
+      assert(await page.locator('#safe-recipient').isDisabled());
+      assert.equal(await page.locator('#safe-amount').inputValue(), '0');
+      assert.equal(await page.locator('#safe-data').inputValue(), '0xdeadbeef');
+      assert.equal(await page.locator('#safe-balance').textContent(), beforeSendBalance, 'last confirmed balance remains visible');
+      await page.screenshot({path:'/tmp/falcon-pending-transaction.png',fullPage:true});
       holdSettlement = false;
       await status('Transfer confirmed on');
-      assert.equal(await page.getByTestId('cost-without-eez').getAttribute('data-estimated'), 'true', 'the comparison keeps using current L1 pricing after confirmation');
+      await page.waitForFunction(() => document.querySelector('[data-testid="cost-without-eez"]')?.textContent === '0.55¢');
+      assert.equal(await page.getByTestId('cost-without-eez').getAttribute('data-estimated'), 'true', 'same-gas comparison uses the verified settlement price');
       assert.equal(await page.getByTestId('cost-actual').textContent(), '2.20e-9¢');
       assert.equal(sends.length, attemptsBeforeSuccess + 2, 'one creation and one Falcon-authorized transfer');
       for (const gasWallet of ['0x'+'99'.repeat(20), account]) {
@@ -467,9 +497,9 @@ try {
         assert.equal(await page.locator('#safe-cost-comparison').count(), gasWallet === account ? 1 : 0, 'transfer costs follow their wallet and key');
       }
       assert.match(await page.getByTestId('cost-actual').textContent(), /¢/);
-      await page.waitForFunction(() => document.querySelector('[data-testid="cost-without-eez"]')?.textContent === '3.85e-9¢');
+      await page.waitForFunction(() => document.querySelector('[data-testid="cost-without-eez"]')?.textContent === '0.55¢');
       assert.equal(observationCalls.filter(call => call.method === 'eth_gasPrice' && call.path.endsWith('/rpc/l1')).length,
-        l1PriceReadsBefore + 1, 'one L1 price snapshot is retained through confirmation and wallet switches');
+        l1PriceReadsBefore, 'the verified receipt price is retained without querying RPC gas suggestions');
       assert(!f.requests.some(request => request.url.startsWith('https://api.coinbase.com/')), 'xDAI costs must not fetch or multiply by ETH/USD');
       await page.screenshot({path:'/tmp/falcon-account-transaction.png',fullPage:true});
       await page.setViewportSize({width:390,height:900});
@@ -492,7 +522,7 @@ try {
         await page.locator('#unlock-saved').click();
         await page.waitForFunction(() => document.querySelector('#key-status').textContent.includes('Saved key unlocked'));
         assert.equal(await page.getByTestId('public-key').inputValue(),publicKey);
-        await page.getByText(new RegExp(`Gas wallet · ${name}`)).waitFor();
+        assert.equal(await page.getByText(/Gas wallet ·/).count(), 0, 'gas wallet stays in the dashboard header');
         await status('Safe loaded');
         assert.equal(await page.locator('#safe-cost-comparison').count(), 0, 'discovering an existing Safe never invents a new transaction cost');
         assert.equal(await page.locator('#safe-load').count(), 0);

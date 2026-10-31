@@ -47,15 +47,25 @@ export function matchesDashboard(n: SetupNetwork, d: DashboardNetwork) {
     && same(n.registry, d.registry) && same(n.manager, d.manager)
     && same(n.contracts.bridgeL1.address, d.bridgeL1) && same(n.contracts.bridgeL2.address, d.bridgeL2);
 }
+// Address/hash casing and object field order do not change contract identity.
+// Normalize only the comparison; saved snapshots retain their setup identity.
+function sameBindings(a: unknown, b: unknown) {
+  const canonical = (value: unknown) => JSON.stringify(value, (_key, item) => {
+    if (typeof item === 'string' && /^0x[\da-f]+$/i.test(item)) return item.toLowerCase();
+    return item && typeof item === 'object' && !Array.isArray(item)
+      ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => a.localeCompare(b))) : item;
+  });
+  return canonical(a) === canonical(b);
+}
 /** Reuse a live infrastructure check for a saved token selection only when
  * both snapshots describe exactly the same chains, anchors and contracts. */
 export function assertSameInfrastructure(saved: SetupNetwork, current: SetupNetwork) {
   check(same(saved.registry, current.registry) && same(saved.manager, current.manager) && saved.rollupId === current.rollupId
     && chains.every(c => saved.chains[c].chainId === current.chains[c].chainId && saved.chains[c].number === current.chains[c].number
       && same(saved.chains[c].hash, current.chains[c].hash))
-    && JSON.stringify(saved.protocol) === JSON.stringify(current.protocol)
-    && JSON.stringify(saved.bridgeImplementations ?? {}) === JSON.stringify(current.bridgeImplementations ?? {})
-    && chains.every(c => JSON.stringify(saved.contracts[c === 'l1' ? 'bridgeL1' : 'bridgeL2']) === JSON.stringify(current.contracts[c === 'l1' ? 'bridgeL1' : 'bridgeL2'])),
+    && sameBindings(saved.protocol, current.protocol)
+    && sameBindings(saved.bridgeImplementations ?? {}, current.bridgeImplementations ?? {})
+    && chains.every(c => sameBindings(saved.contracts[c === 'l1' ? 'bridgeL1' : 'bridgeL2'], current.contracts[c === 'l1' ? 'bridgeL1' : 'bridgeL2'])),
   'Network contracts changed since setup. Preserve the saved treasury and review this deployment.');
 }
 export async function matchingDeployerChecks(io: IO): Promise<NetworkCheck[]> {
