@@ -98,9 +98,12 @@ try {
  await f.open();await page.getByRole('button',{name:'Connect Wallet',exact:true}).click();await page.getByRole('button',{name:'MetaMask',exact:true}).click();
  await page.locator('#generate').click();await page.waitForFunction(()=>document.querySelector('#key-status')?.textContent.includes('Key generated'));
  publicKey='0x'+await page.getByTestId('public-key').inputValue();
- try { await page.getByRole('button',{name:'Add to existing Safe',exact:true}).click(); } catch(error) { console.error(await page.locator('body').innerText()); throw error; }
- const input=page.getByLabel('L1 Safe address',{exact:true}),add=page.getByRole('button',{name:'Add owner',exact:true});
+ try { await page.getByRole('button',{name:'Add to existing Safe',exact:true}).waitFor();
+  await page.locator('[aria-labelledby="safe-heading"]').screenshot({path:'/tmp/falcon-safe-choices.png'});
+  await page.getByRole('button',{name:'Add to existing Safe',exact:true}).click(); } catch(error) { console.error(await page.locator('body').innerText()); throw error; }
+ const input=page.getByLabel('L1 Safe address',{exact:true}),add=page.getByRole('button',{name:'Add Falcon controller',exact:true});
  assert.equal((await input.inputValue()).toLowerCase(),safe.toLowerCase(),'Treasury L1 address is prefilled, not its mirror');
+ await page.locator('[aria-labelledby="safe-heading"]').screenshot({path:'/tmp/falcon-add-controller.png'});
  assert.equal(await page.getByText(/Gas wallet ·/).count(),0);
  const status=text=>page.getByRole('status').filter({hasText:text}).waitFor();
  owners=[a(999)];await add.click();await status('Only a 1-of-1 Safe');assert.equal(signed.length,0);

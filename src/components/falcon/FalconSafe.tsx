@@ -765,15 +765,14 @@ export function FalconSafe({ signer, wallet, deployment, fees }: { signer: Signe
       {!preparationComplete ? <button id="controller-create" className={`btn btn-solid ${styles.action}`} disabled={unavailable} aria-busy={setupRunning} onClick={() => void createController()}>
         {setupRunning ? 'Creating controller…' : 'Create Falcon controller'}
       </button> : <>
-        {!existingSafe && <div className={styles.actions}>
+        {!existingSafe && <div className={styles.safeChoices}>
           <button id="safe-create" className={`btn btn-solid ${styles.action}`} disabled={unavailable || ownerPending} aria-busy={setupRunning} onClick={() => void createSafe()}>
             {setupRunning ? 'Creating Safe…' : 'Create a Safe'}
           </button>
-          <button className={`btn btn-outline ${styles.action}`} disabled={unavailable || ownerPending} onClick={() => setExistingSafe(true)}>Add to existing Safe</button>
+          <button className={`btn btn-solid ${styles.action}`} disabled={unavailable || ownerPending} onClick={() => setExistingSafe(true)}>Add to existing Safe</button>
         </div>}
-        {existingSafe && <button className="btn btn-outline" disabled={unavailable || ownerPending} onClick={() => setExistingSafe(false)}>Back to Safe options</button>}
         {controller && signer.publicKeyHex && <ExistingFalconSafe key={recoveryScope} wallet={wallet} deployment={deployment} controller={controller}
-          publicKey={`0x${signer.publicKeyHex}`} disabled={unavailable} visible={existingSafe} onPending={setOwnerPending}
+          publicKey={`0x${signer.publicKeyHex}`} disabled={unavailable} visible={existingSafe} onPending={setOwnerPending} onBack={() => setExistingSafe(false)}
           isCurrent={() => mounted.current && currentKey.current === signer.publicKeyHex && currentScope.current === recoveryScope && currentDeployment.current === deployment}
           onAttached={() => { setExistingSafe(false); setOwnerPending(false); setAttachmentRevision(value => value + 1); }} />}
         {!existingSafe && <SafeFeeQuote fee={fee} config={fees} />}

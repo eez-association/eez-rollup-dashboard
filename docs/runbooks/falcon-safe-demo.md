@@ -62,7 +62,7 @@ retain their separate gas estimation path.
    flow on L1, with the controller's L1 proxy as sole owner. **Add to existing
    Safe** instead opens an L1 address field. A completed Treasury setup on the
    same network supplies its L1 Safe as an editable suggestion.
-   **Add owner** supports a verified Safe whose only owner is the connected wallet
+   **Add Falcon controller** supports a verified Safe whose only owner is the connected wallet
    and whose threshold is 1. The wallet signs an EIP-712 Safe transaction, then
    submits it on L1 to add the controller's deterministic L1 proxy. The wallet
    remains an owner and the threshold stays at 1 (1 of 2). Existing modules and

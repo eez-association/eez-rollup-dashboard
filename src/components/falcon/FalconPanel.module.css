@@ -54,6 +54,8 @@ input.input { font-family: var(--sans); }
 }
 
 .workflow { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.safeChoices { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+.safeChoices > .action { width: 100%; min-width: 0; }
 .setupProgress { display: flex; flex-direction: column; gap: 16px; }
 .setupRunning:global(.btn):disabled { opacity: 1; background: var(--green-dim); color: var(--green); border-color: var(--green-border); cursor: progress; }
 .setupSteps { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }

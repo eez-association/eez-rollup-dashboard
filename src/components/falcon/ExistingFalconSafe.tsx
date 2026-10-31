@@ -16,9 +16,9 @@ import type { SafeAttachment } from '../../lib/falcon/safe';
 import styles from './FalconPanel.module.css';
 
 type Props = { wallet: FalconWallet; deployment: CrossChainDeployment; controller: ControllerState; publicKey: Hex;
-  disabled: boolean; visible: boolean; isCurrent: () => boolean; onAttached: (safe: SafeAttachment) => void; onPending: (pending: boolean) => void };
+  disabled: boolean; visible: boolean; isCurrent: () => boolean; onAttached: (safe: SafeAttachment) => void; onPending: (pending: boolean) => void; onBack: () => void };
 /** L1 owner administration only; the L2 mirror is never a transaction target. */
-export function ExistingFalconSafe({ wallet, deployment, controller, publicKey, disabled, visible, isCurrent, onAttached, onPending }: Props) {
+export function ExistingFalconSafe({ wallet, deployment, controller, publicKey, disabled, visible, isCurrent, onAttached, onPending, onBack }: Props) {
   const journal = useFalconRecovery(recoveryKey(deployment, 'owner'), wallet.address ? { account: wallet.address, publicKey } : null);
   const [address, setAddress] = useState(() => treasurySafeSuggestion(localStorage, deployment));
   const [busy, setBusy] = useState(false), [message, setMessage] = useState(''), [hashInput, setHashInput] = useState('');
@@ -144,7 +144,10 @@ export function ExistingFalconSafe({ wallet, deployment, controller, publicKey, 
     <input id="falcon-existing-safe" className={styles.input} value={journal.attempt?.to ?? address} disabled={busy || !!journal.attempt || disabled}
       placeholder="0x…" spellCheck={false} onChange={event => { setAddress(event.target.value); setMessage(''); }} />
     <p className={styles.hint}>Your connected wallet must be the only owner, with threshold 1. Adding Falcon keeps your wallet and changes the Safe to 1 of 2 owners.</p>
-    <button className={`btn btn-solid ${styles.action}`} disabled={disabled || busy || !!journal.attempt || !!journal.error || !wallet.address} onClick={() => void addOwner()}>Add owner</button>
+    <div className={styles.safeChoices}>
+      <button className={`btn btn-outline ${styles.action}`} disabled={disabled || busy || !!journal.attempt || !!journal.error} onClick={onBack}>Go back</button>
+      <button className={`btn btn-solid ${styles.action}`} disabled={disabled || busy || !!journal.attempt || !!journal.error || !wallet.address} onClick={() => void addOwner()}>Add Falcon controller</button>
+    </div>
     {(message || journal.error) && <p role="status" className={styles.status}>{journal.error || message}</p>}
     {journal.attempt && <details className={styles.details} open={!journal.attempt.hash}>
       <summary>Owner transaction recovery</summary>
