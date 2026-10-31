@@ -112,8 +112,38 @@ async function until(condition, message) {
 module.exports={fixture,until,target,eoa,fresh,forward,reverse};
 
 if(require.main===module)(async()=>{
- const browser=await chromium.launch({headless:true,chromiumSandbox: true});let scenarios=0;
+ const browser=await chromium.launch({headless:true,chromiumSandbox: process.env.TREASURY_BROWSER_SANDBOX !== '0'});let scenarios=0;
  try {
+  {
+   const f=await fixture(browser);
+   const bridge=f.page.getByRole('region',{name:'Bridge transfers',exact:true});
+   const source=bridge.getByRole('group',{name:'Source network',exact:true});
+   const destination=bridge.getByRole('group',{name:'Destination network',exact:true});
+   const amount=bridge.getByLabel('Bridge amount',{exact:true});
+   await amount.fill('0.125');
+   // Saved proxy selection switches the wallet, but never the bridge endpoints or amount.
+   await f.select(target,true);
+   await f.panel.getByRole('button',{name:`Selected proxy for ${target} on L2`,exact:true}).waitFor();
+   assert.equal(await f.page.evaluate(()=>window.currentChain),'0x1892');
+   assert.equal(await source.getAttribute('data-chain'),'l1');
+   assert.equal(await destination.getAttribute('data-chain'),'l2');
+   assert.equal(await amount.inputValue(),'0.125');
+   // The bridge direction is independent in the opposite direction too.
+   await bridge.getByTitle('Swap direction').click();
+   assert.equal(await source.getAttribute('data-chain'),'l2');
+   assert.equal(await f.panel.getByRole('button',{name:`Selected proxy for ${target} on L2`,exact:true}).getAttribute('aria-pressed'),'true');
+   await f.panel.getByRole('button',{name:'Add address',exact:true}).click();
+   for(const back of [false,true]){
+    const choose=f.panel.getByRole('button',{name:back?'Call L2 to L1':'Call L1 to L2',exact:true});
+    await choose.click();await until(async()=>await choose.getAttribute('aria-pressed')==='true','Call direction must update');
+    assert.equal(await f.page.evaluate(()=>window.currentChain),back?'0x1892':'0x27d8');
+    assert.equal(await source.getAttribute('data-chain'),'l2');
+    assert.equal(await destination.getAttribute('data-chain'),'l1');
+    assert.equal(await amount.inputValue(),'0.125');
+   }
+   assert.equal(await f.page.evaluate(()=>window.walletRequests.length),0);
+   assert.deepEqual(f.errors,[]);await f.context.close();scenarios++;
+  }
   for(const back of [false,true]){
    const f=await fixture(browser);await f.select(target,back);await f.send.waitFor({state:'visible'});await assert.doesNotReject(()=>f.send.click({trial:true}));
    const builder=f.panel.locator('[data-call-builder]');
