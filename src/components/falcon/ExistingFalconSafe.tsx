@@ -9,7 +9,7 @@ import { falconReadProvider, confirmationDelay } from '../../lib/falcon/readOnly
 import { checkChain, FalconTransactionReverted, sameAddress, type ControllerState } from '../../lib/falcon/l1Controller';
 import { attachmentKey, prepareOwnerAddition, treasurySafeSuggestion, verifyOwnerAddition } from '../../lib/falcon/existingSafe';
 import { recoveryKey, type RecoveryAttempt } from '../../lib/falcon/recoveryJournal';
-import { checkNoObservedSubmission, checkRecoveryOutcome, findRecoveryByNonce } from '../../lib/falcon/recoveryChecks';
+import { findRecoveryByNonce } from '../../lib/falcon/recoveryChecks';
 import { encodeSafeExecution, packEOAApprovals, safeTransactionHash, safeTypedDataJSON } from '../../lib/treasury/safeTransactions';
 import { UnknownFeeSubmission } from '../../lib/falcon/l2Fees';
 import type { SafeAttachment } from '../../lib/falcon/safe';
@@ -21,8 +21,7 @@ type Props = { wallet: FalconWallet; deployment: CrossChainDeployment; controlle
 export function ExistingFalconSafe({ wallet, deployment, controller, publicKey, disabled, visible, isCurrent, onAttached, onPending, onBack }: Props) {
   const journal = useFalconRecovery(recoveryKey(deployment, 'owner'), wallet.address ? { account: wallet.address, publicKey } : null);
   const [address, setAddress] = useState(() => treasurySafeSuggestion(localStorage, deployment));
-  const [busy, setBusy] = useState(false), [message, setMessage] = useState(''), [hashInput, setHashInput] = useState('');
-  const [acknowledged, setAcknowledged] = useState(false);
+  const [busy, setBusy] = useState(false), [message, setMessage] = useState('');
   const active = useRef(false), currentAddress = useRef(address); currentAddress.current = address;
   const abortRef = useRef<AbortController | null>(null);
   const callbacks = useRef({ onAttached, isCurrent }); callbacks.current = { onAttached, isCurrent };
@@ -49,7 +48,7 @@ export function ExistingFalconSafe({ wallet, deployment, controller, publicKey, 
               else { await journal.resolve(attempt); setMessage('The owner transaction was replaced or cancelled. You can review a new request.'); }
               return;
             }
-            setMessage('Waiting for the wallet transaction. Check wallet activity or enter its hash below.');
+            setMessage('Waiting for the wallet transaction. Checking automatically…');
           } else {
             const attachment = await verifyOwnerAddition(client, deployment, attempt, abort.signal);
             abort.signal.throwIfAborted();
@@ -112,32 +111,6 @@ export function ExistingFalconSafe({ wallet, deployment, controller, publicKey, 
       } catch (error) { if (!(error instanceof UnknownFeeSubmission)) await journal.reject(attempt); throw error; }
     });
   }
-  function recover() {
-    return run(async signal => {
-      const attempt = journal.attempt;
-      if (!attempt) return;
-      assertAttempt(attempt);
-      if (!/^0x[\da-f]{64}$/i.test(hashInput.trim())) throw new Error('Enter the transaction hash from wallet activity.');
-      const client = clientFor(signal);
-      await checkChain(client, deployment.l1);
-      const hash = hashInput.trim() as Hex;
-      if (await checkRecoveryOutcome(client, attempt, hash, signal) === 'replaced') { await journal.resolve(attempt); setMessage('The owner transaction was replaced or cancelled.'); }
-      else await journal.selectHash(attempt, hash);
-    });
-  }
-  function clearUnsent() {
-    return run(async signal => {
-      const attempt = journal.attempt;
-      if (!attempt || attempt.hash || !acknowledged) return;
-      assertAttempt(attempt);
-      await Promise.all([...new Set([config.l1Rpc, config.l1ProxyRpc])].map(async url => {
-        const client = eezClient(falconReadProvider(url, signal, deployment.l1.chainName));
-        await checkChain(client, deployment.l1); await checkNoObservedSubmission(client, attempt, signal);
-      }));
-      signal.throwIfAborted(); await journal.resolve(attempt); setAcknowledged(false);
-      setMessage('Unsent owner request cleared.');
-    });
-  }
   if (!visible && !journal.attempt && !journal.error) return null;
   return <div className={styles.fields} aria-label="Add Falcon to an existing Safe">
     <label className={styles.label} htmlFor="falcon-existing-safe">L1 Safe address</label>
@@ -149,15 +122,6 @@ export function ExistingFalconSafe({ wallet, deployment, controller, publicKey, 
       <button className={`btn btn-solid ${styles.action}`} disabled={disabled || busy || !!journal.attempt || !!journal.error || !wallet.address} onClick={() => void addOwner()}>Add Falcon controller</button>
     </div>
     {(message || journal.error) && <p role="status" className={styles.status}>{journal.error || message}</p>}
-    {journal.attempt && <details className={styles.details} open={!journal.attempt.hash}>
-      <summary>Owner transaction recovery</summary>
-      {journal.attempt.hash && <a href={`${deployment.l1.explorer}/tx/${journal.attempt.hash}`} target="_blank" rel="noreferrer">L1 owner transaction</a>}
-      <label className={styles.label}>Owner transaction hash<input className={styles.input} value={hashInput} onChange={event => setHashInput(event.target.value)} /></label>
-      <button className="btn btn-outline" disabled={busy} onClick={() => void recover()}>Recover owner transaction</button>
-      {!journal.attempt.hash && <>
-        <label className={styles.hint}><input type="checkbox" checked={acknowledged} onChange={event => setAcknowledged(event.target.checked)} /> I cancelled all wallet prompts and checked that no transaction was sent.</label>
-        <button className="btn btn-outline" disabled={busy || !acknowledged} onClick={() => void clearUnsent()}>Check and clear unsent owner request</button>
-      </>}
-    </details>}
+    {journal.attempt?.hash && <a href={`${deployment.l1.explorer}/tx/${journal.attempt.hash}`} target="_blank" rel="noreferrer">L1 owner transaction</a>}
   </div>;
 }

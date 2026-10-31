@@ -33,7 +33,7 @@ async function rpc({method,params=[],chain}) {
  if(method==='eth_gasPrice')return '0x1';
  if(method==='eth_estimateGas')return '0x493e0';
  if(method==='eth_getLogs')return [];
- if(method==='eth_getTransactionBySenderAndNonce')return null;
+ if(method==='eth_getTransactionBySenderAndNonce')return confirmed?{hash:txHash}:null;
  if(method==='eth_getTransactionCount')return '0x2';
  if(method==='eth_getCode')return eq(params[0],safe)?artifacts.contracts.SafeProxy.runtime:eq(params[0],singleton)?artifacts.contracts.Safe.runtime:Object.values(code).find(c=>eq(c.address,params[0]))?.code??'0x';
  if(method==='eth_getStorageAt')return params[1]==='0x0'?pad(singleton):zeroHash;
@@ -119,10 +119,10 @@ try {
  assert.equal(sends.length,1);await page.waitForFunction(()=>document.querySelector('#falcon-existing-safe')?.disabled);
  await page.reload();await page.locator('#unlock-saved').waitFor();
  await page.getByLabel('Saved key password',{exact:true}).fill('existing-safe-test-password');await page.locator('#unlock-saved').click();
- await page.getByText('Owner transaction recovery',{exact:true}).waitFor();assert.equal(sends.length,1,'reload never resubmits');
+ await status('Checking automatically');assert.equal(sends.length,1,'reload never resubmits');
+ assert.equal(await page.getByText('Owner transaction recovery',{exact:true}).count(),0);
+ assert.equal(await page.getByLabel('Owner transaction hash',{exact:true}).count(),0);
  owners=[owner,account];nonce=8n;confirmed=true;
- await page.getByLabel('Owner transaction hash',{exact:true}).fill(txHash);
- await page.getByRole('button',{name:'Recover owner transaction',exact:true}).click();
  await page.getByRole('heading',{name:'Your Safe account',exact:true}).waitFor();
  assert.equal(await page.locator('#safe-address').getAttribute('title'),safe);
  await page.locator('#safe-sign').waitFor();await page.locator('#safe-send').waitFor();await page.locator('#safe-fund').waitFor();
