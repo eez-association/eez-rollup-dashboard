@@ -14,7 +14,7 @@ export function readAttachment(storage: Pick<Storage, 'getItem'>, key: string): 
   const raw = storage.getItem(key);
   if (!raw) return undefined;
   const value = JSON.parse(raw) as SafeAttachment;
-  if (!isAddress(value.target) || !isAddress(value.walletOwner)) throw new Error('Saved Falcon Safe address is invalid.');
+  if (!value || !isAddress(value.target) || !isAddress(value.walletOwner)) throw new Error('Saved Falcon Safe address is invalid.');
   return { target: getAddress(value.target), walletOwner: getAddress(value.walletOwner) };
 }
 /** A completed, matching Treasury is an address suggestion, never an authorization. */
@@ -56,15 +56,21 @@ export async function prepareOwnerAddition(client: EezClient, d: CrossChainDeplo
 export async function verifyOwnerAddition(client: EezClient, d: CrossChainDeployment, attempt: RecoveryAttempt, signal: AbortSignal) {
   if (attempt.kind !== 'owner' || attempt.chainId !== d.l1.chainId || !attempt.controller || !attempt.hash || attempt.safeNonce === undefined) throw new Error('Owner recovery belongs to a different deployment.');
   await checkChain(client, d.l1);
+  // An unrelated reverted transaction must never clear this pending request.
+  const submitted = await client.getTransaction({ hash: attempt.hash });
+  if (!sameAddress(submitted.hash, attempt.hash) || !matchesRecoveryTransaction(submitted, attempt)) throw new Error('Owner transaction does not match the saved request.');
   const receipt = await canonicalReceipt(client, attempt.hash, signal);
   const tx = await client.getTransaction({ hash: attempt.hash });
-  if (!matchesRecoveryTransaction(tx, attempt) || tx.blockHash !== receipt.blockHash || tx.blockNumber !== receipt.blockNumber
+  if (!sameAddress(receipt.transactionHash, attempt.hash) || !sameAddress(tx.hash, attempt.hash)
+    || !matchesRecoveryTransaction(tx, attempt) || tx.blockHash !== receipt.blockHash || tx.blockNumber !== receipt.blockNumber
     || !sameAddress(receipt.from, attempt.account) || !sameAddress(receipt.to ?? '', attempt.to)) throw new Error('Owner transaction does not match the saved request.');
   const attachment = { target: attempt.to, walletOwner: attempt.account };
   const remote = await loadRemoteSafe(client, d, attempt.controller, signal, receipt.blockNumber, attachment);
   const transaction = ownerTransaction(d, attempt.to, remote.owner, BigInt(attempt.safeNonce));
   const hash = safeTransactionHash(transaction);
-  if (remote.nonce !== BigInt(attempt.safeNonce) + 1n || !receipt.logs.some(log => {
+  // Another Safe transaction may execute later in the same block. Its nonce
+  // must not hide this operation's exact success event.
+  if (remote.nonce === null || remote.nonce <= BigInt(attempt.safeNonce) || !receipt.logs.some(log => {
     const event = sameAddress(log.address, attempt.to) ? decodeSafeExecution(log) : undefined;
     return event?.eventName === 'ExecutionSuccess' && event.args.txHash === hash && event.args.payment === 0n;
   })) throw new Error('The receipt does not confirm this Safe owner addition.');
