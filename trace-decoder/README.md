@@ -18,12 +18,18 @@ results remain visible. Searching also reveals matching local reads.
 The native call flow connects visible callers to their children, numbers
 calls, and highlights connections for the selected call. Dashed connectors mark
 uncertain or missing execution; recorded traces never connect independent
-transactions. With **Show protocol calls**, L1- and L2-started flows also retain
-the observed `executeOnBehalf` proxy connection to each matched remote/reentrant
-call. That second connection points to the same call box and does not count an
-additional execution. Static incoming proxies are cross-chain evidence and stay
-visible when ordinary local reads are hidden. Search and hidden protocol frames can promote descendants to the
-nearest visible ancestor. **Token transfers** (on by
+transactions. **Show protocol calls** reconstructs the recorded call tree and
+sibling order within each transaction: outgoing proxy → EEZ → any observed
+reentrant `executeOnBehalf` calls and their targets. Separate matched cross-chain
+arrows connect each outgoing proxy to its remote execution; they do not become
+local tree parents or duplicate execution. Call numbering and folding follow
+this recorded tree. The ordinary linked application view remains unchanged.
+Static incoming proxies and outgoing manager calls are cross-chain evidence and
+stay visible when ordinary local reads are hidden. Search and hidden frames can
+promote descendants to the nearest visible ancestor. The **Search network**
+selector only locates the requested hash; the initiating transaction label and
+L2 table-load ordering follow decoded trigger evidence, including when the
+searched hash belongs to an L1 settlement. **Token transfers** (on by
 default) shows ERC20 Transfer events on call cards only when the same event
 appears in both the trace and the committed receipt; amounts describe events,
 not net balance changes. Prepared results without an expected L2 delivery are labeled separately

@@ -1,5 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
-import type { TraceRow } from "../../../trace-decoder/flow/rows.mjs";
+import { traceConnections, type TraceRow } from "../../../trace-decoder/flow/rows.mjs";
 import type { TraceChain, TraceModel, TraceNode, TraceProtocolLink } from "../../../trace-decoder/service/types";
 import { TokenNotes, tokenNotesHeight } from "./TokenTransfers";
 import styles from "./CallMap.module.css";
@@ -34,13 +34,13 @@ function roundPath(points: [number, number][], radius = 9) {
   return d + ` L${p[p.length - 1]![0]} ${p[p.length - 1]![1]}`;
 }
 
-export function CallMap({ model, rows, steps, physical, selected, onSelect, collapsed, onToggle, contractColor, contractKey, returnLabel, tokens, protocolLinks }: {
+export function CallMap({ model, rows, steps, physical, selected, onSelect, collapsed, onToggle, contractColor, contractKey, returnLabel, tokens, protocolLinks, crossChainLinks }: {
   model: TraceModel; rows: TraceRow[]; steps: number[]; physical: boolean;
   selected: number | null; onSelect: (id: number) => void;
   collapsed: Set<number>; onToggle: (id: number) => void;
   contractColor: Map<string, number>; contractKey: (node: TraceNode) => string;
   returnLabel: (node: TraceNode) => string; tokens: boolean;
-  protocolLinks: TraceProtocolLink[];
+  protocolLinks: TraceProtocolLink[]; crossChainLinks: TraceProtocolLink[];
 }) {
   const marker = "map-" + useId().replace(/[^a-zA-Z0-9_-]/g, "");
   const scroller = useRef<HTMLDivElement>(null);
@@ -121,16 +121,11 @@ export function CallMap({ model, rows, steps, physical, selected, onSelect, coll
     // One trunk lane per parent in the corridor right of its column, so sibling arrows never overlap.
     const columns = Math.max(1, ...items.map(item => item.col + 1)), lanesIn = Array<number>(columns).fill(0);
     const byNode = new Map(items.filter(item => item.node).map(item => [item.node!.id, item]));
-    const connections = rows.flatMap(row => {
-      const item = byNode.get(row.node.id);
-      const parent = row.parent === null ? undefined : byNode.get(row.parent);
-      const caller = parent ?? (item?.parent?.sender ? item.parent : undefined);
-      return item && caller ? [{ parent: caller, item, protocol: false }] : [];
-    });
-    connections.push(...protocolLinks.flatMap(link => {
+    const connections = traceConnections(rows, protocolLinks, crossChainLinks).flatMap(link => {
       const parent = byNode.get(link.from), item = byNode.get(link.to);
-      return parent && item ? [{ parent, item, protocol: true }] : [];
-    }));
+      return parent && item ? [{ parent, item, protocol: link.protocol }] : [];
+    });
+    for (const item of items) if (item.node && item.parent?.sender) connections.push({ parent: item.parent, item, protocol: false });
     const parents = new Set(connections.map(connection => connection.parent));
     for (const item of items) if (parents.has(item)) item.lane = lanesIn[item.col]!++;
     const corridor = (col: number) => F.gap + Math.max(0, lanesIn[col]! - 1) * 7;
@@ -188,7 +183,7 @@ export function CallMap({ model, rows, steps, physical, selected, onSelect, coll
       if (last && edge.trunk - last.x < 90) last.edges.push(edge); else badges.push({ x: edge.trunk, edges: [edge] });
     }
     return { items, edges, badges, bands, bandTop, bandHeight, boundary, width, height: y };
-  }, [rows, steps, model, physical, tokens, protocolLinks]);
+  }, [rows, steps, model, physical, tokens, protocolLinks, crossChainLinks]);
 
   const { items, edges, badges, bands, bandTop, bandHeight, boundary, width, height } = layout;
   // Fit never shrinks below 40%, where labels stop being readable; wider maps scroll instead.

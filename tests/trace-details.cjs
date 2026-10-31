@@ -187,6 +187,7 @@ model.recordedView = { ...model, mode: "physical", recordedView: null,
     const { scenario, frame, address: fixtureAddress } = await import("../trace-decoder/tests/fixtures/scenarios.mjs");
     const { decodeCrossChainTrace } = await import("../trace-decoder/src/engine.mjs");
     const { buildFlowModel } = await import("../trace-decoder/flow/model.mjs");
+    const { traceRows } = await import("../trace-decoder/flow/rows.mjs");
     const fixture = scenario({ direction: "L2", repeat: 2, sharedAttempt: true, unrelatedAttempts: true });
     const linked = buildFlowModel(await decodeCrossChainTrace(fixture.config, fixture.trigger));
     await page.route("**/trace/api/jobs/*/result", route => route.fulfill({ json: {
@@ -284,6 +285,18 @@ model.recordedView = { ...model, mode: "physical", recordedView: null,
     await page.getByRole('button', { name: 'Call map', exact: true }).click();
     await protocol.check();
     assert.equal(l1Linked.protocolLinks.length, 3);
+    await page.waitForFunction(() => document.querySelector('[aria-label="Initiating transactions"]')?.textContent.includes('L1'));
+    const protocolRows = traceRows(l1Linked, { protocol: true, localReads: false });
+    for (const [index, row] of protocolRows.entries()) {
+      const box = page.locator(`[data-map-node="${row.node.id}"]`);
+      assert.equal(Number((await box.getAttribute('title')).match(/^\d+/)[0]), index + 1, 'number calls in recorded tree order');
+      if (row.parent !== null) {
+        assert.equal(l1Linked.nodes[row.parent].chain, row.node.chain);
+        await page.locator(`path[data-from="${row.parent}"][data-to="${row.node.id}"][data-crossing="false"]`).waitFor({ state: 'attached' });
+      }
+    }
+    assert.match(await page.getByLabel('Initiating transactions', { exact: true }).textContent(), /L1/);
+    assert.equal(await page.getByRole('combobox', { name: 'Search network', exact: true }).count(), 1);
     for (const connection of l1Linked.protocolLinks) {
       await page.locator(`[data-protocol-link="true"][data-from="${connection.from}"][data-to="${connection.to}"]`).waitFor({ state: 'attached' });
       assert.equal(await page.locator(`[data-map-node="${connection.to}"]`).count(), 1);
@@ -298,6 +311,8 @@ model.recordedView = { ...model, mode: "physical", recordedView: null,
     }
     await protocol.uncheck();
     await page.waitForFunction(() => document.querySelectorAll('[data-protocol-link="true"]').length === 0);
+    const ordinaryRows = traceRows(l1Linked, { protocol: false, localReads: false });
+    assert.deepEqual(await page.locator('[data-flow-node]').evaluateAll(nodes => nodes.map(node => Number(node.dataset.flowNode))), ordinaryRows.map(row => row.node.id), 'turning protocol calls off restores the unchanged logical application flow');
     assert.equal(await page.locator('[data-protocol-link="true"]').count(), 0);
     await protocol.check();
     await page.getByRole('textbox', { name: 'Find a call' }).fill('executeOnBehalf');

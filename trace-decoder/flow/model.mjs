@@ -87,6 +87,7 @@ export function buildFlowModel(trace, { label, explorers = {}, mode = 'combined'
   const frames = new Map(trace.frames.map(f => [f.id, f]));
   const logical = new Map(trace.logicalNodes.map(n => [n.id, n]));
   const outgoingByFrame = new Map((trace.outgoing || []).map(o => [o.frameId, o]));
+  const outgoingManagerFrames = new Set((trace.outgoing || []).map(o => o.managerFrameId));
   const incomingByFrame = new Map((trace.incoming || []).map(i => [i.frameId, i]));
   const incomingProxyFrames = new Set((trace.incoming || []).map(i => i.proxyFrameId));
   const nodes = [], seen = new Set();
@@ -128,7 +129,7 @@ export function buildFlowModel(trace, { label, explorers = {}, mode = 'combined'
       contract, accountType: d.accountType, address: frame.to ?? null, from: frame.from ?? null,
       fn: role === 'system-value-transfer' ? 'Value to L2 system' : functionName(d, frame), signature: d.signature || null, args: (d.arguments || []).map(argument),
       ret: returnInfo(d, frame), value: String(frame.value ?? '0'), isStatic: !!frame.isStatic,
-      crossChainRead: !!frame.isStatic && (outgoingByFrame.has(frame.id) || incomingByFrame.has(frame.id) || incomingProxyFrames.has(frame.id)),
+      crossChainRead: !!frame.isStatic && (outgoingByFrame.has(frame.id) || incomingByFrame.has(frame.id) || incomingProxyFrames.has(frame.id) || outgoingManagerFrames.has(frame.id)),
       failed: !!frame.error, reverted: !!frame.reverted, gasUsed: toDecimal(frame.gasUsed),
       tx: frame.transactionHash, block: frame.blockNumber ?? null, path: frame.path,
       abiSource: d.provenance?.source || null, abiProvider: d.provenance?.provider || null,
@@ -275,6 +276,30 @@ export function buildFlowModel(trace, { label, explorers = {}, mode = 'combined'
   transactions.sort((a, b) => Number(b.inFlow === true || b.requested) - Number(a.inFlow === true || a.requested) || (rank[a.role] ?? 9) - (rank[b.role] ?? 9) || Number(a.block ?? 0) - Number(b.block ?? 0) || Number(a.index ?? 0) - Number(b.index ?? 0));
 
   for (const node of nodes) node.inFlow = scope.frames.has(node.frameId || node.crossing?.managerFrameId);
+  // Preserve physical ancestry separately from the linked application tree.
+  // Protocol view can then show proxy -> EEZ -> reentrant proxy in recorded
+  // order, while cross-chain links remain explicit evidence, not tree parents.
+  const nodeByFrame = new Map(nodes.filter(node => node.frameId).map(node => [node.frameId, node]));
+  for (const node of nodes) if (node.frameId) {
+    let parent = frames.get(node.frameId)?.parentId;
+    const checked = new Set([node.frameId]);
+    node.recordedParent = null;
+    while (parent && !checked.has(parent)) {
+      checked.add(parent);
+      const candidate = nodeByFrame.get(parent);
+      if (candidate && candidate.id !== node.id) {
+        if (candidate.chain === node.chain && candidate.tx === node.tx) node.recordedParent = candidate.id;
+        break;
+      }
+      parent = frames.get(parent)?.parentId;
+    }
+  }
+  const crossChainLinks = physical ? [] : nodes.flatMap(node => node.children.flatMap(id => {
+    const target = nodes[id];
+    return node.outgoing && target?.crossing && target.chain !== node.chain &&
+      target.crossing.from === node.chain && target.crossing.to === target.chain &&
+      target.crossing.managerFrameId === node.outgoing.managerFrameId ? [{ from: node.id, to: id }] : [];
+  }));
   // Linking a remote call moves it out of its recorded executeOnBehalf parent.
   // Retain that observed caller on either chain as a second connection to the
   // same node, including reentrant calls in L1-started flows. It is not another
@@ -337,7 +362,7 @@ export function buildFlowModel(trace, { label, explorers = {}, mode = 'combined'
     }])),
     settlements: (trace.settlements || []).map(s => ({ id: s.id, l1Tx: s.l1TransactionHash, l1Block: s.l1BlockNumber ?? null, firstL2Block: s.firstL2Block ?? null, lastL2Block: s.lastL2Block ?? null })),
     stateObservations: trace.metadata?.stateObservations || [],
-    transactions, roots, nodes, gas, protocolLinks,
+    transactions, roots, nodes, gas, protocolLinks, crossChainLinks,
     matchingNotes: matchingNotes.map(u => ({ code: u.code, message: u.message, frameId: u.frameId || null })),
     unresolved: unresolved.map(u => ({ code: u.code, message: u.message, frameId: u.frameId || null })),
     stats: { frames: scope.frames.size, preparedResponses: nodes.filter(n => n.preparedResponse && scope.frames.has(n.frameId)).length, preparedResults: [...prepared].filter(id => scope.frames.has(id)).length, crossings: (trace.outgoing || []).filter(o => scope.frames.has(o.frameId)).length, matched: (trace.outgoing || []).filter(o => scope.frames.has(o.frameId) && o.status === 'matched').length, events: (trace.events || []).filter(e => scope.frames.has(e.frameId)).length },

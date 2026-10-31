@@ -6,7 +6,7 @@ import { buildFlowModel, explorerSite, standardRevert } from '../flow/model.mjs'
 import { inlineModelSource, preferSavedTrace, renderFlowHtml } from '../flow/render-flow.mjs';
 import { scenario, address } from './fixtures/scenarios.mjs';
 import { largeTrace } from './fixtures/large-trace.mjs';
-import { traceRows } from '../flow/rows.mjs';
+import { traceRows, traceConnections } from '../flow/rows.mjs';
 
 const plain = value => JSON.parse(JSON.stringify(value, (_, v) => typeof v === 'bigint' ? v.toString() : v));
 const decode = async (opts = {}, edit) => {
@@ -86,6 +86,43 @@ test('L1-started reentrant calls retain both chains’ recorded proxy callers', 
   }
   physicalLinks(trace);
   assert.deepEqual(buildFlowModel(trace, { mode: 'physical' }).protocolLinks, []);
+});
+
+test('protocol rows follow recorded ancestry while proxy crossings remain explicit', async () => {
+  for (const options of [{ deep: true }, { direction: 'L1', repeat: 2 }, { direction: 'L2', repeat: 2, attempts: true }]) {
+    const { trace } = await decode(options), model = buildFlowModel(trace);
+    const rows = traceRows(model, { protocol: true, localReads: false });
+    const index = new Map(rows.map((row, i) => [row.node.id, i]));
+    assert.equal(new Set(rows.map(row => row.node.id)).size, rows.length);
+    for (const link of model.protocolLinks) {
+      const row = rows.find(row => row.node.id === link.to);
+      assert.equal(row.parent, link.from);
+      assert(index.get(link.from) < index.get(link.to), 'executeOnBehalf precedes its real target');
+    }
+    const edges = traceConnections(rows, model.protocolLinks, model.crossChainLinks);
+    assert.equal(new Set(edges.map(e => `${e.from}:${e.to}`)).size, edges.length);
+    assert.equal(model.crossChainLinks.length, model.stats.matched);
+    for (const link of model.crossChainLinks) {
+      const source = model.nodes[link.from], target = model.nodes[link.to];
+      assert(source.outgoing);assert.equal(target.crossing.status, 'matched');
+      assert.notEqual(source.chain, target.chain);
+      assert(edges.some(edge => edge.from === link.from && edge.to === link.to && !edge.protocol));
+      const manager = rows.find(row => row.node.frameId === source.outgoing.managerFrameId);
+      if (manager) assert.equal(manager.parent, source.id, 'proxy still calls EEZ locally');
+    }
+  }
+});
+
+test('searching an L1 settlement does not label its L2 initiating user transaction as L1', async () => {
+  const { f, trace } = await decode({ direction: 'L2' });
+  trace.origin = { chain: 'L1', transactionId: `L1:${f.posting}` };trace.txHash = f.posting;
+  const model = buildFlowModel(trace), sources = model.transactions.filter(tx => tx.role === 'trigger' && tx.inFlow === true);
+  assert.equal(model.origin.chain, 'L1', 'origin records the searched transaction');
+  assert.deepEqual(sources.map(tx => [tx.chain, tx.hash]), [['L2', f.trigger]], 'initiator follows decoded calls and verified links');
+  const rows = traceRows(model, { protocol: true });
+  const table = rows.findIndex(row => row.node.fn.startsWith('loadExecutionTable'));
+  const source = rows.findIndex(row => row.node.tx === f.trigger && row.node.path === '0');
+  assert(table >= 0 && table < source, 'the actual L2 table load precedes its L2 user transaction');
 });
 
 test('static incoming proxy calls remain visible as cross-chain evidence when local reads are hidden', async () => {

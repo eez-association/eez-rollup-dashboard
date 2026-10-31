@@ -1,5 +1,5 @@
 import { useId, useEffect, useState, type RefObject } from "react";
-import type { TraceRow } from "../../../trace-decoder/flow/rows.mjs";
+import { traceConnections, type TraceRow } from "../../../trace-decoder/flow/rows.mjs";
 import type { TraceProtocolLink } from "../../../trace-decoder/service/types";
 import styles from "./TraceDetailView.module.css";
 
@@ -9,10 +9,10 @@ interface Connection {
 }
 
 /** Measure the actual cards so connectors follow wrapping, folding and resizing. */
-export function FlowConnections({ container, rows, physical, selected, protocolLinks }: {
+export function FlowConnections({ container, rows, physical, selected, protocolLinks, crossChainLinks }: {
   container: RefObject<HTMLDivElement | null>; rows: TraceRow[];
   physical: boolean; selected: number | null;
-  protocolLinks: TraceProtocolLink[];
+  protocolLinks: TraceProtocolLink[]; crossChainLinks: TraceProtocolLink[];
 }) {
   const marker = "trace-" + useId().replace(/[^a-zA-Z0-9_-]/g, "");
   const [layout, setLayout] = useState<{ width: number; height: number; edges: Connection[] }>({
@@ -32,8 +32,7 @@ export function FlowConnections({ container, rows, physical, selected, protocolL
         if (node) laneLeft[node.chain] = Math.min(laneLeft[node.chain], card.left - bounds.left);
       }
       const edges: Connection[] = [];
-      const connections = rows.flatMap(({ node, parent }) => parent === null ? [] : [{ from: parent, to: node.id, protocol: false }]);
-      connections.push(...protocolLinks.map(link => ({ ...link, protocol: true })));
+      const connections = traceConnections(rows, protocolLinks, crossChainLinks);
       for (const { from: parent, to, protocol } of connections) {
         const node = byId.get(to);
         if (!node) continue;
@@ -73,7 +72,7 @@ export function FlowConnections({ container, rows, physical, selected, protocolL
     observer.observe(element);
     element.querySelectorAll("[data-flow-node]").forEach(card => observer.observe(card));
     return () => observer.disconnect();
-  }, [container, rows, physical, protocolLinks]);
+  }, [container, rows, physical, protocolLinks, crossChainLinks]);
 
   return <svg className={styles.connections} width={layout.width} height={layout.height} aria-hidden="true">
     <defs>{(["L1", "L2", "uncertain", "failed"] as const).map(tone =>

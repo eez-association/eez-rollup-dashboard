@@ -22,6 +22,7 @@ export interface TraceTokenTransfer {
 }
 export interface TraceNode {
   id: number; kind: "call" | "ghost"; frameId: string | null; chain: TraceChain;
+  recordedParent?: number | null;
   role: string; protocol: boolean; inFlow?: boolean; callType: string; contract: string;
   flowAttempt?: "related" | "other";
   accountType?: "eoa";
@@ -53,6 +54,7 @@ export interface TraceModel {
   chains: Record<TraceChain, { chainId: string | null; rollupId: string | null; manager: string | null; name: string; explorer: string | null }>;
   nodes: TraceNode[]; transactions: TraceTransaction[];
   protocolLinks?: TraceProtocolLink[];
+  crossChainLinks?: TraceProtocolLink[];
   roots: { node: number; chain: TraceChain; tx: string; block: number | null; isOrigin: boolean; inFlow?: boolean; preferred?: boolean; unisolatedEntry?: boolean; entryIndex?: number | null; role: string; relatedSettlement?: boolean; label: string }[];
   settlements: { id: string; l1Tx: string; l1Block: number | null; firstL2Block: number | null; lastL2Block: number | null }[];
   unresolved: { code: string; message: string; frameId: string | null }[];
