@@ -88,6 +88,7 @@ export function buildFlowModel(trace, { label, explorers = {}, mode = 'combined'
   const logical = new Map(trace.logicalNodes.map(n => [n.id, n]));
   const outgoingByFrame = new Map((trace.outgoing || []).map(o => [o.frameId, o]));
   const incomingByFrame = new Map((trace.incoming || []).map(i => [i.frameId, i]));
+  const incomingProxyFrames = new Set((trace.incoming || []).map(i => i.proxyFrameId));
   const nodes = [], seen = new Set();
   const exactLink = (trace.transactionLinks || []).find(l => l.state === 'complete' &&
     `${l.sourceChain}:${l.sourceHash}` === trace.origin?.transactionId);
@@ -127,7 +128,7 @@ export function buildFlowModel(trace, { label, explorers = {}, mode = 'combined'
       contract, accountType: d.accountType, address: frame.to ?? null, from: frame.from ?? null,
       fn: role === 'system-value-transfer' ? 'Value to L2 system' : functionName(d, frame), signature: d.signature || null, args: (d.arguments || []).map(argument),
       ret: returnInfo(d, frame), value: String(frame.value ?? '0'), isStatic: !!frame.isStatic,
-      crossChainRead: !!frame.isStatic && (outgoingByFrame.has(frame.id) || incomingByFrame.has(frame.id)),
+      crossChainRead: !!frame.isStatic && (outgoingByFrame.has(frame.id) || incomingByFrame.has(frame.id) || incomingProxyFrames.has(frame.id)),
       failed: !!frame.error, reverted: !!frame.reverted, gasUsed: toDecimal(frame.gasUsed),
       tx: frame.transactionHash, block: frame.blockNumber ?? null, path: frame.path,
       abiSource: d.provenance?.source || null, abiProvider: d.provenance?.provider || null,
@@ -275,18 +276,21 @@ export function buildFlowModel(trace, { label, explorers = {}, mode = 'combined'
 
   for (const node of nodes) node.inFlow = scope.frames.has(node.frameId || node.crossing?.managerFrameId);
   // Linking a remote call moves it out of its recorded executeOnBehalf parent.
-  // For L2-started flows retain that observed L1 caller as a second connection
-  // to the same node. It is not another execution or a second tree parent.
+  // Retain that observed caller on either chain as a second connection to the
+  // same node, including reentrant calls in L1-started flows. It is not another
+  // execution or a second tree parent.
   const protocolLinks = [];
-  if (!physical && trace.origin?.chain === 'L2') {
+  if (!physical) {
     const byFrame = new Map(nodes.filter(node => node.frameId).map(node => [node.frameId, node]));
     for (const incoming of trace.incoming || []) {
       const caller = byFrame.get(incoming.proxyFrameId), target = byFrame.get(incoming.frameId);
-      if (caller?.chain !== 'L1' || !target || !target.inFlow || target.crossing?.status !== 'matched' ||
+      if (!caller || !target || !target.inFlow || target.crossing?.status !== 'matched' ||
           caller.role !== 'incoming-proxy' || caller.tx !== target.tx || caller.chain !== target.chain ||
           frames.get(target.frameId)?.parentId !== caller.frameId || caller.children.includes(target.id)) continue;
       protocolLinks.push({ from: caller.id, to: target.id });
     }
+  }
+  if (!physical && trace.origin?.chain === 'L2') {
     // Attempts are batch entries. Recover their physical ancestry because the
     // logical tree has relocated the matched application calls into the L2 flow.
     const relatedAttempts = new Set(), checked = new Set();

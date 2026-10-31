@@ -50,7 +50,7 @@ model.recordedView = { ...model, mode: "physical", recordedView: null,
       await server.listen();
       url = `http://127.0.0.1:${server.httpServer.address().port}/dashboard/`;
     }
-    browser = await chromium.launch({ headless: true, chromiumSandbox: true, executablePath: process.env.EEZ_UI_CHROMIUM_EXECUTABLE });
+    browser = await chromium.launch({ headless: true, chromiumSandbox: process.env.TREASURY_BROWSER_SANDBOX !== '0', executablePath: process.env.EEZ_UI_CHROMIUM_EXECUTABLE });
     const page = await browser.newPage();
     page.setDefaultTimeout(15000);
     const errors = [];
@@ -272,6 +272,38 @@ model.recordedView = { ...model, mode: "physical", recordedView: null,
       }), undefined, { timeout: 3000 });
       assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `no page overflow at ${width}px`);
     }
+    // L1 origins need the same recorded proxy connections for every reentry,
+    // including the later L2 delivery and its nested callback.
+    const l1Fixture = scenario({ deep: true });
+    const l1Linked = buildFlowModel(await decodeCrossChainTrace(l1Fixture.config, l1Fixture.trigger));
+    await page.route('**/trace/api/jobs/*/result', route => route.fulfill({ json: {
+      apiVersion: 1, partial: false, observedAt: '2026-10-14T12:00:00Z', model: l1Linked,
+    } }));
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.getByRole('button', { name: 'Refresh', exact: true }).click();
+    await page.getByRole('button', { name: 'Call map', exact: true }).click();
+    await protocol.check();
+    assert.equal(l1Linked.protocolLinks.length, 3);
+    for (const connection of l1Linked.protocolLinks) {
+      await page.locator(`[data-protocol-link="true"][data-from="${connection.from}"][data-to="${connection.to}"]`).waitFor({ state: 'attached' });
+      assert.equal(await page.locator(`[data-map-node="${connection.to}"]`).count(), 1);
+      assert.equal(await page.locator(`path[data-crossing="true"][data-to="${connection.to}"]`).count(), 1);
+    }
+    assert.equal(await page.locator('[data-protocol-link="true"]').count(), 3);
+    await page.screenshot({ path: `${directory}/l1-reentrant-protocol-links.png`, fullPage: true });
+    await page.getByRole('button', { name: 'Lanes', exact: true }).click();
+    for (const connection of l1Linked.protocolLinks) {
+      await page.locator(`[data-protocol-link="true"][data-from="${connection.from}"][data-to="${connection.to}"]`).waitFor({ state: 'attached' });
+      assert.equal(await page.locator(`[data-flow-node="${connection.to}"]`).count(), 1);
+    }
+    await protocol.uncheck();
+    await page.waitForFunction(() => document.querySelectorAll('[data-protocol-link="true"]').length === 0);
+    assert.equal(await page.locator('[data-protocol-link="true"]').count(), 0);
+    await protocol.check();
+    await page.getByRole('textbox', { name: 'Find a call' }).fill('executeOnBehalf');
+    await page.waitForFunction(() => document.querySelectorAll('[data-protocol-link="true"]').length === 0);
+    assert.equal(await page.locator('[data-protocol-link="true"]').count(), 0, 'search does not leave connections to hidden targets');
+    await page.getByRole('textbox', { name: 'Find a call' }).fill('');
     const accounts = scenario({ direction: 'L2' }), accountTx = accounts.txs.L2.get(accounts.trigger);
     const callerAddress = fixtureAddress(900), eoaAddresses = [fixtureAddress(1000), fixtureAddress(1001)];
     const codeAddress = fixtureAddress(1002);
