@@ -91,6 +91,9 @@ retain their separate gas estimation path.
    nonempty data. The signature, Safe hash and receipt check bind these exact bytes.
 8. Click **Sign with Falcon**. Fees are estimated automatically after signing
    and refreshed before **Send transaction** opens the wallet confirmation.
+   The send form stays visible during signing, submission and confirmation.
+   The active button shows progress, repeat submission is disabled, and the last
+   confirmed balance remains visible until the L1 result is verified.
    Editing the recipient, amount or data invalidates the signature and quote.
    Confirmation is automatic, with one trace button and small L1/L2 hash links.
    The [cost comparison](../falcon/cost-comparison.md) shows the actual paid fee

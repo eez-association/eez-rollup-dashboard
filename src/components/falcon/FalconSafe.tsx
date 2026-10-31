@@ -76,6 +76,7 @@ export function FalconSafe({ signer, wallet, deployment, fees }: { signer: Signe
   const [notice, setNotice] = useState<Notice>(initial);
   const [observation, setObservation] = useState('L1 read');
   const [busy, setBusy] = useState(false);
+  const [buttonActivity, setButtonActivity] = useState<'sign' | 'send' | null>(null);
   const mounted = useRef(false), running = useRef(false);
   const request = useRef<AbortController | null>(null);
   const currentKey = useRef(signer.publicKeyHex), currentInput = useRef({ amount, recipient, data });
@@ -122,7 +123,7 @@ export function FalconSafe({ signer, wallet, deployment, fees }: { signer: Signe
   }, [signer.publicKeyHex, deployment, wallet.address, attachmentRevision]);
   useEffect(() => {
     request.current?.abort(); request.current = null;
-    running.current = false; setBusy(false);
+    running.current = false; setBusy(false); setButtonActivity(null);
     completedFunding.current = null;
     setFunding(null); setFundedHash(null); setFundingNotice(null);
     setFundingRecoveryHash(''); setControllerRecoveryHash('');
@@ -328,9 +329,9 @@ export function FalconSafe({ signer, wallet, deployment, fees }: { signer: Signe
     return () => abort.abort();
   }, [funding, deployment, recoveryScope]);
 
-  async function run(action: (signal: AbortSignal) => Promise<void>) {
+  async function run(action: (signal: AbortSignal) => Promise<void>, activity: 'sign' | 'send' | null = null) {
     if (running.current) return;
-    running.current = true; setBusy(true);
+    running.current = true; setBusy(true); setButtonActivity(activity);
     const abort = new AbortController(); request.current = abort;
     try { await action(abort.signal); }
     catch (error) {
@@ -342,7 +343,7 @@ export function FalconSafe({ signer, wallet, deployment, fees }: { signer: Signe
     } finally {
       if (request.current === abort) {
         running.current = false;
-        if (mounted.current) { setBusy(false); setCheckingCosts(false); }
+        if (mounted.current) { setBusy(false); setButtonActivity(null); setCheckingCosts(false); }
         request.current = null;
       }
     }
@@ -449,7 +450,7 @@ export function FalconSafe({ signer, wallet, deployment, fees }: { signer: Signe
       const next = await prepareAction(signal);
       setPrepared(next);
       await sendPrepared(next, signal, true);
-    });
+    }, 'sign');
   }
 
   async function sourceReceipt(tx: Submitted, signal: AbortSignal) {
@@ -471,7 +472,9 @@ export function FalconSafe({ signer, wallet, deployment, fees }: { signer: Signe
     const decoded = safeCallResult(tx.prepared.operation, result);
     if (sameKey(tx.publicKey)) {
       setController(state); setObservation('Result reported by L2');
-      setRemote(before => before && (tx.prepared.operation.kind === 'create' ? { ...before, target: decoded as Address, nonce: null, balance: null } : { ...before, nonce: tx.prepared.operation.safeNonce + 1n, balance: null }));
+      // Keep the last confirmed account visible while an existing Safe transfer settles.
+      // L2 inclusion alone does not establish its new L1 balance or Safe nonce.
+      if (tx.prepared.operation.kind === 'create') setRemote(before => before && { ...before, target: decoded as Address, nonce: null, balance: null });
     }
     signal.throwIfAborted();
     setCosts(tx.prepared.operation.kind === 'transfer' ? { sourceHash: tx.hash, source: null, settlement: null,
@@ -486,7 +489,7 @@ export function FalconSafe({ signer, wallet, deployment, fees }: { signer: Signe
       if (uncertain) throw new Error('Recover the previous wallet transaction before sending again.');
       if (!prepared || !prepared.isCurrent()) throw new Error('Sign the current action first.');
       await sendPrepared(prepared, signal, preview);
-    });
+    }, 'send');
   }
 
   function createController() {
@@ -732,7 +735,8 @@ export function FalconSafe({ signer, wallet, deployment, fees }: { signer: Signe
   const symbol = deployment.l1.safe?.nativeSymbol ?? 'native token';
   const unavailable = loadingSafe || busy || confirming || fundingPending || !!controllerJournal.attempt || !!fundingJournal.error || !!controllerJournal.error
     || wallet.networkSetup?.status === 'connecting' || !!uncertain || signer.busy || !signer.publicKeyHex || !wallet.address || !deployment.l1.safe;
-  const safeReady = !!remote?.target && remote.balance !== null && remote.nonce !== null && !confirming;
+  const safeReady = !!remote?.target && remote.balance !== null && remote.nonce !== null;
+  const transactionLocked = busy || confirming || !!uncertain;
   const creatingSafe = activeSubmission?.kind === 'call' && activeSubmission.prepared.operation.kind === 'create' && confirming;
   const setupRunning = busy || creatingSafe || !!controllerJournal.attempt?.hash;
   const showSetup = !!recoveryOwner && lookedUp && (!remote?.target || creatingSafe);
@@ -846,24 +850,26 @@ export function FalconSafe({ signer, wallet, deployment, fees }: { signer: Signe
         <p className={styles.hint}>Send from your Safe on {deployment.l1.chainName}.</p>
         <div className={styles.fields}>
           <label className={styles.label} htmlFor="safe-recipient">To</label>
-          <input id="safe-recipient" className={styles.input} value={recipient} disabled={busy || confirming} spellCheck={false} autoCapitalize="off" placeholder="0x…" onChange={e => { setRecipient(e.target.value); clearAuthorization(); }} />
+          <input id="safe-recipient" className={styles.input} value={recipient} disabled={transactionLocked} spellCheck={false} autoCapitalize="off" placeholder="0x…" onChange={e => { setRecipient(e.target.value); clearAuthorization(); }} />
           <label className={styles.label} htmlFor="safe-amount">Amount · {symbol}</label>
-          <input id="safe-amount" className={styles.input} inputMode="decimal" value={amount} disabled={busy || confirming} onChange={e => { setAmount(e.target.value); clearAuthorization(); }} />
+          <input id="safe-amount" className={styles.input} inputMode="decimal" value={amount} disabled={transactionLocked} onChange={e => { setAmount(e.target.value); clearAuthorization(); }} />
         </div>
         <details id="safe-data-options" className={styles.details}>
           <summary>Data (optional)</summary>
           <label className={styles.label} htmlFor="safe-data">Transaction data (hex)</label>
-          <textarea id="safe-data" className={styles.input} rows={4} value={data} disabled={busy || confirming}
+          <textarea id="safe-data" className={styles.input} rows={4} value={data} disabled={transactionLocked}
             spellCheck={false} autoCapitalize="off" placeholder="0x" maxLength={2 + 60 * 1024 * 2}
             onChange={e => { setData(e.target.value); clearAuthorization(); }} />
           <p className={styles.hint}>For contract calls. Leave empty for a normal transfer. Calls with data can send zero {symbol}.</p>
         </details>
-        <p className={styles.hint}>{prepared ? 'Falcon signature ready. Send the transaction to continue.' : 'First sign with Falcon, then send the transaction.'}</p>
+        <p className={styles.hint}>{confirming ? 'Your transaction is being confirmed. The balance updates after confirmation.' : uncertain ? 'Check the transaction status below before sending again.' : prepared ? 'Falcon signature ready. Send the transaction to continue.' : 'First sign with Falcon, then send the transaction.'}</p>
         <div className={styles.actions}>
-          <button id="safe-sign" className={`btn ${prepared ? `btn-outline ${styles.signedAction}` : 'btn-solid'} ${styles.action}`} disabled={unavailable} onClick={() => void sign()}>
-            {prepared ? 'Signed with Falcon · Sign again' : 'Sign with Falcon'}
+          <button id="safe-sign" className={`btn ${prepared ? `btn-outline ${styles.signedAction}` : 'btn-solid'} ${styles.action}`} disabled={unavailable} aria-busy={buttonActivity === 'sign'} onClick={() => void sign()}>
+            {buttonActivity === 'sign' ? 'Signing…' : prepared ? 'Signed with Falcon · Sign again' : 'Sign with Falcon'}
           </button>
-          <button id="safe-send" className={`btn ${prepared ? 'btn-solid' : 'btn-outline'} ${styles.action}`} disabled={unavailable || !prepared} onClick={() => void send()}>Send transaction <span aria-hidden="true">→</span></button>
+          <button id="safe-send" className={`btn ${prepared ? 'btn-solid' : 'btn-outline'} ${styles.action}`} disabled={unavailable || !prepared} aria-busy={buttonActivity === 'send' || confirming} onClick={() => void send()}>
+            {buttonActivity === 'send' ? 'Sending transaction…' : confirming ? 'Waiting for confirmation…' : uncertain ? 'Check transaction status' : <>Send transaction <span aria-hidden="true">→</span></>}
+          </button>
         </div>
         <SafeFeeQuote fee={fee} config={fees} />
         {prepared?.operation.kind === 'transfer' && <p className={styles.hint}>Signed {formatUnits(prepared.operation.value, 18)} {symbol} to {prepared.operation.recipient}{prepared.operation.data && prepared.operation.data !== '0x' ? ` · ${(prepared.operation.data.length - 2) / 2} data bytes` : ''}.</p>}
