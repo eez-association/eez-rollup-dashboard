@@ -5,9 +5,8 @@ import { fetchEthUsdPrice, type EthUsdPrice } from '../../lib/falcon/ethPrice.ts
 import shared from './FalconPanel.module.css';
 import styles from './SafeCostComparison.module.css';
 
-export function SafeCostComparison({ evidence, l1ChainId, l1Name, l1Symbol, l2Symbol, estimatedL1GasPrice = null, estimateFailed = false }: {
+export function SafeCostComparison({ evidence, l1ChainId, l1Name, l1Symbol, l2Symbol }: {
   evidence: SafeCostEvidence; l1ChainId: number; l1Name: string; l1Symbol: string; l2Symbol: string; checking?: boolean;
-  estimatedL1GasPrice?: bigint | null; estimateFailed?: boolean;
 }) {
   const l1Token = gasToken(l1Symbol, l1ChainId), l2Token = gasToken(l2Symbol, l1ChainId);
   const needsEthPrice = l1Token === 'ETH' || l2Token === 'ETH';
@@ -36,7 +35,7 @@ export function SafeCostComparison({ evidence, l1ChainId, l1Name, l1Symbol, l2Sy
   }, [needsEthPrice]);
   const fee = evidence.receiptFee;
   if (!fee) return null;
-  const costs = simpleGasCosts(fee.gasUsed, fee.gasPrice, estimatedL1GasPrice);
+  const costs = simpleGasCosts(fee.gasUsed, fee.gasPrice, evidence.l1Verified ? fee.l1GasPrice : null);
   const native = (wei: bigint, token: 'ETH' | 'xDAI') => `${formatUnits(wei, 18)} ${token}`;
   const cents = (wei: bigint, token: 'ETH' | 'xDAI') => token === 'xDAI' ? nativeFeeCents(wei, 100_000_000n)
     : price ? nativeFeeCents(wei, price.usdPerEthE8) : native(wei, token);
@@ -51,14 +50,14 @@ export function SafeCostComparison({ evidence, l1ChainId, l1Name, l1Symbol, l2Sy
       </div>
       <div className={styles.total}>
         <span className={shared.label}>Estimated cost without EEZ</span>
-        <strong data-testid="cost-without-eez" data-estimated="true">{costs.withoutEezWei === null ? estimateFailed ? 'Estimate unavailable' : 'Fetching L1 gas price…' : cents(costs.withoutEezWei, l1Token)}</strong>
-        <p className={shared.hint}>{costs.withoutEezWei !== null && <>{native(costs.withoutEezWei, l1Token)}.<br /></>}Same L2 gas used × current L1 gas price.</p>
+        <strong data-testid="cost-without-eez" data-estimated="true">{costs.withoutEezWei === null ? 'Waiting for L1 settlement…' : cents(costs.withoutEezWei, l1Token)}</strong>
+        <p className={shared.hint}>{costs.withoutEezWei !== null && <>{native(costs.withoutEezWei, l1Token)}.<br /></>}Same L2 gas used × the gas price paid for L1 settlement.</p>
       </div>
     </div>
     <details className={shared.details}>
       <summary>How this is calculated</summary>
       <p className={shared.hint}>Actual cost is the gas your L2 transaction used multiplied by the gas price you paid.</p>
-      <p className={shared.hint}>Without EEZ uses that same amount of gas at the L1 gas price on {l1Name} when this comparison was first calculated. It estimates doing the work directly on L1.</p>
+      <p className={shared.hint}>Without EEZ uses that same amount of gas at the effective gas price paid by the verified settlement transaction on {l1Name}. It estimates doing the work directly on L1.</p>
       <p className={shared.hint}>Your L2 fee includes EEZ’s charge for posting and settling on L1. We do not add that charge again.</p>
       {needsEthPrice && priceError && <p className={shared.hint}>{price ? 'Dollar amounts use the last available price.' : 'Dollar estimates are temporarily unavailable; native fees are shown.'}</p>}
       {batch && <>

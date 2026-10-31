@@ -97,8 +97,8 @@ retain their separate gas estimation path.
    Editing the recipient, amount or data invalidates the signature and quote.
    Confirmation is automatic, with one trace button and small L1/L2 hash links.
    The [cost comparison](../falcon/cost-comparison.md) shows the actual paid fee
-   first, then the same gas usage at the L1 gas price fetched once when the
-   comparison is first calculated. That price is kept without refreshing. The comparison is labelled
+   first, then, after verified L1 settlement, the same gas usage at the gas price
+   actually paid in that settlement receipt. That receipt price stays fixed. The comparison is labelled
    as estimated. xDAI uses $1 per token; ETH uses a live ETH/USD quote.
    Chiado/Gnosis are the xDAI fallback; other networks default to ETH.
 

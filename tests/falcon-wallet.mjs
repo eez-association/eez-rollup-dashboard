@@ -470,10 +470,10 @@ try {
       assert(await page.locator('#safe-sign').isDisabled());
       await page.evaluate(() => window.falconWalletTest.release());
       await page.getByText('Estimated cost without EEZ', { exact: true }).waitFor();
-      await page.waitForFunction(() => document.querySelector('[data-testid="cost-without-eez"]')?.textContent === '3.85e-9¢');
+      await page.waitForFunction(() => document.querySelector('[data-testid="cost-without-eez"]')?.textContent === 'Waiting for L1 settlement…');
       assert.equal(await page.getByTestId('cost-without-eez').getAttribute('data-estimated'), 'true');
       assert.equal(await page.getByTestId('cost-actual').textContent(), '2.20e-9¢', 'the actual cost still uses the paid L2 receipt fee');
-      assert(observationCalls.some(call => call.method === 'eth_gasPrice' && call.path.endsWith('/rpc/l1')), 'pending comparison uses the current L1 RPC gas price');
+      assert.equal(observationCalls.filter(call => call.method === 'eth_gasPrice' && call.path.endsWith('/rpc/l1')).length, l1PriceReadsBefore, 'cost comparison never substitutes the 7-wei RPC suggestion');
       assert.equal(await setupSteps.count(), 0, 'a normal transaction does not re-show setup steps');
       assert.match(await page.locator('#safe-send').textContent(), /Waiting for confirmation/);
       assert.equal(await page.locator('#safe-send').getAttribute('aria-busy'), 'true');
@@ -487,7 +487,8 @@ try {
       await page.screenshot({path:'/tmp/falcon-pending-transaction.png',fullPage:true});
       holdSettlement = false;
       await status('Transfer confirmed on');
-      assert.equal(await page.getByTestId('cost-without-eez').getAttribute('data-estimated'), 'true', 'the comparison keeps using current L1 pricing after confirmation');
+      await page.waitForFunction(() => document.querySelector('[data-testid="cost-without-eez"]')?.textContent === '0.55¢');
+      assert.equal(await page.getByTestId('cost-without-eez').getAttribute('data-estimated'), 'true', 'same-gas comparison uses the verified settlement price');
       assert.equal(await page.getByTestId('cost-actual').textContent(), '2.20e-9¢');
       assert.equal(sends.length, attemptsBeforeSuccess + 2, 'one creation and one Falcon-authorized transfer');
       for (const gasWallet of ['0x'+'99'.repeat(20), account]) {
@@ -496,9 +497,9 @@ try {
         assert.equal(await page.locator('#safe-cost-comparison').count(), gasWallet === account ? 1 : 0, 'transfer costs follow their wallet and key');
       }
       assert.match(await page.getByTestId('cost-actual').textContent(), /¢/);
-      await page.waitForFunction(() => document.querySelector('[data-testid="cost-without-eez"]')?.textContent === '3.85e-9¢');
+      await page.waitForFunction(() => document.querySelector('[data-testid="cost-without-eez"]')?.textContent === '0.55¢');
       assert.equal(observationCalls.filter(call => call.method === 'eth_gasPrice' && call.path.endsWith('/rpc/l1')).length,
-        l1PriceReadsBefore + 1, 'one L1 price snapshot is retained through confirmation and wallet switches');
+        l1PriceReadsBefore, 'the verified receipt price is retained without querying RPC gas suggestions');
       assert(!f.requests.some(request => request.url.startsWith('https://api.coinbase.com/')), 'xDAI costs must not fetch or multiply by ETH/USD');
       await page.screenshot({path:'/tmp/falcon-account-transaction.png',fullPage:true});
       await page.setViewportSize({width:390,height:900});

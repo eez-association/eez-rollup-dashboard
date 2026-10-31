@@ -70,8 +70,6 @@ export function FalconSafe({ signer, wallet, deployment, fees }: { signer: Signe
   const confirming = activeSubmission?.kind === 'call' && activeSubmission.hash !== confirmedHash;
   const [l1Hash, setL1Hash] = useState<Hex | null>(null);
   const [costs, setCosts] = useState<SafeCostEvidence | null>(null);
-  const [l1GasEstimate, setL1GasEstimate] = useState<{ sourceHash: Hex; gasPrice: bigint | null; failed: boolean } | null>(null);
-  const l1PriceSnapshots = useRef(new Map<string, bigint>());
   const [checkingCosts, setCheckingCosts] = useState(false);
   const [notice, setNotice] = useState<Notice>(initial);
   const [observation, setObservation] = useState('L1 read');
@@ -131,31 +129,6 @@ export function FalconSafe({ signer, wallet, deployment, fees }: { signer: Signe
   }, [deployment, recoveryScope]);
   useEffect(() => { setCosts(null); }, [deployment]);
   const compareCosts = activeSubmission?.kind === 'call' && activeSubmission.prepared.operation.kind === 'transfer';
-  const costSourceHash = compareCosts && costs?.receiptFee ? costs.sourceHash : null;
-  useEffect(() => {
-    setL1GasEstimate(null);
-    if (!costSourceHash) return;
-    const snapshotKey = `${recoveryKey(deployment, 'controller')}:${costSourceHash}`;
-    const savedPrice = l1PriceSnapshots.current.get(snapshotKey);
-    if (savedPrice !== undefined) {
-      setL1GasEstimate({ sourceHash: costSourceHash, gasPrice: savedPrice, failed: false });
-      return;
-    }
-    const abort = new AbortController();
-    void (async () => {
-      try {
-        const client = l1ReadClient(abort.signal);
-        await checkChain(client, deployment.l1);
-        const gasPrice = await client.getGasPrice();
-        abort.signal.throwIfAborted();
-        l1PriceSnapshots.current.set(snapshotKey, gasPrice);
-        setL1GasEstimate({ sourceHash: costSourceHash, gasPrice, failed: false });
-      } catch {
-        if (!abort.signal.aborted) setL1GasEstimate({ sourceHash: costSourceHash, gasPrice: null, failed: true });
-      }
-    })();
-    return () => abort.abort();
-  }, [costSourceHash, deployment]);
   useEffect(() => {
     const attempt = fundingJournal.attempt;
     if (attempt?.hash && attempt.kind === 'funding' && attempt.chainId === deployment.l1.chainId) {
@@ -894,8 +867,6 @@ export function FalconSafe({ signer, wallet, deployment, fees }: { signer: Signe
       <a id="safe-trace" className={`btn btn-outline ${styles.action} ${styles.traceAction}`} href={`#/visualizer?mode=trace&chain=l2&tx=${activeSubmission.hash}`} target="_blank" rel="noreferrer">See in trace decoder</a>
     </div>}
     {compareCosts && costs && activeSubmission?.hash === costs.sourceHash && <SafeCostComparison evidence={costs} l1ChainId={deployment.l1.chainId} l1Name={deployment.l1.chainName} l1Symbol={symbol} l2Symbol={fees.nativeSymbol}
-      estimatedL1GasPrice={l1GasEstimate?.sourceHash === costs.sourceHash ? l1GasEstimate.gasPrice : null}
-      estimateFailed={l1GasEstimate?.sourceHash === costs.sourceHash && l1GasEstimate.failed}
       checking={checkingCosts} />}
   </section>;
 }
