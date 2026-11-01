@@ -11,8 +11,14 @@ export type SafeInspection = {
 };
 export const SAFE_GUARD_SLOT = "0x4a204f620c8c5ccdca3fd54d003badd85ba500436a431f0cbda4f558c93c34c8";
 const SAFE_MODULE_GUARD_SLOT = "0xb104e0b93118902c651344349b610029d694cfdec91c589c91ebafbcd0289947";
-// Published @safe-global/safe-smart-account@1.5.0 SafeProxy, including metadata.
-const SAFE_150_PROXY_HASH = "0x4e381985ca68b3e5d27b4425fa581c19cf33146d3f887a3cfca96f55528ea46f";
+// Reviewed proxy builds whose executable bodies differ from the Treasury artifact.
+// Bind full runtime hashes; VERSION() or a recognized singleton alone cannot authenticate a proxy.
+const reviewedProxyHashes = new Set<Hex>([
+  // Published @safe-global/safe-smart-account@1.5.0 SafeProxy.
+  "0x4e381985ca68b3e5d27b4425fa581c19cf33146d3f887a3cfca96f55528ea46f",
+  // SafeProxy used by FalconSafeFactory; also pinned in Falcon's deployment bindings.
+  "0xb30ba1e3d8e15fff550f82025529177dabc8e791b5473a8f0e66d5f6f08bffbf",
+]);
 const sentinel = getAddress("0x0000000000000000000000000000000000000001");
 const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 const canonicalSingletons = new Map<Hex, string>([
@@ -60,7 +66,7 @@ export async function inspectSafe(d: Pick<DeploymentIO, "artifacts" | "rpc" | "r
     d.rpc<Hex>(chain, "eth_getStorageAt", [address, "0x0", block.number]),
     d.rpc<Hex>(chain, "eth_getStorageAt", [address, SAFE_GUARD_SLOT, block.number]),
   ]);
-  check(matchingSafeCode(proxy, d.artifacts.contracts.SafeProxy!.runtime) || keccak256(proxy) === SAFE_150_PROXY_HASH, "This address is not a supported Safe proxy");
+  check(matchingSafeCode(proxy, d.artifacts.contracts.SafeProxy!.runtime) || reviewedProxyHashes.has(keccak256(proxy)), "This address is not a supported Safe proxy");
   const singleton = getAddress(`0x${slot.slice(-40)}`);
   const code = await d.rpc<Hex>(chain, "eth_getCode", [singleton, block.number]);
   const implementationVersion = canonicalSingletons.get(keccak256(code))
@@ -100,7 +106,9 @@ export async function inspectSafe(d: Pick<DeploymentIO, "artifacts" | "rpc" | "r
     check(registration[0] && same(registration[1], safeL1) && registration[2] === 0n && proxyCode !== "0x", "Owner adapter's L1 Safe proxy is not registered");
     adapter = { address: owners[0]!, safeL1, manager };
   }
-  check(adapter || signableOwners.length >= Number(threshold), "This Safe requires contract-owner signatures that this setup UI cannot collect");
+  check(adapter || signableOwners.length >= Number(threshold), owners.length === 1
+    ? `This Safe is controlled by contract ${owners[0]}. This setup cannot collect contract-owner signatures; authorize changes through the existing owner.`
+    : "This Safe requires contract-owner signatures that this setup UI cannot collect");
   const again = await d.rpc<{ hash: Hex }>(chain, "eth_getBlockByNumber", [block.number, false]);
   check(again?.hash === block.hash, "Safe state changed during inspection; review again");
   return { address: getAddress(address), singleton, proxyHash: keccak256(proxy), singletonHash: keccak256(code),

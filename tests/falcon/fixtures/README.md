@@ -25,6 +25,14 @@ private keys are ephemeral and are never committed.
   captured after deployment and full explorer verification on eez.dev chain
   699169 on 2026-10-30. Chiado Safe contracts are shared with the original
   deployment. Both networks' wallet scenarios check their respective code hashes.
+- `existing-safes.json`: public Ethereum mainnet and Chiado Safe observations
+  captured on 2026-11-01 at the recorded canonical block numbers/hashes. Contains
+  proxy code, singleton hashes, owner code, threshold, nonce, modules and Guard
+  slots. Mainnet's singleton matches `contracts/test/fixtures/safe-150.json`;
+  Chiado's matches `deployed-code.json`. Tests keep contract recognition separate
+  from authorization and cover the mainnet owner's EIP-7702 delegation. These
+  snapshots do not authorize changes or add a mainnet Falcon network binding.
+  See the [read-only audit](../../../docs/audits/2026-11-01-falcon-safe-compatibility/README.md).
 
 The verifier uses ETHFALCON's pinned SHAKE256 implementation under the included
 [MIT license](ETHFALCON-LICENSE.txt), wrapped by the demo's strict padded-format

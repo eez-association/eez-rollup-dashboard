@@ -1,0 +1,38 @@
+{
+  "passed": true,
+  "scope": "Isolated Safe EVM execution with local fixture owners and stubbed registry; no public RPC or native EEZ execution",
+  "cases": [
+    {
+      "name": "Safe 1.5.0 / mainnet proxy",
+      "proxyHash": "0x4e381985ca68b3e5d27b4425fa581c19cf33146d3f887a3cfca96f55528ea46f",
+      "singletonHash": "0xdda019cbd7c867a533a2a86e5c53434fdc50b13122b5a5ddb4a8df61b31c20f2",
+      "ownerAddition": "0xa7d6b06407aa4c229145c8b415861500cef20dd043f4a738b797455022657272",
+      "controllerCall": "0x959273de775a0167444de7c4d631384db92bf6b113bda758b78262942fe1c50a",
+      "threshold": 1,
+      "owners": [
+        "0x0000000000000000000000000000000000000384",
+        "0xEB4665750b1382DF4AeBF49E04B429AAAc4d9929",
+        "0x444d8202d2467F698bBAC3721498233f07BA3Ed4"
+      ],
+      "modules": [
+        "0x60Ad1F4207F699dB32f966a48618F4f4b7B16DC5"
+      ]
+    },
+    {
+      "name": "SafeL2 1.4.1 / Falcon proxy",
+      "proxyHash": "0xb30ba1e3d8e15fff550f82025529177dabc8e791b5473a8f0e66d5f6f08bffbf",
+      "singletonHash": "0xb1f926978a0f44a2c0ec8fe822418ae969bd8c3f18d61e5103100339894f81ff",
+      "ownerAddition": "0x4d497f7b8b66c726403c819ff3cfc828339e19b7324a428cfbbc8ce17f47b921",
+      "controllerCall": "0xc4f46141776abbbafddc12786b16eff154e4721e8bc8affc2f7539e8c55351d1",
+      "threshold": 1,
+      "owners": [
+        "0x0000000000000000000000000000000000000384",
+        "0xEB4665750b1382DF4AeBF49E04B429AAAc4d9929",
+        "0x444d8202d2467F698bBAC3721498233f07BA3Ed4"
+      ],
+      "modules": [
+        "0x60Ad1F4207F699dB32f966a48618F4f4b7B16DC5"
+      ]
+    }
+  ]
+}

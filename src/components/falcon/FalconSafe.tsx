@@ -849,7 +849,7 @@ export function FalconSafe({ signer, wallet, deployment, fees }: { signer: Signe
       </section> : null}
       <details className={styles.details}><summary>Contracts &amp; authority</summary>
         <p className={styles.hint}>{observation} · Controller nonce {controller.nonce.toString()}.</p>
-        <p className={styles.hint}>{remote.attachment ? 'Your wallet and the controller’s L1 proxy are the two owners, with threshold 1. Existing Safe modules and settings are preserved.' : 'The controller’s L1 proxy is the Safe’s sole owner. No recovery owner or module is installed.'} Keep your encrypted Falcon backup.</p>
+        <p className={styles.hint}>{remote.attachment ? 'Falcon is an additional owner, with threshold 1. Existing owners, modules and settings are preserved; each owner can execute independently.' : 'The controller’s L1 proxy is the Safe’s sole owner. No recovery owner or module is installed.'} Keep your encrypted Falcon backup.</p>
         <p className={styles.contractDetails}><a id="safe-controller" href={`${deployment.l2.explorer}/address/${controller.controller}`} target="_blank" rel="noreferrer">L2 controller · {controller.controller}</a></p>
         <p className={styles.contractDetails}><a href={`${deployment.l1.explorer}/address/${remote.owner}`} target="_blank" rel="noreferrer">L1 owner proxy · {remote.owner}</a></p>
       </details>

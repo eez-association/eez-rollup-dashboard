@@ -4,6 +4,7 @@ import type { CrossChainDeployment } from './crossChainDeployment.ts';
 import { canonicalReceipt, checkChain, sameAddress } from './l1Controller.ts';
 import { controllerOwner, inspectExistingSafe, loadRemoteSafe, safeAbi, safeCallFields, type SafeAttachment } from './safe.ts';
 import { buildSafeTransaction, safeTransactionHash } from '../treasury/safeTransactions.ts';
+import { ownerFingerprint } from '../treasury/safeSetup.ts';
 import { decodeSafeExecution } from '../treasury/safeEvents.ts';
 import { loadMainnetManifest, type SetupNetwork } from '../treasury/mainnetSetup.ts';
 import { checkRecoveryOutcome, findRecoveryByNonce } from './recoveryChecks.ts';
@@ -50,18 +51,20 @@ export function ownerTransaction(d: CrossChainDeployment, safe: Address, owner: 
 export async function prepareOwnerAddition(client: EezClient, d: CrossChainDeployment, controller: Address, target: Address, account: Address, signal: AbortSignal) {
   await checkChain(client, d.l1);
   const safe = await inspectExistingSafe(client, target, signal);
-  if (safe.threshold !== 1 || safe.owners.length !== 1 || !sameAddress(safe.owners[0]!, account)
-    || !safe.signableOwners.some(owner => sameAddress(owner, account))) {
-    throw new Error('Only a 1-of-1 Safe owned by the connected wallet is supported.');
-  }
+  if (safe.threshold !== 1) throw new Error('Adding Falcon requires a Safe with threshold 1. This flow cannot collect multiple owner approvals.');
+  if (!safe.signableOwners.some(owner => sameAddress(owner, account))) throw new Error('Connect a signing wallet that is already an owner of this Safe.');
+  // Inspection is bounded to 50 owners, including the owner about to be added.
+  if (safe.owners.length >= 50) throw new Error('This setup supports at most 50 owners after adding Falcon.');
   const owner = await controllerOwner(client, d, controller, BigInt(safe.block));
   if (BigInt(owner) <= 1n || sameAddress(owner, account) || sameAddress(owner, target)) throw new Error('Invalid Falcon owner proxy.');
+  if (safe.owners.some(existing => sameAddress(existing, owner))) throw new Error('This Falcon controller is already an owner of the Safe.');
   const transaction = ownerTransaction(d, target, owner, BigInt(safe.nonce));
   const hash = await client.readContract({ address: target, abi: safeAbi, functionName: 'getTransactionHash',
     args: [...safeCallFields(target, 0n, transaction.message.data), BigInt(safe.nonce)], blockNumber: BigInt(safe.block) });
   if (hash !== safeTransactionHash(transaction)) throw new Error('Safe transaction hash does not match the reviewed owner change.');
   signal.throwIfAborted();
-  return { transaction, owner };
+  // Enabled modules can change owners without consuming the Safe transaction nonce.
+  return { transaction, owner, ownerFingerprint: ownerFingerprint(safe.owners, safe.threshold) };
 }
 export async function verifyOwnerAddition(client: EezClient, d: CrossChainDeployment, attempt: RecoveryAttempt, signal: AbortSignal) {
   if (attempt.kind !== 'owner' || attempt.chainId !== d.l1.chainId || !attempt.controller || !attempt.hash || attempt.safeNonce === undefined) throw new Error('Owner recovery belongs to a different deployment.');
