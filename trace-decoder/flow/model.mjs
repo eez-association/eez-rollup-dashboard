@@ -280,6 +280,7 @@ export function buildFlowModel(trace, { label, explorers = {}, mode = 'combined'
   // Protocol view can then show proxy -> EEZ -> reentrant proxy in recorded
   // order, while cross-chain links remain explicit evidence, not tree parents.
   const nodeByFrame = new Map(nodes.filter(node => node.frameId).map(node => [node.frameId, node]));
+  for (const node of nodes) if (node.impl?.frameId) nodeByFrame.set(node.impl.frameId, node);
   for (const node of nodes) if (node.frameId) {
     let parent = frames.get(node.frameId)?.parentId;
     const checked = new Set([node.frameId]);
@@ -296,9 +297,13 @@ export function buildFlowModel(trace, { label, explorers = {}, mode = 'combined'
   }
   const crossChainLinks = physical ? [] : nodes.flatMap(node => node.children.flatMap(id => {
     const target = nodes[id];
-    return node.outgoing && target?.crossing && target.chain !== node.chain &&
-      target.crossing.from === node.chain && target.crossing.to === target.chain &&
-      target.crossing.managerFrameId === node.outgoing.managerFrameId ? [{ from: node.id, to: id }] : [];
+    if (!node.outgoing || !target?.crossing || target.chain === node.chain ||
+      target.crossing.from !== node.chain || target.crossing.to !== target.chain ||
+      target.crossing.managerFrameId !== node.outgoing.managerFrameId) return [];
+    const manager = nodeByFrame.get(node.outgoing.managerFrameId);
+    const boundary = manager?.role === 'manager' && manager.chain === node.chain && manager.tx === node.tx
+      && manager.recordedParent === node.id ? manager.id : undefined;
+    return [{ from: node.id, to: id, ...(boundary === undefined ? {} : { manager: boundary }) }];
   }));
   // Linking a remote call moves it out of its recorded executeOnBehalf parent.
   // Retain that observed caller on either chain as a second connection to the
@@ -315,7 +320,10 @@ export function buildFlowModel(trace, { label, explorers = {}, mode = 'combined'
       protocolLinks.push({ from: caller.id, to: target.id });
     }
   }
-  if (!physical && trace.origin?.chain === 'L2') {
+  const initiators = transactions.filter(tx => tx.role === 'trigger' && tx.inFlow === true);
+  const focusedSource = initiators.find(tx => tx.requested) ?? (initiators.length === 1 ? initiators[0] : null);
+  const verifiedL1Trigger = exactLink?.sourceChain === 'L1' && focusedSource?.chain === 'L1' && focusedSource.requested;
+  if (!physical && (focusedSource?.chain === 'L2' || trace.origin?.chain === 'L2' || verifiedL1Trigger)) {
     // Attempts are batch entries. Recover their physical ancestry because the
     // logical tree has relocated the matched application calls into the L2 flow.
     const relatedAttempts = new Set(), checked = new Set();
@@ -325,16 +333,29 @@ export function buildFlowModel(trace, { label, explorers = {}, mode = 'combined'
         if (frame.chain === 'L1' && frame.protocol?.name === '_attemptExecuteImmediateL2Txs') relatedAttempts.add(frame.id);
       }
     };
-    for (const id of scope.frames) includeAncestors(id);
+    // Use the initiating user's logical subtree, even when the searched hash
+    // is its L1 batch; the batch's other entries are not all user executions.
+    const focusedFrames = new Set();
+    const sourceKey = focusedSource ? `${focusedSource.chain}:${focusedSource.hash}:` : null;
+    const pendingFrames = sourceKey ? (trace.logicalRoots || []).filter(id => id.startsWith(sourceKey)) : [];
+    while (pendingFrames.length) {
+      const id = pendingFrames.pop();
+      if (focusedFrames.has(id)) continue;
+      focusedFrames.add(id);pendingFrames.push(...(logical.get(id)?.children || []));
+    }
+    const relevantFrames = focusedFrames.size ? focusedFrames : scope.frames;
+    for (const id of relevantFrames) includeAncestors(id);
     includeAncestors(exactLink?.l1Execution?.frameId);
     // An unresolved occurrence can still belong to this flow. Keep its
     // candidates (including rejected returns) available as execution evidence.
-    for (const outgoing of trace.outgoing || []) if (scope.frames.has(outgoing.frameId)) {
+    for (const outgoing of trace.outgoing || []) if (relevantFrames.has(outgoing.frameId)) {
       for (const id of outgoing.candidates || []) includeAncestors(id);
       for (const candidate of outgoing.rejectedCandidates || []) includeAncestors(candidate.frameId);
     }
-    // Without any attribution, leave the available attempts visible.
-    if (relatedAttempts.size) for (const node of nodes) {
+    // A complete L1-source link identifies the deferred user transaction;
+    // unrelated immediate L2 entries in its preparatory batch are not its calls.
+    // Otherwise, without attribution keep the available attempts as evidence.
+    if (relatedAttempts.size || verifiedL1Trigger) for (const node of nodes) {
       const frame = frames.get(node.frameId);
       if (frame?.chain === 'L1' && frame.protocol?.name === '_attemptExecuteImmediateL2Txs') {
         node.flowAttempt = relatedAttempts.has(frame.id) ? 'related' : 'other';

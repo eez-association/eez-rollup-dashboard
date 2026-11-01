@@ -11,10 +11,11 @@ function protocolTree(model, enabled) {
   if (!enabled || model.mode === 'physical' || !model.nodes.some(node => 'recordedParent' in node)) return null;
   const byId = new Map(model.nodes.map(node => [node.id, node]));
   const logicalParent = new Map(model.nodes.flatMap(node => node.children.map(child => [child, node.id])));
+  const requestedParent = new Map((model.crossChainLinks ?? []).filter(link => link.manager !== undefined).map(link => [link.to, link.manager]));
   const children = new Map(model.nodes.map(node => [node.id, []]));
   const roots = [...model.roots], rootIds = new Set(roots.map(root => root.node));
   for (const node of model.nodes) {
-    const parent = node.recordedParent === undefined ? logicalParent.get(node.id) ?? null : node.recordedParent;
+    const parent = node.recordedParent === undefined ? requestedParent.get(node.id) ?? logicalParent.get(node.id) ?? null : node.recordedParent;
     if (parent !== null && parent !== node.id && byId.has(parent)) children.get(parent).push(node.id);
     else if (!rootIds.has(node.id)) {
       roots.push({ node: node.id, chain: node.chain, tx: node.tx, inFlow: node.inFlow });
@@ -37,7 +38,7 @@ export function traceConnections(rows, protocolLinks = [], crossChainLinks = [])
   const edges = new Map();
   const add = (from, to, protocol) => edges.set(`${from}:${to}`, { from, to, protocol });
   for (const row of rows) if (row.parent !== null) add(row.parent, row.node.id, false);
-  for (const link of crossChainLinks) add(link.from, link.to, false);
+  for (const link of crossChainLinks) add(link.manager ?? link.from, link.to, false);
   for (const link of protocolLinks) add(link.from, link.to, true);
   return [...edges.values()];
 }
@@ -52,16 +53,18 @@ export function traceRows(model, { transaction = "", protocol = false, localRead
   const triggers = model.transactions.filter(tx => tx.role === 'trigger' && tx.inFlow === true);
   const source = triggers.find(tx => tx.requested) ?? (triggers.length === 1 ? triggers[0] : undefined)
     ?? model.transactions.find(tx => tx.requested && !tx.role);
-  if (protocol && source?.chain === 'L2') {
+  if (protocol && source) {
+    const prerequisiteRole = source.chain === 'L1' ? 'settlement' : 'table-load';
     const prerequisites = new Set(roots.filter(root => {
       const tx = txs.get(root.chain + ':' + root.tx);
-      return root.chain === 'L2' && tx?.role === 'table-load' && tx.inFlow === true &&
+      return root.chain === source.chain && tx?.role === prerequisiteRole && tx.inFlow === true &&
         Number.isSafeInteger(tx.block) && Number.isSafeInteger(source?.block) &&
         (tx.block < source.block || tx.block === source.block &&
           Number.isSafeInteger(tx.index) && Number.isSafeInteger(source.index) && tx.index < source.index);
     }).map(root => root.node));
-    // Within L2, a verified earlier table load precedes the transaction that
-    // consumes it. Preserve the other roots' logical order across chains.
+    // Put verified prerequisites before their initiating transaction: L1 batch
+    // preparation for L1 origins, or the L2 table load for L2 origins. Never
+    // compare block heights across chains or guess unknown transaction indices.
     roots.sort((a, b) => {
       const earlier = prerequisites.has(a.node), later = prerequisites.has(b.node);
       if (earlier !== later) return earlier ? -1 : 1;
@@ -71,6 +74,10 @@ export function traceRows(model, { transaction = "", protocol = false, localRead
     });
   }
   const rootIds = new Set(roots.map(root => root.node));
+  const initiatingRoots = new Set(roots.filter(root => {
+    const tx = txs.get(root.chain + ':' + root.tx);
+    return tx?.role === 'trigger' && (tx.inFlow === true || tx.requested || !!transaction);
+  }).map(root => root.node));
   const stack = roots.slice().reverse().map(root => ({ id: root.node, depth: 0, parent: null }));
   const rows = [], visited = new Set(), query = search.trim().toLowerCase();
   while (stack.length) {
@@ -85,7 +92,10 @@ export function traceRows(model, { transaction = "", protocol = false, localRead
     const matches = !query || [node.contract, node.fn, node.address, node.tx, node.input].some(value => String(value || "").toLowerCase().includes(query));
     // Keep top-level reads and evidence; an explicit search also reveals matching local reads.
     const showRead = localReads || !!query || rootIds.has(node.id) || !isLocalRead(node);
-    const visible = inTransaction && (protocol || !node.protocol) && showRead && matches;
+    // A user transaction sent directly to a proxy is still the initiating call,
+    // not optional internal plumbing. Keep its chain and first crossing visible.
+    const initiatingProxy = initiatingRoots.has(node.id) && !!node.outgoing;
+    const visible = inTransaction && (protocol || !node.protocol || initiatingProxy) && showRead && matches;
     if (visible) rows.push({ node, depth: item.depth, parent: item.parent });
     if (visible && collapsed.has(node.id) && !query) continue;
     for (let index = node.children.length - 1; index >= 0; index--) {

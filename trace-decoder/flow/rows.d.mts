@@ -5,4 +5,4 @@ export function traceRows(model: TraceModel, options?: {
 }): TraceRow[];
 
 export interface TraceConnection { from: number; to: number; protocol: boolean }
-export function traceConnections(rows: TraceRow[], protocolLinks?: { from: number; to: number }[], crossChainLinks?: { from: number; to: number }[]): TraceConnection[];
+export function traceConnections(rows: TraceRow[], protocolLinks?: { from: number; to: number }[], crossChainLinks?: { from: number; to: number; manager?: number }[]): TraceConnection[];

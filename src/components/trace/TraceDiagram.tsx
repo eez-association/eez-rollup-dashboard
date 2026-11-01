@@ -50,8 +50,10 @@ export function TraceDiagram({ model, view, transaction, onSelect, selected, tok
   const visibleIds = new Set(visible.map(row => row.node.id));
   const protocolLinks = protocol && !physical ? (model.protocolLinks ?? []).filter(link =>
     visibleIds.has(link.from) && visibleIds.has(link.to) && (!collapsed.has(link.from) || !!search.trim())) : [];
-  const crossChainLinks = protocol && !physical ? (model.crossChainLinks ?? []).filter(link =>
-    visibleIds.has(link.from) && visibleIds.has(link.to) && (!collapsed.has(link.from) || !!search.trim())) : [];
+  const crossChainLinks = protocol && !physical ? (model.crossChainLinks ?? []).filter(link => {
+    const from = link.manager ?? link.from;
+    return visibleIds.has(from) && visibleIds.has(link.to) && (!collapsed.has(from) || !!search.trim());
+  }) : [];
   const initiators = model.transactions.filter(tx => tx.role === 'trigger' && tx.inFlow === true);
   const visibleSteps = visible.map((_, index) => physical ? steps[currentPage * 100 + index]! : currentPage * 100 + index + 1);
   const toggle = (id: number) => setCollapsed(previous => {

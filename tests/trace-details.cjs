@@ -212,6 +212,12 @@ model.recordedView = { ...model, mode: "physical", recordedView: null,
     const proxyArrow = `[data-protocol-link="true"][data-from="${link.from}"][data-to="${link.to}"]`;
     await page.locator(proxyArrow).waitFor({ state: "attached" });
     assert.equal(await page.locator('[data-protocol-link="true"]').count(), 2);
+    for (const crossing of linked.crossChainLinks) {
+      assert.notEqual(crossing.manager,undefined);
+      await page.locator(`path[data-from="${crossing.from}"][data-to="${crossing.manager}"][data-crossing="false"]`).waitFor({state:'attached'});
+      await page.locator(`path[data-from="${crossing.manager}"][data-to="${crossing.to}"][data-crossing="true"]`).waitFor({state:'attached'});
+      assert.equal(await page.locator(`path[data-from="${crossing.from}"][data-to="${crossing.to}"][data-crossing="true"]`).count(),0,'crossing must not bypass EEZL2');
+    }
     assert.equal(await page.locator(`[data-map-node="${link.to}"]`).count(), 1);
     assert.equal(await page.locator(`path[data-crossing="true"][data-to="${link.to}"]`).count(), 1);
     await page.locator(`[data-map-node="${link.from}"]`).click();
@@ -285,6 +291,10 @@ model.recordedView = { ...model, mode: "physical", recordedView: null,
     await page.getByRole('button', { name: 'Call map', exact: true }).click();
     await protocol.check();
     assert.equal(l1Linked.protocolLinks.length, 3);
+    for(const crossing of l1Linked.crossChainLinks){
+      assert.notEqual(crossing.manager,undefined);
+      await page.locator(`path[data-from="${crossing.manager}"][data-to="${crossing.to}"][data-crossing="true"]`).waitFor({state:'attached'});
+    }
     await page.waitForFunction(() => document.querySelector('[aria-label="Initiating transactions"]')?.textContent.includes('L1'));
     const protocolRows = traceRows(l1Linked, { protocol: true, localReads: false });
     for (const [index, row] of protocolRows.entries()) {
@@ -319,6 +329,43 @@ model.recordedView = { ...model, mode: "physical", recordedView: null,
     await page.waitForFunction(() => document.querySelectorAll('[data-protocol-link="true"]').length === 0);
     assert.equal(await page.locator('[data-protocol-link="true"]').count(), 0, 'search does not leave connections to hidden targets');
     await page.getByRole('textbox', { name: 'Find a call' }).fill('');
+    // A user can call the L1 proxy directly. Its entry point must remain
+    // visible even with plumbing hidden, and earlier batch preparation belongs above it.
+    const { M, l1Entry } = await import('../trace-decoder/tests/fixtures/scenarios.mjs');
+    const { protocol: protocolAbi } = await import('../trace-decoder/src/protocol.mjs');
+    const directFixture = scenario({ deep: true });
+    const directTx = directFixture.txs.L1.get(directFixture.trigger);
+    directTx.trace = directTx.trace.calls[0];
+    Object.assign(directTx.transaction, {from:directTx.trace.from,to:directTx.trace.to,input:directTx.trace.input});
+    directFixture.txs.L1.get(directFixture.posting).trace.calls.push(frame(M.L1,M.L1,
+      protocolAbi.L1.encodeFunctionData('_attemptExecuteImmediateL2Txs',[l1Entry('0x'+'00'.repeat(32))])));
+    const directTrace = await decodeCrossChainTrace(directFixture.config,directFixture.trigger);
+    directTrace.transactionLinks = [{state:'complete',sourceChain:'L1',sourceHash:directFixture.trigger,
+      references:directTrace.transactions.map(tx=>({chain:tx.chain,hash:tx.hash,role:tx.hash===directFixture.trigger?'source':tx.chain==='L1'?'l1-post-batch':'l2-delivery'}))}];
+    const directModel=buildFlowModel(directTrace);
+    await page.route('**/trace/api/jobs/*/result',route=>route.fulfill({json:{apiVersion:1,partial:false,observedAt:'2026-10-14T12:00:00Z',model:directModel}}));
+    await page.getByRole('button',{name:'Refresh',exact:true}).click();
+    await page.getByRole('button',{name:'Call map',exact:true}).click();
+    await protocol.check();
+    const entry=directModel.nodes.find(n=>n.tx===directFixture.trigger&&n.path==='0');
+    const post=directModel.nodes.find(n=>n.tx===directFixture.posting&&n.path==='0');
+    const emptyAttempt=directModel.nodes.find(n=>n.fn.startsWith('_attemptExecute'));
+    await page.waitForFunction(({id,fn})=>document.querySelector(`[data-map-node="${id}"]`)?.getAttribute('title')?.includes(fn),{id:entry.id,fn:entry.fn});
+    assert.match(await page.locator(`[data-map-node="${post.id}"]`).getAttribute('title'),/^1\. /);
+    assert.equal(await page.locator(`[data-map-node="${emptyAttempt.id}"]`).count(),0);
+    const postBox=await page.locator(`[data-map-node="${post.id}"]`).boundingBox(),entryBox=await page.locator(`[data-map-node="${entry.id}"]`).boundingBox();
+    assert(postBox.y+postBox.height<entryBox.y,'L1 batch preparation is above the initiating user transaction');
+    await page.getByRole('region',{name:'Related transactions'}).getByRole('button',{name:/Settlement batch/}).click();
+    await page.locator(`[data-map-node="${emptyAttempt.id}"]`).waitFor();
+    await page.getByRole('button',{name:'Show connected flow',exact:true}).click();
+    await protocol.uncheck();
+    const entryCard=page.locator(`[data-map-node="${entry.id}"]`);await entryCard.waitFor();
+    assert.equal(await entryCard.getAttribute('data-chain'),'L1');
+    assert.match(await entryCard.getAttribute('title'),/^1\. /,'the initiating proxy is the first ordinary call');
+    const firstCross=directModel.crossChainLinks.find(link=>link.from===entry.id);
+    await page.locator(`path[data-from="${entry.id}"][data-to="${firstCross.to}"][data-crossing="true"]`).waitFor({state:'attached'});
+    assert.equal(await page.locator(`[data-map-node="${post.id}"]`).count(),0,'internal protocol calls stay hidden');
+    await page.screenshot({path:`${directory}/l1-direct-proxy-entry.png`,fullPage:true});
     const accounts = scenario({ direction: 'L2' }), accountTx = accounts.txs.L2.get(accounts.trigger);
     const callerAddress = fixtureAddress(900), eoaAddresses = [fixtureAddress(1000), fixtureAddress(1001)];
     const codeAddress = fixtureAddress(1002);

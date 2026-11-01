@@ -114,7 +114,7 @@ test('protocol view preserves recorded proxy/manager/reentry order with separate
    {id:4,chain:'L1',tx:'source',path:'0.0.0',contract:'Reentrant proxy',protocol:true,children:[],recordedParent:2},
    {id:5,chain:'L2',tx:'delivery',path:'0',contract:'EEZL2',protocol:true,children:[6],recordedParent:null},
    {id:6,chain:'L2',tx:'delivery',path:'0.0',contract:'Incoming proxy',protocol:true,children:[],recordedParent:5},
-  ],protocolLinks:[{from:4,to:3},{from:6,to:1}],crossChainLinks:[{from:0,to:1},{from:1,to:3}]};
+  ],protocolLinks:[{from:4,to:3},{from:6,to:1}],crossChainLinks:[{from:0,to:1,manager:2},{from:1,to:3}]};
  const before=structuredClone(data),plain=traceRows(data,{protocol:false});
  assert.deepEqual(plain.map(r=>r.node.id),[0,1,3]);
  const rows=traceRows(data,{protocol:true});
@@ -122,9 +122,29 @@ test('protocol view preserves recorded proxy/manager/reentry order with separate
  assert.deepEqual(rows.map(r=>r.parent),[null,0,2,4,null,5,6]);
  assert.deepEqual(rows.find(r=>r.node.id===4).node.children,[3],'recorded proxy can fold its real children');
  const edges=traceConnections(rows,data.protocolLinks,data.crossChainLinks);
- assert(edges.some(e=>e.from===0&&e.to===1&&!e.protocol));
+ assert(edges.some(e=>e.from===2&&e.to===1&&!e.protocol),'protocol crossing leaves EEZ after the local proxy call');
+ assert(!edges.some(e=>e.from===0&&e.to===1),'protocol view does not skip the EEZ call');
  assert(edges.some(e=>e.from===1&&e.to===3&&!e.protocol));
  assert.equal(edges.filter(e=>e.from===4&&e.to===3).length,1,'recorded parent is not drawn twice');
  assert(!traceRows(data,{protocol:true,collapsed:new Set([2])}).some(r=>r.node.id===3),'folding EEZ hides its real reentrant subtree');
  assert.deepEqual(data,before,'projection never mutates the ordinary linked model');
+});
+
+
+test('L1 batch preparation precedes its initiating user transaction only with known same-chain order', () => {
+ const data={origin:{chain:'L1'},transactions:[
+  {chain:'L1',hash:'user',requested:true,role:'trigger',inFlow:true,block:100,index:1},
+  {chain:'L1',hash:'prepare',role:'settlement',inFlow:true,block:100,index:0},
+  {chain:'L1',hash:'later',role:'settlement',inFlow:true,block:100,index:2},
+  {chain:'L1',hash:'unrelated',role:'settlement',inFlow:false,block:99,index:0},
+  {chain:'L2',hash:'delivery',role:'delivery',inFlow:true,block:20,index:0},
+ ]};
+ data.roots=data.transactions.map((tx,node)=>({node,chain:tx.chain,tx:tx.hash}));
+ data.nodes=data.transactions.map((tx,id)=>({id,chain:tx.chain,tx:tx.hash,protocol:!tx.requested,children:[]}));
+ assert.deepEqual(traceRows(data,{protocol:true}).map(r=>r.node.id),[1,0,2,3,4]);
+ assert.deepEqual(traceRows(data,{protocol:false}).map(r=>r.node.id),[0]);
+ data.transactions[1].index=null;
+ assert.deepEqual(traceRows(data,{protocol:true}).map(r=>r.node.id),[0,1,2,3,4],'unknown same-block order is not guessed');
+ data.transactions[1].block=99;
+ assert.deepEqual(traceRows(data,{protocol:true}).map(r=>r.node.id),[1,0,2,3,4]);
 });

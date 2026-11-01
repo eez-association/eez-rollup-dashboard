@@ -1,13 +1,13 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { traceConnections, type TraceRow } from "../../../trace-decoder/flow/rows.mjs";
-import type { TraceChain, TraceModel, TraceNode, TraceProtocolLink } from "../../../trace-decoder/service/types";
+import type { TraceChain, TraceModel, TraceNode, TraceProtocolLink, TraceCrossChainLink } from "../../../trace-decoder/service/types";
 import { TokenNotes, tokenNotesHeight } from "./TokenTransfers";
 import styles from "./CallMap.module.css";
 
 // Port of the standalone viewer's call flow: one box per call, depth runs left to right,
 // execution order top to bottom. Each chain is a horizontal band; the band of the chain
 // the flow starts on is drawn first, so a flow that starts on L2 still reads from the top left.
-const F = { w: 264, h: 112, senderW: 180, senderH: 64, gap: 46, row: 22, pad: 48, side: 28, label: 40 };
+const F = { w: 264, h: 112, senderW: 180, senderH: 64, gap: 46, row: 22, pad: 48, side: 28, label: 40, crossingGap: 12, incomingGap: 10 };
 
 // Boxes wrap names and signatures instead of truncating them, so heights are estimated from
 // text length (average glyph widths of the card fonts) and each row takes its tallest box.
@@ -40,7 +40,7 @@ export function CallMap({ model, rows, steps, physical, selected, onSelect, coll
   collapsed: Set<number>; onToggle: (id: number) => void;
   contractColor: Map<string, number>; contractKey: (node: TraceNode) => string;
   returnLabel: (node: TraceNode) => string; tokens: boolean;
-  protocolLinks: TraceProtocolLink[]; crossChainLinks: TraceProtocolLink[];
+  protocolLinks: TraceProtocolLink[]; crossChainLinks: TraceCrossChainLink[];
 }) {
   const marker = "map-" + useId().replace(/[^a-zA-Z0-9_-]/g, "");
   const scroller = useRef<HTMLDivElement>(null);
@@ -128,7 +128,16 @@ export function CallMap({ model, rows, steps, physical, selected, onSelect, coll
     for (const item of items) if (item.node && item.parent?.sender) connections.push({ parent: item.parent, item, protocol: false });
     const parents = new Set(connections.map(connection => connection.parent));
     for (const item of items) if (parents.has(item)) item.lane = lanesIn[item.col]!++;
-    const corridor = (col: number) => F.gap + Math.max(0, lanesIn[col]! - 1) * 7;
+    const protocolRouting = crossChainLinks.length > 0;
+    const incomingLanes = Array<number>(columns).fill(0);
+    const crossingRoutes = new Map<string, { incoming: number; index: number }>();
+    for (const { parent, item } of connections) if (protocolRouting && parent.chain !== item.chain) {
+      crossingRoutes.set(`${parent.id}:${item.id}`, { incoming: incomingLanes[item.col]!++, index: crossingRoutes.size });
+    }
+    // Reserve separate channels for outgoing and incoming crossings. Calls
+    // entering the same column must not share their final vertical segment.
+    const corridor = (col: number) => F.gap + Math.max(0, lanesIn[col]! - 1) * 7
+      + Math.max(0, (incomingLanes[col + 1] ?? 0) - 1) * F.incomingGap;
     const colX: number[] = [];
     let x = F.side;
     for (let col = 0; col < columns; col++) { colX[col] = x; x += (col === 0 ? F.senderW : F.w) + corridor(col); }
@@ -146,7 +155,8 @@ export function CallMap({ model, rows, steps, physical, selected, onSelect, coll
       bandTop[chain] = y;
       let top = y + F.label + F.pad;
       rowTop[chain] = heights.map(height => { const at = top; top += height + F.row; return at; });
-      bandHeight[chain] = top - F.row + F.pad - y;
+      const padding = chain === bands[0] && protocolRouting ? Math.max(F.pad, 20 + Math.max(0, crossingRoutes.size - 1) * F.crossingGap) : F.pad;
+      bandHeight[chain] = top - F.row + padding - y;
       y += bandHeight[chain];
     }
     for (const item of items) {
@@ -161,15 +171,19 @@ export function CallMap({ model, rows, steps, physical, selected, onSelect, coll
       const crosses = parent.chain !== item.chain;
       const crossing = protocol ? undefined : node.crossing;
       const uncertain = node.kind === "ghost" || !!crossing && crossing.status !== "matched";
+      const route = crossingRoutes.get(`${parent.id}:${item.id}`);
+      let crossingX = trunk;
       let points: [number, number][] = [[parent.x + parent.w, py], [trunk, py], [trunk, cy], [item.x - 2, cy]];
-      if (parent.col + 1 !== item.col) {
+      if (parent.col + 1 !== item.col || route) {
         // Cross the chain boundary before entering the target's column, so the
         // L2 arrow does not pass through the newly aligned L1 proxy box.
-        const railY = crosses && boundary !== null ? boundary : rowTop[item.chain][item.row]! - F.row / 2;
-        points = [[parent.x + parent.w, py], [trunk, py], [trunk, railY], [item.x - 12, railY], [item.x - 12, cy], [item.x - 2, cy]];
+        const railY = crosses && boundary !== null ? boundary - (route ? 12 + route.index * F.crossingGap : 0) : rowTop[item.chain][item.row]! - F.row / 2;
+        const incoming = item.x - 12 - (route?.incoming ?? 0) * F.incomingGap;
+        points = [[parent.x + parent.w, py], [trunk, py], [trunk, railY], [incoming, railY], [incoming, cy], [item.x - 2, cy]];
+        if (route && boundary !== null) crossingX = py < boundary ? incoming : trunk;
       }
       return {
-        item, parent, trunk, crosses, uncertain, failed: node.failed || node.reverted, protocol,
+        item, parent, trunk, crossingX, crosses, uncertain, failed: node.failed || node.reverted, protocol,
         // Recorded traces never connect independent transactions across chains.
         hidden: physical && (crosses || !!parent.node && parent.node.tx !== node.tx),
         d: roundPath(points),
@@ -178,11 +192,18 @@ export function CallMap({ model, rows, steps, physical, selected, onSelect, coll
     // Neighbouring trunks sit only a few pixels apart, so crossings closer than a badge's width
     // share one badge with a numbered entry per crossing instead of stacking badges on top of each other.
     const badges: { x: number; edges: typeof edges }[] = [];
-    for (const edge of edges.filter(edge => edge.crosses && !edge.hidden && boundary !== null).sort((a, b) => a.trunk - b.trunk)) {
+    for (const edge of edges.filter(edge => edge.crosses && !edge.hidden && boundary !== null).sort((a, b) => a.crossingX - b.crossingX)) {
       const last = badges[badges.length - 1];
-      if (last && edge.trunk - last.x < 90) last.edges.push(edge); else badges.push({ x: edge.trunk, edges: [edge] });
+      if (last && edge.crossingX - last.x < 90) last.edges.push(edge); else badges.push({ x: edge.crossingX, edges: [edge] });
     }
-    return { items, edges, badges, bands, bandTop, bandHeight, boundary, width, height: y };
+    // A manager can be the rightmost call. Leave room for the whole crossing
+    // badge, not just its line, so Fit width never clips the label.
+    const paddedWidth = protocolRouting ? Math.max(width, ...badges.map(badge => {
+      const center = badge.x + (badge.edges[badge.edges.length - 1]!.crossingX - badge.x) / 2;
+      const labelWidth = 64 + badge.edges.reduce((sum, edge) => sum + 32 + String(edge.item.step).length * 8, 0);
+      return center + labelWidth / 2 + F.side;
+    })) : width;
+    return { items, edges, badges, bands, bandTop, bandHeight, boundary, width: paddedWidth, height: y };
   }, [rows, steps, model, physical, tokens, protocolLinks, crossChainLinks]);
 
   const { items, edges, badges, bands, bandTop, bandHeight, boundary, width, height } = layout;
@@ -265,7 +286,7 @@ export function CallMap({ model, rows, steps, physical, selected, onSelect, coll
             const from = group[0]!.parent.chain, to = group[0]!.item.chain;
             const mixed = group.some(edge => edge.item.chain !== to);
             const uncertain = group.some(edge => edge.uncertain);
-            return <div key={x} className={styles.badge} data-uncertain={uncertain} style={{ left: x + (group[group.length - 1]!.trunk - x) / 2, top: boundary }}>
+            return <div key={x} className={styles.badge} data-crossing-badge="true" data-uncertain={uncertain} style={{ left: x + (group[group.length - 1]!.crossingX - x) / 2, top: boundary }}>
               {mixed ? <span>L1⇄L2</span> : <span><b data-chain={from}>{from}</b>→<b data-chain={to}>{to}</b></span>}
               {group.map(edge => {
                 const node = edge.item.node!, status = node.crossing?.status;

@@ -21,9 +21,15 @@ uncertain or missing execution; recorded traces never connect independent
 transactions. **Show protocol calls** reconstructs the recorded call tree and
 sibling order within each transaction: outgoing proxy → EEZ → any observed
 reentrant `executeOnBehalf` calls and their targets. Separate matched cross-chain
-arrows connect each outgoing proxy to its remote execution; they do not become
-local tree parents or duplicate execution. Call numbering and folding follow
-this recorded tree. The ordinary linked application view remains unchanged.
+arrows leave the observed EEZ/EEZL2 call after each outgoing proxy and connect
+to its matched remote execution; they do not become local tree parents or duplicate execution. Call numbering and folding follow
+this recorded tree. The ordinary linked application view keeps internal plumbing
+hidden, but retains a directly called initiating proxy so it does not appear to start on the remote
+chain. Protocol view places a verified earlier L1 batch before its L1 user
+transaction (and an L2 table load before its L2 user transaction). Unrelated
+immediate batch attempts are hidden from a verified connected flow; selecting
+the batch or recorded traces restores the full evidence. Crossing routes use
+separate rails to avoid merging distinct calls.
 Static incoming proxies and outgoing manager calls are cross-chain evidence and
 stay visible when ordinary local reads are hidden. Search and hidden frames can
 promote descendants to the nearest visible ancestor. The **Search network**
