@@ -198,9 +198,9 @@ export async function controllerOwner(client: EezClient, d: CrossChainDeployment
 }
 async function loadAttachedSafe(client: EezClient, d: CrossChainDeployment, controller: Address, attachment: SafeAttachment, signal: AbortSignal, blockNumber: bigint): Promise<RemoteSafe> {
   const [safe, owner] = await Promise.all([inspectExistingSafe(client, attachment.target, signal, blockNumber), controllerOwner(client, d, controller, blockNumber)]);
-  if (safe.threshold !== 1 || safe.owners.length !== 2 || sameAddress(owner, attachment.walletOwner)
+  if (safe.threshold !== 1 || sameAddress(owner, attachment.walletOwner)
     || !safe.owners.some(a => sameAddress(a, owner)) || !safe.owners.some(a => sameAddress(a, attachment.walletOwner))) {
-    throw new Error('The existing Safe must retain the wallet and Falcon controller as its two owners, with threshold 1.');
+    throw new Error('The existing Safe must retain the wallet and Falcon controller as owners, with threshold 1.');
   }
   // The registry creates this deterministic proxy on the first cross-chain call.
   const code = await client.getCode({ address: owner, blockNumber });

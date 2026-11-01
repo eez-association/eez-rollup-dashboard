@@ -9,7 +9,6 @@ import { managerAbi } from '../src/lib/falcon/l1Controller.ts';
 import { safeAbi, safeFactoryAbi } from '../src/lib/falcon/safe.ts';
 import { ownerTransaction, attachmentKey } from '../src/lib/falcon/existingSafe.ts';
 import { safeTransactionHash } from '../src/lib/treasury/safeTransactions.ts';
-import { loadTreasuryArtifacts } from '../src/lib/treasury/release.ts';
 import { recoveryKey, scopedRecoveryKey } from '../src/lib/falcon/recoveryJournal.ts';
 import { COMPOSER_DISCOVERY_ABI, COMPOSER_DISCOVERY_ADDRESS, COMPOSER_DISCOVERY_MARKER } from '../src/lib/composerDiscovery.ts';
 import { fixture, origin } from './falcon/fixture.mjs';
@@ -19,12 +18,15 @@ const a=n=>toHex(n,{size:20}), eq=(a,b)=>a.toLowerCase()===b.toLowerCase();
 const wallet=privateKeyToAccount(toHex(12345,{size:32})),account=wallet.address,controller=a(300),owner=a(301),singleton=a(302),module=a(303);
 const treasury=treasuryFixture(d,origin),safe=treasury.config.safeL1,l2Safe=treasury.config.safeL2;
 const code=JSON.parse(readFileSync(new URL('./falcon/fixtures/deployed-code.json',import.meta.url),'utf8'));
-const artifacts=await loadTreasuryArtifacts();
+const snapshots=JSON.parse(readFileSync(new URL('./falcon/fixtures/existing-safes.json',import.meta.url),'utf8'));
+const safe150=JSON.parse(readFileSync(new URL('../contracts/test/fixtures/safe-150.json',import.meta.url),'utf8'));
 const blockNumber=d.l1.anchor.blockNumber+100n,blockHash=keccak256(toHex('owner-block')),txHash=keccak256(toHex('owner-transaction'));
 const signed=[],sends=[],reads=[];
-let keyHash,publicKey,owners=[account],threshold=1n,nonce=7n,confirmed=false,changeNonce=false;
+const other=a(999),replacement=a(998);
+let keyHash,publicKey,owners=[account,other],threshold=1n,nonce=7n,confirmed=false,changeNonce=false,changeOwners=false,walletMismatch=false;
+let proxy=snapshots.mainnet.proxy.runtime,implementation=safe150.contracts.Safe.runtime,version='1.5.0';
 const ownerTx=()=>ownerTransaction(d,safe,owner,7n);
-async function rpc({method,params=[],chain}) {
+async function rpc({method,params=[],chain,walletRead=false}) {
  if(!method)return null;
  reads.push({method,params,chain});
  if(method==='eth_chainId')return chain;
@@ -35,7 +37,7 @@ async function rpc({method,params=[],chain}) {
  if(method==='eth_getLogs')return [];
  if(method==='eth_getTransactionBySenderAndNonce')throw Object.assign(new Error('pruned history unavailable: earliest available '+(blockNumber-10n)),{code:4444});
  if(method==='eth_getTransactionCount')return confirmed && (['latest','pending'].includes(params[1]) || BigInt(params[1])>=blockNumber)?'0x3':'0x2';
- if(method==='eth_getCode')return eq(params[0],safe)?artifacts.contracts.SafeProxy.runtime:eq(params[0],singleton)?artifacts.contracts.Safe.runtime:Object.values(code).find(c=>eq(c.address,params[0]))?.code??'0x';
+ if(method==='eth_getCode')return eq(params[0],safe)?proxy:eq(params[0],singleton)?implementation:eq(params[0],account)?snapshots.mainnet.owners[0].code:eq(params[0],snapshots.chiado.owners[0].address)?snapshots.chiado.owners[0].code:Object.values(code).find(c=>eq(c.address,params[0]))?.code??'0x';
  if(method==='eth_getStorageAt')return params[1]==='0x0'?pad(singleton):zeroHash;
  if(method==='eth_getBlockByNumber'){
   const side=BigInt(chain)===BigInt(d.l1.chainId)?d.l1:d.l2;
@@ -56,7 +58,7 @@ async function rpc({method,params=[],chain}) {
   const {functionName,args}=decodeFunctionData({abi,data});
   if(functionName==='controllers')keyHash=args[0];
   const values={verifier:d.l2.verifier.address,eezL2:d.l2.manager,l1ChainId:BigInt(d.l1.chainId),ROLLUP_ID:d.l2.rollupId,USE_GAS_LEFT:false,controllers:controller,publicKeyHash:keyHash,nonce:eq(to,safe)?nonce:0n,
-   singleton:d.l1.safe.singleton.address,fallbackHandler:d.l1.safe.fallbackHandler.address,computeCrossChainProxyAddress:owner,safes:zeroAddress,VERSION:'1.4.1',getOwners:owners,getThreshold:threshold,getModulesPaginated:[[module],a(1)],authorizedProxies:[false,zeroAddress,0n]};
+   singleton:d.l1.safe.singleton.address,fallbackHandler:d.l1.safe.fallbackHandler.address,computeCrossChainProxyAddress:owner,safes:zeroAddress,VERSION:version,getOwners:walletRead&&walletMismatch?[account,replacement]:owners,getThreshold:threshold,getModulesPaginated:[[module],a(1)],authorizedProxies:[false,zeroAddress,0n]};
   const result=functionName==='getTransactionHash'?safeTransactionHash(ownerTransaction(d,safe,owner,args[9])):values[functionName];
   assert.notEqual(result,undefined,functionName);return encodeFunctionResult({abi,functionName,result});
  }
@@ -72,6 +74,7 @@ try {
    assert.equal(typed.domain.verifyingContract.toLowerCase(),safe.toLowerCase());
    assert.equal(typed.message.to.toLowerCase(),safe.toLowerCase());assert.equal(typed.message.data,ownerTx().message.data);
    if(changeNonce){nonce++;changeNonce=false;}
+   if(changeOwners){owners=[account,replacement];changeOwners=false;}
    return wallet.signTypedData(typed);
   }
   if(request.method==='eth_sendTransaction'){
@@ -79,7 +82,7 @@ try {
    const {functionName,args}=decodeFunctionData({abi:safeAbi,data:tx.data});assert.equal(functionName,'execTransaction');assert(eq(args[0],safe));assert.equal(args[2],ownerTx().message.data);
    sends.push(tx);return txHash;
   }
-  return rpc(request);
+  return rpc({...request,walletRead:true});
  });
  await page.addInitScript(({account,chain,entries})=>{
   const listeners=new Map();const state=window.existingSafeWallet={chain,loseReply:true};
@@ -106,10 +109,15 @@ try {
  await page.locator('[aria-labelledby="safe-heading"]').screenshot({path:'/tmp/falcon-add-controller.png'});
  assert.equal(await page.getByText(/Gas wallet ·/).count(),0);
  const status=text=>page.getByRole('status').filter({hasText:text}).waitFor();
- owners=[a(999)];await add.click();await status('Only a 1-of-1 Safe');assert.equal(signed.length,0);
- owners=[account,a(999)];await add.click();await status('Only a 1-of-1 Safe');assert.equal(signed.length,0);
- owners=[account];threshold=2n;await add.click();await status('Unsupported Safe owners');assert.equal(signed.length,0);
- threshold=1n;changeNonce=true;await add.click();await status('Safe owners or nonce changed');assert.equal(sends.length,0);nonce=7n;
+ owners=[other];await add.click();await status('Connect a signing wallet');assert.equal(signed.length,0);
+ owners=[account,other];threshold=2n;await add.click();await status('requires a Safe with threshold 1');assert.equal(signed.length,0);
+ threshold=1n;proxy=snapshots.chiado.proxy.runtime;implementation=code.singleton.code;version='1.4.1';owners=[snapshots.chiado.owners[0].address];
+ await add.click();await status('controlled by contract '+snapshots.chiado.owners[0].address);assert.equal(signed.length,0);
+ owners=[account,other];proxy='0x6000';await add.click();await status('not a supported Safe proxy');assert.equal(signed.length,0);
+ proxy=snapshots.mainnet.proxy.runtime;implementation=safe150.contracts.Safe.runtime;version='1.5.0';
+ walletMismatch=true;await add.click();await status('Wallet and dashboard disagree');assert.equal(signed.length,0);walletMismatch=false;
+ changeNonce=true;await add.click();await status('Safe owners or nonce changed');assert.equal(sends.length,0);nonce=7n;
+ changeOwners=true;await add.click();await status('Safe owners or nonce changed');assert.equal(sends.length,0);owners=[account,other];
  await page.locator('#backup-options input[name="password"]').fill('existing-safe-test-password');
  await page.locator('#backup-options input[name="confirmation"]').fill('existing-safe-test-password');await page.locator('#remember').click();
  await page.waitForFunction(()=>document.querySelector('#key-status')?.textContent.includes('saved'));
@@ -126,7 +134,7 @@ try {
  await status('Checking automatically');assert.equal(sends.length,1,'reload never resubmits');
  assert.equal(await page.getByText('Owner transaction recovery',{exact:true}).count(),0);
  assert.equal(await page.getByLabel('Owner transaction hash',{exact:true}).count(),0);
- owners=[owner,account];nonce=8n;confirmed=true;
+ owners=[owner,account,other];nonce=8n;confirmed=true;
  await page.getByRole('heading',{name:'Your Safe account',exact:true}).waitFor();
  assert.equal(await page.locator('#safe-address').getAttribute('title'),safe);
  await page.locator('#safe-sign').waitFor();await page.locator('#safe-send').waitFor();await page.locator('#safe-fund').waitFor();
@@ -137,5 +145,5 @@ try {
  await page.reload();await page.locator('#unlock-saved').waitFor();await page.getByLabel('Saved key password',{exact:true}).fill('existing-safe-test-password');await page.locator('#unlock-saved').click();
  await page.getByRole('heading',{name:'Your Safe account',exact:true}).waitFor();assert.equal(sends.length,1);
  assert(!reads.some(r=>r.method==='eth_call'&&eq(r.params[0].to,l2Safe)),'attachment never reads or changes the L2 mirror');
- await f.close();console.log('PASS: Treasury prefill, 1/1 wallet checks, typed Safe signature, stale nonce rejection, L1-only owner addition, lost-reply recovery, reload and retained Safe menu');
+ await f.close();console.log('PASS: Safe 1.5.0 1-of-2 with EIP-7702, Chiado contract-owner diagnosis, strict proxy checks, wallet/owner/nonce changes, typed signature, 1-of-3 recovery and reload, retained modules/menu');
 }finally{await browser.close();}

@@ -102,13 +102,15 @@ export function ExistingFalconSafe({ wallet, deployment, controller, publicKey, 
       const review = await prepareOwnerAddition(client, deployment, controller.controller, target, session.account, signal);
       // Validate the wallet's own chain and Safe view before its signature prompt.
       const walletReview = await prepareOwnerAddition(walletClient, deployment, controller.controller, target, session.account, signal);
-      if (safeTransactionHash(walletReview.transaction) !== safeTransactionHash(review.transaction)) throw new Error('Wallet and dashboard disagree about this Safe.');
+      if (safeTransactionHash(walletReview.transaction) !== safeTransactionHash(review.transaction)
+        || walletReview.ownerFingerprint !== review.ownerFingerprint) throw new Error('Wallet and dashboard disagree about this Safe.');
       if (!current()) throw new Error('Wallet, key or Safe changed. Review again.');
       setMessage('Sign the Safe transaction to add your Falcon controller. The threshold stays at 1.');
       const signature = await session.provider.request({ method: 'eth_signTypedData_v4', params: [session.account, safeTypedDataJSON(review.transaction)] }) as Hex;
       const signatures = await packEOAApprovals(review.transaction, [session.account], 1, [{ owner: session.account, signature }]);
       const fresh = await prepareOwnerAddition(client, deployment, controller.controller, target, session.account, signal);
-      if (safeTransactionHash(fresh.transaction) !== safeTransactionHash(review.transaction)) throw new Error('Safe owners or nonce changed. Review and sign again.');
+      if (safeTransactionHash(fresh.transaction) !== safeTransactionHash(review.transaction)
+        || fresh.ownerFingerprint !== review.ownerFingerprint) throw new Error('Safe owners or nonce changed. Review and sign again.');
       const data = encodeSafeExecution(review.transaction, signatures);
       const gas = await client.estimateGas({ account: session.account, to: target, data });
       const nonce = await walletClient.getTransactionCount({ address: session.account, blockTag: 'pending' });
@@ -130,7 +132,7 @@ export function ExistingFalconSafe({ wallet, deployment, controller, publicKey, 
     <label className={styles.label} htmlFor="falcon-existing-safe">L1 Safe address</label>
     <input id="falcon-existing-safe" className={styles.input} value={journal.attempt?.to ?? address} disabled={busy || !!journal.attempt || disabled}
       placeholder="0x…" spellCheck={false} onChange={event => { setAddress(event.target.value); setMessage(''); }} />
-    <p className={styles.hint}>Your connected wallet must be the only owner, with threshold 1. Adding Falcon keeps your wallet and changes the Safe to 1 of 2 owners.</p>
+    <p className={styles.hint}>Connect an existing owner wallet. Threshold must be 1. Adding Falcon keeps all owners and modules; any owner can execute independently.</p>
     <div className={styles.safeChoices}>
       <button className={`btn btn-outline ${styles.action}`} disabled={disabled || busy || !!journal.attempt || !!journal.error} onClick={onBack}>Go back</button>
       <button className={`btn btn-solid ${styles.action}`} disabled={disabled || busy || !!journal.attempt || !!journal.error || !wallet.address} onClick={() => void addOwner()}>Add Falcon controller</button>

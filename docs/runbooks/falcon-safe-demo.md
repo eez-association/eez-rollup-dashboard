@@ -62,12 +62,20 @@ retain their separate gas estimation path.
    flow on L1, with the controller's L1 proxy as sole owner. **Add to existing
    Safe** instead opens an L1 address field. A completed Treasury setup on the
    same network supplies its L1 Safe as an editable suggestion.
-   **Add Falcon controller** supports a verified Safe whose only owner is the connected wallet
-   and whose threshold is 1. The wallet signs an EIP-712 Safe transaction, then
-   submits it on L1 to add the controller's deterministic L1 proxy. The wallet
-   remains an owner and the threshold stays at 1 (1 of 2). Existing modules and
-   handler are retained; the L2 mirror is not modified. Nonce or ownership changes
-   invalidate the review. The attached Safe address is remembered in this browser,
+   **Add Falcon controller** supports a verified Safe with threshold 1 when the
+   connected wallet is an existing EOA owner (including EIP-7702 delegated EOAs).
+   Safe / SafeL2 1.3.0, 1.4.1 and 1.5.0 are accepted on L1, including the proxy
+   used by the Falcon factory. Proxy and singleton bytecode are checked separately;
+   a reported version alone is insufficient. The wallet signs an EIP-712 Safe transaction,
+   then submits it on L1 to add the controller's deterministic L1 proxy. All existing
+   owners remain; the threshold stays at 1 (for example, 1 of 2 becomes 1 of 3).
+   Each owner can execute independently. Existing modules and handler are retained;
+   the L2 mirror is not modified. Higher thresholds, Guards, and additions exceeding
+   50 owners are rejected; this flow never lowers a threshold or collects contract-owner
+   approvals. A Safe controlled solely by a contract reports that owner's address
+   and must be administered through it. Nonce or ownership changes invalidate the
+   review, including module-driven owner changes without a nonce increment. The wallet
+   RPC and dashboard RPC must agree before signing. The attached Safe address is remembered in this browser,
    scoped to the deployment and Falcon key, and its live authority is checked on
    every load and transaction. The registry can provision the owner proxy on the
    first cross-chain call.
@@ -181,12 +189,14 @@ available if browser persistence fails.
 
 ## Validation
 
-Use the repository's `.nvmrc` and locked dependencies:
+Use the repository's `.nvmrc`, locked dependencies and Anvil 1.7.1 for the
+isolated EVM regression:
 
 ```bash
 npm ci
 npm test
 npm run build
+node tests/integration/falcon-existing-safe.mjs
 ```
 
 With a disposable preview running (for example port 8083), execute:
@@ -204,6 +214,14 @@ failures and check exact quoted sends and late hashes. RPC and receipt data are
 test doubles; they do not establish live settlement or installed-extension
 compatibility. Unit tests cover fee limits/expiry/nonce changes, signature and
 receipt binding, independent interoperability vectors and cost accounting.
+The isolated Anvil regression uses the observed Safe proxy builds and published
+1.4.1/1.5.0 singleton runtimes. It executes typed owner additions and subsequent
+caller-authenticated Safe calls, checking the retained owners, modules and handler.
+Its registry and cross-chain caller are test fixtures, not native EEZ settlement.
+The [compatibility audit](../audits/2026-11-01-falcon-safe-compatibility/README.md)
+records the requested Ethereum mainnet Safe's read-only checks. Safe compatibility
+does not configure a mainnet Falcon deployment: the verified routes above still
+target Chiado.
 The original devnet deployment and protocol pins remain unchanged. The eez.dev
 addition deploys the same verifier/controller source to the second network;
 it does not include follower replay or a live Safe transfer rehearsal.

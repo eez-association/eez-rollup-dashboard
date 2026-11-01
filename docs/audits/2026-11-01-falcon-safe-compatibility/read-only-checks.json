@@ -1,0 +1,74 @@
+{
+  "mainnet": {
+    "chainId": 1,
+    "address": "0x1a38210B3330aa0B41267D605f14C699A7189b60",
+    "blockNumber": "26319996",
+    "blockHash": "0x740b1fdeb18a23cd5e3305e27729c2716e0ae17035e6bf3c336f999b4550f411",
+    "inspection": {
+      "address": "0x1a38210B3330aa0B41267D605f14C699A7189b60",
+      "singleton": "0xFf51A5898e281Db6DfC7855790607438dF2ca44b",
+      "proxyHash": "0x4e381985ca68b3e5d27b4425fa581c19cf33146d3f887a3cfca96f55528ea46f",
+      "singletonHash": "0xdda019cbd7c867a533a2a86e5c53434fdc50b13122b5a5ddb4a8df61b31c20f2",
+      "owners": [
+        "0xF35960302a07022aBa880DFFaEC2Fdd64d5BF1c1",
+        "0xcEAF908C05B277E92e89b51B281Ec76305b9A141"
+      ],
+      "threshold": 1,
+      "nonce": "4",
+      "block": "0x1919c7c",
+      "signableOwners": [
+        "0xF35960302a07022aBa880DFFaEC2Fdd64d5BF1c1",
+        "0xcEAF908C05B277E92e89b51B281Ec76305b9A141"
+      ],
+      "modules": [
+        "0x60Ad1F4207F699dB32f966a48618F4f4b7B16DC5"
+      ],
+      "moreModules": false
+    },
+    "simulatedOwner": "0x00000000000000000000000000000000000faca0",
+    "simulations": [
+      {
+        "from": "0xF35960302a07022aBa880DFFaEC2Fdd64d5BF1c1",
+        "result": "0x0000000000000000000000000000000000000000000000000000000000000001"
+      },
+      {
+        "from": "0xcEAF908C05B277E92e89b51B281Ec76305b9A141",
+        "result": "0x0000000000000000000000000000000000000000000000000000000000000001"
+      }
+    ],
+    "baselineResult": {
+      "result": {
+        "address": "0x1a38210B3330aa0B41267D605f14C699A7189b60",
+        "singleton": "0xFf51A5898e281Db6DfC7855790607438dF2ca44b",
+        "proxyHash": "0x4e381985ca68b3e5d27b4425fa581c19cf33146d3f887a3cfca96f55528ea46f",
+        "singletonHash": "0xdda019cbd7c867a533a2a86e5c53434fdc50b13122b5a5ddb4a8df61b31c20f2",
+        "owners": [
+          "0xF35960302a07022aBa880DFFaEC2Fdd64d5BF1c1",
+          "0xcEAF908C05B277E92e89b51B281Ec76305b9A141"
+        ],
+        "threshold": 1,
+        "nonce": "4",
+        "block": "0x1919c7c",
+        "signableOwners": [
+          "0xF35960302a07022aBa880DFFaEC2Fdd64d5BF1c1",
+          "0xcEAF908C05B277E92e89b51B281Ec76305b9A141"
+        ],
+        "modules": [
+          "0x60Ad1F4207F699dB32f966a48618F4f4b7B16DC5"
+        ],
+        "moreModules": false
+      }
+    },
+    "safeTransactionHash": "0x84270c06ad7c0a5fcc542ded72361a4d65989efb392f3c31b1b623c77e4fa8fa"
+  },
+  "chiado": {
+    "chainId": 10200,
+    "address": "0x7e044b95c8560B9347E40297E9aC5247353B63a2",
+    "blockNumber": "23793434",
+    "blockHash": "0xca4a30370335afa2c948269d494db0888300ef00ffab79636112fe340e4683ff",
+    "inspectionError": "This Safe is controlled by contract 0x71Fa743C56Eb8f389c1cbA367B9d80f86A25C922. This setup cannot collect contract-owner signatures; authorize changes through the existing owner.",
+    "baselineResult": {
+      "error": "This address is not a supported Safe proxy"
+    }
+  }
+}

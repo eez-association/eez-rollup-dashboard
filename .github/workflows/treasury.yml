@@ -49,6 +49,7 @@ jobs:
           npm run build:treasury-release
       - name: Isolated deployment and source verification
         run: |
+          node tests/integration/falcon-existing-safe.mjs
           node tests/integration/treasury-source-verification.mjs
           node tests/integration/treasury-paired-setup.mjs
           node tests/integration/treasury-paired-setup.mjs --current-bridge
