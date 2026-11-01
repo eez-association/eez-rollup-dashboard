@@ -170,7 +170,7 @@ export function TraceDetailView({ hash, source, ready, onBack }: {
       <a className={`${visualizerStyles.tab} ${visualizerStyles.activeTab}`} href="#/visualizer?mode=trace" aria-current="page">Trace</a>
     </nav>
     <form className={styles.searchBar} onSubmit={inspect}>
-      <label>Source network<select value={chain} onChange={event => setChain(event.target.value as TraceSource)}>
+      <label>Search network<select value={chain} onChange={event => setChain(event.target.value as TraceSource)}>
         <option value="auto">Detect automatically</option><option value="l1">{config.l1NetworkName} · L1</option><option value="l2">{config.rollupName} · L2</option>
       </select></label>
       <label className={styles.query}>Transaction hash<input value={query} onChange={event => setQuery(event.target.value)}

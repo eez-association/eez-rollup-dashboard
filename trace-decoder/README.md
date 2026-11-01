@@ -18,8 +18,24 @@ results remain visible. Searching also reveals matching local reads.
 The native call flow connects visible callers to their children, numbers
 calls, and highlights connections for the selected call. Dashed connectors mark
 uncertain or missing execution; recorded traces never connect independent
-transactions. Search and hidden protocol frames can promote descendants to the
-nearest visible ancestor. **Token transfers** (on by
+transactions. **Show protocol calls** reconstructs the recorded call tree and
+sibling order within each transaction: outgoing proxy → EEZ → any observed
+reentrant `executeOnBehalf` calls and their targets. Separate matched cross-chain
+arrows leave the observed EEZ/EEZL2 call after each outgoing proxy and connect
+to its matched remote execution; they do not become local tree parents or duplicate execution. Call numbering and folding follow
+this recorded tree. The ordinary linked application view keeps internal plumbing
+hidden, but retains a directly called initiating proxy so it does not appear to start on the remote
+chain. Protocol view places a verified earlier L1 batch before its L1 user
+transaction (and an L2 table load before its L2 user transaction). Unrelated
+immediate batch attempts are hidden from a verified connected flow; selecting
+the batch or recorded traces restores the full evidence. Crossing routes use
+separate rails to avoid merging distinct calls.
+Static incoming proxies and outgoing manager calls are cross-chain evidence and
+stay visible when ordinary local reads are hidden. Search and hidden frames can
+promote descendants to the nearest visible ancestor. The **Search network**
+selector only locates the requested hash; the initiating transaction label and
+L2 table-load ordering follow decoded trigger evidence, including when the
+searched hash belongs to an L1 settlement. **Token transfers** (on by
 default) shows ERC20 Transfer events on call cards only when the same event
 appears in both the trace and the committed receipt; amounts describe events,
 not net balance changes. Prepared results without an expected L2 delivery are labeled separately

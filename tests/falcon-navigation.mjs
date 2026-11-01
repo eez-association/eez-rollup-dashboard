@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { chromium } from 'playwright';
 import { fixture, origin, shortcut, visibilityKey } from './falcon/fixture.mjs';
 
-const browser = await chromium.launch({ headless: true, chromiumSandbox: true });
+const browser = await chromium.launch({ headless: true, chromiumSandbox: process.env.TREASURY_BROWSER_SANDBOX !== '0' });
 try {
   const f = await fixture(browser);
   await f.page.goto(origin + '/#/falcon-demo');

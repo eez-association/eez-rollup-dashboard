@@ -162,3 +162,21 @@ test('startup reuses one live network check without accepting different saved bi
   const changed=structuredClone(selected);patch(changed);assert.throws(()=>assertSameInfrastructure(changed,observed.network),/Network contracts changed/);
  }
 });
+
+
+test('network rechecks ignore hex casing and object order without rewriting saved identities', async () => {
+ const {io}=fixture();const {network}=await discoverInfrastructure(io,dashboard);
+ const saved=structuredClone(network);
+ const counterpart=address(0xabcdef);
+ saved.contracts.bridgeL1.bindings.counterpart=counterpart.toLowerCase();
+ const before=JSON.stringify(saved),current=structuredClone(saved);
+ current.contracts.bridgeL1.bindings={...current.contracts.bridgeL1.bindings,counterpart};
+ current.contracts.bridgeL1=Object.fromEntries(Object.entries(current.contracts.bridgeL1).reverse());
+ current.protocol[0].implementationHash='0x'+current.protocol[0].implementationHash.slice(2).toUpperCase();
+ assertSameInfrastructure(saved,current);
+ assert.equal(JSON.stringify(saved),before,'Comparisons never rekey an existing setup journal');
+ for(const patch of [n=>n.contracts.bridgeL1.bindings.counterpart=address(999),n=>n.contracts.bridgeL1.hash=toHex(99,{size:32}),
+   n=>n.contracts.bridgeL1.bindings.rollupId='2',n=>n.bridgeImplementations.l1.address=address(999),n=>n.protocol[0].implementationHash=toHex(88,{size:32})]){
+  const changed=structuredClone(current);patch(changed);assert.throws(()=>assertSameInfrastructure(saved,changed),/Network contracts changed/);
+ }
+});

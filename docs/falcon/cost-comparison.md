@@ -9,16 +9,16 @@ Both cards start with the measured gas cost in the network's native token:
 
 - **Actual cost:** verified L2 receipt `gasUsed × effectiveGasPrice`.
 - **Estimated cost without EEZ:** the **same L2 gas used** multiplied by the
-  L1 RPC `eth_gasPrice` suggestion fetched once when the comparison is first
-  calculated. Keep this price snapshot for that transaction.
+  verified L1 settlement receipt's `effectiveGasPrice`, including its priority fee.
 
-The comparison is explicitly labelled as estimated. Its initial price is retained
-through confirmation and wallet switches; it is not polled, refreshed, or replaced
-by the settlement receipt price. The RPC suggestion can exclude tips paid by
-individual transactions. A failed estimate read displays as unavailable and does
-not block settlement checks. Both comparisons use gas used, never
-gas limit or a separately benchmarked L1 gas count. A real direct L1 execution
-could consume different gas; this remains a same-gas estimate.
+The actual L2 fee appears after its receipt is verified. The L1 estimate displays
+**Waiting for L1 settlement…** until canonical L1 execution and the Safe result
+are verified. It never substitutes the RPC's `eth_gasPrice` suggestion, which may
+be only 7 wei on an idle Chiado network even when the Composer pays a 1-gwei tip.
+The verified receipt price remains fixed for that transaction through wallet
+switches. Both comparisons use gas used, never gas limit or a separately
+benchmarked L1 gas count. A real direct L1 execution could consume different gas;
+this remains a same-gas estimate rather than an actual direct-L1 transaction.
 
 ## Currency conversion
 

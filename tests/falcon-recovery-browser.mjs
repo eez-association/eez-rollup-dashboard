@@ -55,7 +55,7 @@ async function showRecovery(f, kind) {
   if (kind === 'controller') await f.page.getByText('Earlier setup needs attention', { exact: true }).click();
 }
 
-const browser = await chromium.launch({ headless: true, chromiumSandbox: true,
+const browser = await chromium.launch({ headless: true, chromiumSandbox: process.env.TREASURY_BROWSER_SANDBOX !== '0',
   ...(process.env.PLAYWRIGHT_CHANNEL ? { channel: process.env.PLAYWRIGHT_CHANNEL } : {}) });
 try {
   for (const kind of ['funding', 'controller']) {

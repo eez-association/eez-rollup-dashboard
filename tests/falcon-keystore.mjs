@@ -6,7 +6,7 @@ import { decryptKeystore } from '../src/lib/falcon/keystore.ts';
 import { toHex } from '../src/lib/falcon/falcon.ts';
 import { BROWSER_KEYSTORE_KEY } from '../src/lib/falcon/browserKeystore.ts';
 
-const browser = await chromium.launch({ headless: true, chromiumSandbox: true });
+const browser = await chromium.launch({ headless: true, chromiumSandbox: process.env.TREASURY_BROWSER_SANDBOX !== '0' });
 try {
   const { context, page, errors, requests, open } = await fixture(browser);
   let downloads = 0;

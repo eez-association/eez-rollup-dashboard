@@ -337,7 +337,9 @@ export function App() {
     try {
       const cached = crossChainGeneric.getProxy(target, direction);
       if (cached) await crossChainGeneric.verifyProxy(target, cached, direction);
-      if (wallet.address && !await switchBridgeNetwork(crossChainRoute(direction).source)) {
+      // Selecting a call route must not change the independent bridge form.
+      const switchCallNetwork = direction === "l1-to-l2" ? wallet.switchToL1 : wallet.switchToL2;
+      if (wallet.address && !await switchCallNetwork()) {
         setProxySelectionError("Wallet network switch was cancelled. Your selected proxy has not changed.");
         return;
       }

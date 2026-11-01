@@ -1,6 +1,6 @@
 import { useId, useEffect, useState, type RefObject } from "react";
-import type { TraceRow } from "../../../trace-decoder/flow/rows.mjs";
-import type { TraceProtocolLink } from "../../../trace-decoder/service/types";
+import { traceConnections, type TraceRow } from "../../../trace-decoder/flow/rows.mjs";
+import type { TraceProtocolLink, TraceCrossChainLink } from "../../../trace-decoder/service/types";
 import styles from "./TraceDetailView.module.css";
 
 interface Connection {
@@ -9,10 +9,10 @@ interface Connection {
 }
 
 /** Measure the actual cards so connectors follow wrapping, folding and resizing. */
-export function FlowConnections({ container, rows, physical, selected, protocolLinks }: {
+export function FlowConnections({ container, rows, physical, selected, protocolLinks, crossChainLinks }: {
   container: RefObject<HTMLDivElement | null>; rows: TraceRow[];
   physical: boolean; selected: number | null;
-  protocolLinks: TraceProtocolLink[];
+  protocolLinks: TraceProtocolLink[]; crossChainLinks: TraceCrossChainLink[];
 }) {
   const marker = "trace-" + useId().replace(/[^a-zA-Z0-9_-]/g, "");
   const [layout, setLayout] = useState<{ width: number; height: number; edges: Connection[] }>({
@@ -32,8 +32,15 @@ export function FlowConnections({ container, rows, physical, selected, protocolL
         if (node) laneLeft[node.chain] = Math.min(laneLeft[node.chain], card.left - bounds.left);
       }
       const edges: Connection[] = [];
-      const connections = rows.flatMap(({ node, parent }) => parent === null ? [] : [{ from: parent, to: node.id, protocol: false }]);
-      connections.push(...protocolLinks.map(link => ({ ...link, protocol: true })));
+      const connections = traceConnections(rows, protocolLinks, crossChainLinks);
+      const crossings = connections.filter(edge => byId.has(edge.from) && byId.has(edge.to)
+        && byId.get(edge.from)!.chain !== byId.get(edge.to)!.chain);
+      const crossingIndex = new Map(crossings.map((edge, index) => [`${edge.from}:${edge.to}`, index]));
+      const leftEdge = Math.max(...rows.filter(row => row.node.chain === 'L1').map(row => (cards.get(row.node.id)?.right ?? bounds.left) - bounds.left));
+      const rightEdge = Math.min(...rows.filter(row => row.node.chain === 'L2').map(row => (cards.get(row.node.id)?.left ?? bounds.right) - bounds.left));
+      const gap = Number.isFinite(leftEdge + rightEdge) ? Math.max(0, rightEdge - leftEdge - 24) : 0;
+      const spacing = crossChainLinks.length ? Math.min(10, gap / Math.max(1, crossings.length - 1)) : 0;
+      const middle = crossChainLinks.length && gap > 0 ? (leftEdge + rightEdge) / 2 : bounds.width / 2;
       for (const { from: parent, to, protocol } of connections) {
         const node = byId.get(to);
         if (!node) continue;
@@ -49,7 +56,8 @@ export function FlowConnections({ container, rows, physical, selected, protocolL
           const forward = caller.chain === "L1";
           const sx = (forward ? start.right : start.left) - bounds.left;
           const tx = (forward ? end.left : end.right) - bounds.left;
-          const rail = bounds.width / 2;
+          const index = crossingIndex.get(`${parent}:${to}`) ?? 0;
+          const rail = middle + (index - (crossings.length - 1) / 2) * spacing;
           path = `M ${sx} ${sy} H ${rail} V ${ty} H ${tx}`;
         } else {
           const sx = start.left - bounds.left, tx = end.left - bounds.left;
@@ -73,7 +81,7 @@ export function FlowConnections({ container, rows, physical, selected, protocolL
     observer.observe(element);
     element.querySelectorAll("[data-flow-node]").forEach(card => observer.observe(card));
     return () => observer.disconnect();
-  }, [container, rows, physical, protocolLinks]);
+  }, [container, rows, physical, protocolLinks, crossChainLinks]);
 
   return <svg className={styles.connections} width={layout.width} height={layout.height} aria-hidden="true">
     <defs>{(["L1", "L2", "uncertain", "failed"] as const).map(tone =>
