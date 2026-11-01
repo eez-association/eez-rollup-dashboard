@@ -76,8 +76,8 @@ retain their separate gas estimation path.
    and must be administered through it. Nonce or ownership changes invalidate the
    review, including module-driven owner changes without a nonce increment. The wallet
    RPC and dashboard RPC must agree before signing. The attached Safe address is remembered in this browser,
-   scoped to the deployment and Falcon key, and its live authority is checked on
-   every load and transaction. The registry can provision the owner proxy on the
+   scoped to the deployment and Falcon key, and its authority is checked on
+   loading, attachment and confirmation. The registry can provision the owner proxy on the
    first cross-chain call.
 5. L2 inclusion and L1 execution are checked automatically. A source receipt
    alone is not proof of canonical L1 execution: the UI also checks settlement,
@@ -97,8 +97,20 @@ retain their separate gas estimation path.
    and funding controls. In **Send transaction**, enter **To** and **Amount**.
    Expand **Data (optional)** for contract calldata; zero-value calls require
    nonempty data. The signature, Safe hash and receipt check bind these exact bytes.
-8. Click **Sign with Falcon**. Fees are estimated automatically after signing
-   and refreshed before **Send transaction** opens the wallet confirmation.
+8. Click **Sign with Falcon**. Signing reads the controller and Safe nonces and
+   the source block timestamp, then signs locally. Deployment inspection stays
+   in discovery; the Safe transaction hash is calculated locally. Signing does
+   not request a fee quote or separately call the on-chain signature verifier.
+   **Send transaction** checks the wallet's Composer route and Safe nonce, then
+   obtains a fresh fee quote before wallet approval. Composer simulates the
+   signed call; the contracts recheck authorization and execution. An invalid
+   nonce, expired authorization or insufficient balance can therefore surface
+   on Send. Quote failures never fall back to an unquoted transaction.
+   Wallet account/network/nonce and quote binding/expiry/fee-limit checks remain.
+   Authority information is labelled as last checked, not an enforced policy
+   for every transfer. The retained Safe nonce check is for receipt correlation:
+   if it changes, sign again. A read cannot lock state during wallet approval;
+   mismatched settlement evidence is never reported as a successful transfer.
    The send form stays visible during signing, submission and confirmation.
    The active button shows progress, repeat submission is disabled, and the last
    confirmed balance remains visible until the L1 result is verified.

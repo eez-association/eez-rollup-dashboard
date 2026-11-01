@@ -7,6 +7,7 @@ import { crossChainDeployments } from '../src/lib/falcon/crossChainDeployment.ts
 import { l1ActionDigest, l1ControllerAbi, l1ControllerFactoryAbi } from '../src/lib/falcon/l1Action.ts';
 import { managerAbi } from '../src/lib/falcon/l1Controller.ts';
 import { safeFactoryAbi, safeAbi } from '../src/lib/falcon/safe.ts';
+import { buildSafeTransaction, safeTransactionHash } from '../src/lib/treasury/safeTransactions.ts';
 import { recoveryKey, scopedRecoveryKey } from '../src/lib/falcon/recoveryJournal.ts';
 import { fromHex } from '../src/lib/falcon/falcon.ts';
 import { COMPOSER_DISCOVERY_ABI, COMPOSER_DISCOVERY_ADDRESS, COMPOSER_DISCOVERY_MARKER } from '../src/lib/composerDiscovery.ts';
@@ -35,6 +36,7 @@ try {
     let failFirstReceipt = missingNetwork && name === 'MetaMask';
     const quotes = [], sends = [], walletCalls = [], observationCalls = [], fundingSends = [];
     let safeBalance = 0n, mockRpc;
+    let safeOwners = [owner];
     let optionFailure = false;
     let revertNextCreation = false;
     const f = await fixture(browser, { deployment: d, rpc: async request => { observationCalls.push(request); return mockRpc(request); }, quote: async ([intent, options]) => {
@@ -43,8 +45,14 @@ try {
       const resolved = { chainId: toHex(d.l2.chainId), data: intent.data.toLowerCase(), from: intent.from.toLowerCase(),
         gas: toHex(6_000_000n), nonce: '0x0', to: intent.to.toLowerCase(), type, value: '0x0' };
       const fees = type === '0x0' ? { gasPrice: '0x4' } : { maxFeePerGas: '0x4', maxPriorityFeePerGas: '0x1' };
+      const signed = signedAction(intent.data);
+      const transfer = same(signed.action.target, safe) ? decodeFunctionData({ abi: safeAbi, data: signed.action.data }).args : null;
+      const simulationError = signed.action.nonce !== consumed ? 'InvalidNonce'
+        : transfer && !safeOwners.includes(owner) ? 'GS026: caller is not an owner'
+          : transfer && transfer[1] > safeBalance ? 'Safe balance is too low' : null;
       const quote = { version: 1, chainId: resolved.chainId, nonce: '0x0', expiresAt: toHex(Math.floor(Date.now()/1000)+30),
         options: [optionFailure ? { type, error: { code: 'quote_limit', message: 'Test admission limit' } }
+          : simulationError ? { type, error: { code: 'simulation_failed', message: simulationError } }
           : { type, gas: resolved.gas, requestHash: keccak256(toHex(JSON.stringify(resolved))), estimatedFee: toHex(18_000_000n), ...fees }] };
       quotes.push({ quote, tx: { ...resolved, ...fees } });
       return { result: quote };
@@ -104,8 +112,10 @@ try {
         const logs = [];
         if (params[0] === settlementHash && sent && same(sent.action.target, safe)) {
           const { args } = decodeFunctionData({ abi: safeAbi, data: sent.action.data });
+          const transaction = buildSafeTransaction({ chainId: BigInt(d.l1.chainId), safe, to: args[0], data: args[2], nonce: safeNonce - 1n });
+          const safeHash = safeTransactionHash({ ...transaction, message: { ...transaction.message, value: args[1] } });
           const baseLog = { address: safe, blockHash: l1BlockHash, blockNumber: toHex(blockNumber), transactionHash: settlementHash, transactionIndex: '0x0', removed: false };
-          logs.push({ ...baseLog, logIndex: '0x0', topics: encodeEventTopics({ abi: safeAbi, eventName: 'ExecutionSuccess', args: { txHash: keccak256('0x1234') } }), data: encodeAbiParameters([{type:'uint256'}], [0n]) });
+          logs.push({ ...baseLog, logIndex: '0x0', topics: encodeEventTopics({ abi: safeAbi, eventName: 'ExecutionSuccess', args: { txHash: safeHash } }), data: encodeAbiParameters([{type:'uint256'}], [0n]) });
           logs.push({ ...baseLog, logIndex: '0x1', topics: encodeEventTopics({ abi: safeAbi, eventName: 'SafeMultiSigTransaction' }),
             data: encodeAbiParameters(safeAbi.find(item => item.name === 'SafeMultiSigTransaction').inputs,
               [...args, encodeAbiParameters([{type:'uint256'}, {type:'address'}, {type:'uint256'}], [safeNonce - 1n, owner, 1n])]) });
@@ -141,7 +151,7 @@ try {
           publicKeyHash: publicKeyHashForReads ?? (publicKey ? keccak256('0x'+publicKey) : toHex(0n, {size:32})), nonce: same(to, safe) ? safeNonce : consumed,
           ROLLUP_ID: d.l2.rollupId, USE_GAS_LEFT: false, singleton: d.l1.safe.singleton.address, fallbackHandler: d.l1.safe.fallbackHandler.address,
           computeCrossChainProxyAddress: owner, safes: consumed > 0n ? safe : zeroAddress,
-          masterCopy: d.l1.safe.singleton.address, VERSION: '1.4.1', getOwners: [owner], getThreshold: 1n,
+          masterCopy: d.l1.safe.singleton.address, VERSION: '1.4.1', getOwners: safeOwners, getThreshold: 1n,
           getModulesPaginated: [[], '0x'+'0'.repeat(39)+'1'], authorizedProxies: [true, controller, d.l2.rollupId], getTransactionHash: keccak256('0x1234') };
         const result = functionName === 'checkAuthorization' ? signedAction(data).digest
           : functionName === 'actionDigest' ? l1ActionDigest({ ...decodeAction(data), sourceChainId: BigInt(d.l2.chainId), destinationChainId: BigInt(d.l1.chainId), controller, eezL2: d.l2.manager })
@@ -379,7 +389,8 @@ try {
       assert.equal(sends.length, sendsBeforeSwitch, 'changing the gas wallet only discovers the same Safe');
       assert.equal(await page.locator('#safe-balance').textContent(), '0');
       await page.locator('#safe-recipient').fill('0x'+'99'.repeat(20));
-      await page.locator('#safe-sign').click(); await status('Safe balance is too low');
+      await page.locator('#safe-sign').click(); await status('Falcon signature ready');
+      await page.locator('#safe-send').click(); await status('Safe balance is too low');
       assert.equal(await page.evaluate(() => window.falconWalletTest.chain), toHex(d.l2.chainId));
       assert.equal(await setup.count(), 0);
       assert.equal(await page.locator('#safe-fund-amount').inputValue(), '0.01');
@@ -425,8 +436,41 @@ try {
       assert.equal(await page.evaluate(() => window.copiedSafeAddress), safe);
       assert.equal(await page.locator('#safe-load').count(), 0, 'loaded account replaces onboarding');
       assert.equal(await page.locator('#safe-estimate-fee, #safe-l1-trace').count(), 0);
+      const ownerReads = () => observationCalls.filter(call => call.method === 'eth_call' && same(call.params[0].to, safe)
+        && decodeFunctionData({ abi: safeAbi, data: call.params[0].data }).functionName === 'getOwners').length;
+      const beforeSigningReads = ownerReads();
+      const beforeSigningQuotes = quotes.length;
+      const beforeSigningWallet = walletCalls.length, beforeSigningObservations = observationCalls.length;
       await page.locator('#safe-sign').click(); await status('Falcon signature ready');
-      await page.locator('#safe-fee-total').waitFor();
+      await page.waitForFunction(() => !document.querySelector('#safe-send').disabled);
+      assert.equal(quotes.length, beforeSigningQuotes, 'signing does not request a fee quote');
+      assert.equal(ownerReads(), beforeSigningReads, 'signing does not reinspect the Safe');
+      const signingReads = [...walletCalls.slice(beforeSigningWallet), ...observationCalls.slice(beforeSigningObservations)];
+      // A wallet network switch may also trigger the dashboard's Composer probe.
+      const contractReads = signingReads.filter(call => call.method === 'eth_call'
+        && [controller, safe].some(address => same(call.params[0].to, address)));
+      assert.equal(contractReads.length, 2, 'only the controller and Safe nonces are read while signing');
+      for (const call of contractReads) assert.equal(decodeFunctionData({ abi: same(call.params[0].to, safe) ? safeAbi : l1ControllerAbi, data: call.params[0].data }).functionName, 'nonce');
+      assert.equal(signingReads.filter(call => call.method === 'eth_getCode').length, 0);
+      assert.equal(await page.locator('#safe-fee-total').count(), 0);
+      const beforeStaleSend = sends.length, beforeStaleQuote = quotes.length;
+      safeNonce++;
+      await page.locator('#safe-send').click(); await status('Safe changed');
+      await page.waitForFunction(() => !document.querySelector('#safe-send').disabled);
+      safeNonce--;
+      assert.equal(quotes.length, beforeStaleQuote, 'a stale Safe receipt nonce stops before quoting');
+      consumed++;
+      await page.locator('#safe-send').click(); await status('InvalidNonce');
+      await page.waitForFunction(() => !document.querySelector('#safe-send').disabled);
+      consumed--;
+      safeOwners = [account];
+      await page.locator('#safe-send').click(); await status('GS026');
+      await page.waitForFunction(() => !document.querySelector('#safe-send').disabled);
+      safeOwners = [owner];
+      assert.equal(sends.length, beforeStaleSend, 'quote simulation failures never send');
+      assert.equal(quotes.length, beforeStaleQuote + 2, 'Composer checks execution instead of separate authorization RPCs');
+      assert.equal(ownerReads(), beforeSigningReads, 'send does not repeat Safe inspection');
+      await page.locator('#safe-sign').click(); await status('Falcon signature ready');
       await page.waitForFunction(() => !document.querySelector('#safe-send').disabled);
       await page.getByRole('heading', { name: 'Your Safe account', exact: true }).hover();
       await page.waitForTimeout(250); // Let button color transitions settle for the visual capture.
@@ -453,10 +497,6 @@ try {
       assert(await page.locator('#safe-recipient').isDisabled());
       await page.evaluate(() => window.falconWalletTest.release());
       await status('Falcon signature ready');
-      await page.locator('#safe-fee-total').waitFor();
-      const outer = decodeFunctionData({abi:l1ControllerAbi,data:quotes.at(-1).tx.data});
-      const inner = decodeFunctionData({abi:safeAbi,data:outer.args[1]});
-      assert.equal(inner.args[1],0n); assert.equal(inner.args[2],'0xdeadbeef');
       assert.equal(await page.locator('#safe-cost-comparison').count(), 0, 'signing alone has no paid transaction cost');
       holdSettlement = true;
       const l1PriceReadsBefore = observationCalls.filter(call => call.method === 'eth_gasPrice' && call.path.endsWith('/rpc/l1')).length;
@@ -464,6 +504,10 @@ try {
       await page.evaluate(() => { window.falconWalletTest.holdSend = true; window.falconWalletTest.release = null; });
       await page.locator('#safe-send').click();
       await page.waitForFunction(() => !!window.falconWalletTest.release);
+      await page.locator('#safe-fee-total').waitFor();
+      const outer = decodeFunctionData({abi:l1ControllerAbi,data:quotes.at(-1).tx.data});
+      const inner = decodeFunctionData({abi:safeAbi,data:outer.args[1]});
+      assert.equal(inner.args[1],0n); assert.equal(inner.args[2],'0xdeadbeef');
       assert.match(await page.locator('#safe-send').textContent(), /Sending transaction/);
       assert(await page.locator('#safe-send').isDisabled());
       assert(await page.locator('#safe-recipient').isVisible());
@@ -528,7 +572,7 @@ try {
         assert.equal(await page.locator('#safe-load').count(), 0);
         await page.locator('#safe-recipient').fill('0x'+'99'.repeat(20));
         await page.locator('#safe-sign').click(); await status('Falcon signature ready');
-        await page.locator('#safe-fee-total').waitFor();
+        assert.equal(await page.locator('#safe-fee-total').count(), 0);
       }
       await page.evaluate(() => {
         const w = window.falconWalletTest;

@@ -8,10 +8,10 @@ import { useFalconRecovery } from '../../hooks/useFalconRecovery';
 import { matchesRecoveryTransaction, recoveryKey, type RecoveryAttempt } from '../../lib/falcon/recoveryJournal';
 import { checkNoObservedSubmission, checkRecoveryOutcome, findRecoveryByNonce } from '../../lib/falcon/recoveryChecks';
 import { falconReadProvider, confirmationDelay } from '../../lib/falcon/readOnly.ts';
-import { loadRemoteSafe, prepareSafeTransfer, safeCallResult, safeOperationCall, verifySafeL1Execution, parseSafeTransfer, parseSafeTransaction, type RemoteSafe, type SafeOperation } from '../../lib/falcon/safe.ts';
+import { loadRemoteSafe, prepareSafeTransfer, safeAbi, safeCallResult, safeOperationCall, verifySafeL1Execution, parseSafeTransfer, parseSafeTransaction, type RemoteSafe, type SafeOperation } from '../../lib/falcon/safe.ts';
 import type { CrossChainDeployment } from '../../lib/falcon/crossChainDeployment.ts';
 import { l1ActionDigest, l1ControllerAbi, type SignedL1Action } from '../../lib/falcon/l1Action.ts';
-import { canonicalReceipt, checkChain, checkL1Authorization, controllerClient, createL1ControllerData, executeL1Data, FalconTransactionReverted, l1CallResult, loadL1Controller, parseSettlement, sameAddress, type ControllerState } from '../../lib/falcon/l1Controller.ts';
+import { canonicalReceipt, checkChain, checkComposer, controllerClient, createL1ControllerData, executeL1Data, FalconTransactionReverted, l1CallResult, loadL1Controller, parseSettlement, sameAddress, type ControllerState } from '../../lib/falcon/l1Controller.ts';
 import { type SafeCostEvidence } from '../../lib/falcon/safeCosts.ts';
 import { SafeCostComparison } from './SafeCostComparison.tsx';
 import { ExistingFalconSafe } from './ExistingFalconSafe';
@@ -393,36 +393,43 @@ export function FalconSafe({ signer, wallet, deployment, fees }: { signer: Signe
     return state;
   }
 
-  async function prepareAction(signal: AbortSignal, controllerState = controller, safeState = remote): Promise<Prepared> {
+  async function prepareAction(signal: AbortSignal, controllerState = controller, safeState = remote) {
     const controller = controllerState, remote = safeState;
     const key = keySnapshot(), input = currentInput.current;
     if (!controller || !remote) throw new Error('Load your controller and Safe first.');
-    setPrepared(null); setFee(null); setNotice({ kind: 'pending', text: 'Checking your Safe and preparing the Falcon authorization…' });
-    let operation: SafeOperation = { kind: 'create' };
-    if (remote.target) {
-      const transfer = parseSafeTransaction(input.recipient, input.amount, input.data);
-      operation = await prepareSafeTransfer(l1ReadClient(signal), deployment, controller.controller, transfer.recipient, transfer.value, signal, transfer.data, remote.attachment);
-    }
-    const { client } = await sourceSession(signal);
-    const state = await loadL1Controller(client, deployment, key.publicKey, signal);
-    if (!state || !sameAddress(controller.controller, state.controller)) throw new Error('Controller changed. Load it again.');
+    setPrepared(null); setFee(null); setNotice({ kind: 'pending', text: 'Preparing the Falcon signature…' });
+    const transfer = remote.target ? parseSafeTransaction(input.recipient, input.amount, input.data) : null;
+    const [operation, { session, state }] = await Promise.all([
+      transfer
+        ? prepareSafeTransfer(l1ReadClient(signal), deployment, remote, transfer.recipient, transfer.value, signal, transfer.data)
+        : Promise.resolve<SafeOperation>({ kind: 'create' }),
+      (async () => {
+        const session = await wallet.getSession(signal, deployment.l2);
+        const client = eezClient(session.provider);
+        const block = await client.getBlock();
+        const nonce = await client.readContract({ address: controller.controller, abi: l1ControllerAbi, functionName: 'nonce', blockNumber: block.number });
+        return { session, state: { controller: controller.controller, nonce, timestamp: block.timestamp } };
+      })(),
+    ]);
     const action = { ...safeOperationCall(deployment, operation), sourceChainId: BigInt(deployment.l2.chainId), destinationChainId: BigInt(deployment.l1.chainId), controller: state.controller, eezL2: deployment.l2.manager, nonce: state.nonce, deadline: state.timestamp + 600n };
     const digest = l1ActionDigest(action);
-    const contractDigest = await client.readContract({ address: state.controller, abi: l1ControllerAbi, functionName: 'actionDigest', args: [action.target, action.data, action.nonce, action.deadline] });
-    if (digest !== contractDigest) throw new Error('Browser and controller authorization digests disagree.');
-    const isCurrent = () => key.isCurrent() && (operation.kind === 'create' || (currentInput.current.amount === input.amount && currentInput.current.recipient === input.recipient && currentInput.current.data === input.data));
+    const isCurrent = () => key.isCurrent() && currentDeployment.current === deployment
+      && (operation.kind === 'create' || (currentInput.current.amount === input.amount && currentInput.current.recipient === input.recipient && currentInput.current.data === input.data));
+    signal.throwIfAborted();
+    session.assertCurrent();
     const signature = await signer.signActionDigest(digest, isCurrent);
-    await client.getChainId();
+    session.assertCurrent();
     if (!isCurrent()) throw new Error('Key or transfer changed. Sign the action again.');
     setController(state);
-    return { signed: { action, publicKey: key.publicKey, signature }, operation, isCurrent };
+    const prepared: Prepared = { signed: { action, publicKey: key.publicKey, signature }, operation, isCurrent };
+    return prepared;
   }
 
   function sign() {
     return run(async signal => {
       const next = await prepareAction(signal);
       setPrepared(next);
-      await sendPrepared(next, signal, true);
+      setNotice({ kind: 'neutral', text: 'Falcon signature ready. Fees will be estimated when you send.' });
     }, 'sign');
   }
 
@@ -457,11 +464,11 @@ export function FalconSafe({ signer, wallet, deployment, fees }: { signer: Signe
     return { provider, receipt, result, controller: state.controller };
   }
 
-  function send(preview = false) {
+  function send() {
     return run(async signal => {
       if (uncertain) throw new Error('Recover the previous wallet transaction before sending again.');
       if (!prepared || !prepared.isCurrent()) throw new Error('Sign the current action first.');
-      await sendPrepared(prepared, signal, preview);
+      await sendPrepared(prepared, signal);
     }, 'send');
   }
 
@@ -608,18 +615,21 @@ export function FalconSafe({ signer, wallet, deployment, fees }: { signer: Signe
     });
   }
 
-  async function sendPrepared(prepared: Prepared, signal: AbortSignal, preview = false) {
+  async function sendPrepared(prepared: Prepared, signal: AbortSignal) {
+    setFee(null);
+    setNotice({ kind: 'pending', text: 'Preparing the transaction and estimating its fee…' });
+    const session = await wallet.getSession(signal, deployment.l2);
+    await Promise.all([
+      checkComposer(session.provider, deployment, signal),
+      (async () => {
+        if (prepared.operation.kind !== 'transfer') return;
+        const op = prepared.operation;
+        const nonce = await l1ReadClient(signal).readContract({ address: op.target, abi: safeAbi, functionName: 'nonce' });
+        if (nonce !== op.safeNonce) throw new Error('Safe changed. Sign the transaction again.');
+      })(),
+    ]);
     const options = currentFees.current;
     const isCurrent = () => prepared.isCurrent() && currentDeployment.current === deployment && currentFees.current.fees === options.fees && currentFees.current.feeType === options.feeType;
-    setFee(null);
-    setNotice({ kind: 'pending', text: 'Checking the Safe and Falcon authorization, then estimating the cross-chain call…' });
-    if (prepared.operation.kind === 'transfer') {
-      const op = prepared.operation;
-      const current = await prepareSafeTransfer(l1ReadClient(signal), deployment, prepared.signed.action.controller, op.recipient, op.value, signal, op.data ?? '0x', op.attachment);
-      if (current.kind !== 'transfer' || !sameAddress(current.target, op.target) || current.safeNonce !== op.safeNonce || current.safeTxHash !== op.safeTxHash) throw new Error('Safe changed. Reload and sign the transfer again.');
-    }
-    const { session, client } = await sourceSession(signal);
-    await checkL1Authorization(client, deployment, prepared.signed, signal);
     const intent: FeeIntent = { from: session.account, to: prepared.signed.action.controller, data: executeL1Data(prepared.signed), value: '0x0' };
     let hash: Hex | undefined;
     // Refresh only before the first wallet prompt. A submitted attempt is never automatically retried.
@@ -630,7 +640,6 @@ export function FalconSafe({ signer, wallet, deployment, fees }: { signer: Signe
       session.assertCurrent();
       if (!isCurrent()) throw new Error('Signature, key or fee options changed. Review and try again.');
       setFee(quoted);
-      if (preview) { setNotice({ kind: 'neutral', text: 'Falcon signature ready. Fee estimated automatically; refreshed before sending.' }); return; }
       if (prepared.operation.kind === 'create') setNotice({ kind: 'pending', text: `Approve creation of your Safe on ${deployment.l1.chainName} in your wallet. Only the transaction fee is paid.` });
       try {
         hash = await submitFeeQuote({ quoted, config: fees, wallet: session.provider, isCurrent,
@@ -849,7 +858,7 @@ export function FalconSafe({ signer, wallet, deployment, fees }: { signer: Signe
       </section> : null}
       <details className={styles.details}><summary>Contracts &amp; authority</summary>
         <p className={styles.hint}>{observation} · Controller nonce {controller.nonce.toString()}.</p>
-        <p className={styles.hint}>{remote.attachment ? 'Falcon is an additional owner, with threshold 1. Existing owners, modules and settings are preserved; each owner can execute independently.' : 'The controller’s L1 proxy is the Safe’s sole owner. No recovery owner or module is installed.'} Keep your encrypted Falcon backup.</p>
+        <p className={styles.hint}>{remote.attachment ? 'At last check, Falcon was an additional owner with threshold 1; each owner can execute independently. Existing modules and settings are preserved.' : 'At last check, the controller’s L1 proxy was the sole owner, with no modules or guard.'} Keep your encrypted Falcon backup.</p>
         <p className={styles.contractDetails}><a id="safe-controller" href={`${deployment.l2.explorer}/address/${controller.controller}`} target="_blank" rel="noreferrer">L2 controller · {controller.controller}</a></p>
         <p className={styles.contractDetails}><a href={`${deployment.l1.explorer}/address/${remote.owner}`} target="_blank" rel="noreferrer">L1 owner proxy · {remote.owner}</a></p>
       </details>
