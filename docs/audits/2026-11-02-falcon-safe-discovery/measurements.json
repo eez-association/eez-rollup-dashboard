@@ -1,0 +1,163 @@
+{
+  "date": "2026-11-02",
+  "base": "7690c09cbc9ffa10b89cd77874de7bc82e456b3a",
+  "baseline": "b807275adc3a6a1792148d6e7710a511732d0dee",
+  "candidate": "b3b154ccb1237fc6dcd7e1d6e5be8fde9346f27e",
+  "sourceProtocol": "855fe0602484750861b4c31502a1a91355d33ed6",
+  "node": "22.23.4",
+  "browser": "153.0.8010.12",
+  "rpcLatencyMs": 100,
+  "network": "mocked EEZ-X Devnet 916969 / Chiado 10200",
+  "loadScope": "Generate key through fully checked Safe, after opening the tab and connecting the wallet",
+  "liveTransactions": 0,
+  "trialsPerWallet": 3,
+  "harnessSha256": "4a358ccad501a26a47ef54d903905354b270b3719c810087756b89fadcd3376a",
+  "baselineTrials": [
+    {
+      "trial": 0,
+      "name": "Rabby",
+      "loadMs": 1330.4801669999997,
+      "signMs": 279.45768899999985,
+      "sendToPromptMs": 463.0239339999998,
+      "loadingReadCount": 41,
+      "signingReadCount": 3,
+      "sendingReadCount": 5
+    },
+    {
+      "trial": 0,
+      "name": "MetaMask",
+      "loadMs": 1310.826023,
+      "signMs": 273.9549360000001,
+      "sendToPromptMs": 463.24312699999973,
+      "loadingReadCount": 41,
+      "signingReadCount": 3,
+      "sendingReadCount": 5
+    },
+    {
+      "trial": 1,
+      "name": "Rabby",
+      "loadMs": 1312.147274,
+      "signMs": 287.8161119999986,
+      "sendToPromptMs": 462.2258729999994,
+      "loadingReadCount": 41,
+      "signingReadCount": 3,
+      "sendingReadCount": 5
+    },
+    {
+      "trial": 1,
+      "name": "MetaMask",
+      "loadMs": 1420.6317999999992,
+      "signMs": 289.3944940000001,
+      "sendToPromptMs": 462.60687900000084,
+      "loadingReadCount": 41,
+      "signingReadCount": 3,
+      "sendingReadCount": 5
+    },
+    {
+      "trial": 2,
+      "name": "Rabby",
+      "loadMs": 1313.3152879999998,
+      "signMs": 275.01843700000063,
+      "sendToPromptMs": 462.22479399999975,
+      "loadingReadCount": 41,
+      "signingReadCount": 3,
+      "sendingReadCount": 5
+    },
+    {
+      "trial": 2,
+      "name": "MetaMask",
+      "loadMs": 1328.5198740000014,
+      "signMs": 275.57932900000014,
+      "sendToPromptMs": 462.5665860000008,
+      "loadingReadCount": 41,
+      "signingReadCount": 3,
+      "sendingReadCount": 5
+    }
+  ],
+  "baselineMedians": {
+    "Rabby": {
+      "loadMs": 1313.3152879999998,
+      "signMs": 279.45768899999985,
+      "sendToPromptMs": 462.2258729999994
+    },
+    "MetaMask": {
+      "loadMs": 1328.5198740000014,
+      "signMs": 275.57932900000014,
+      "sendToPromptMs": 462.60687900000084
+    }
+  },
+  "candidateTrials": [
+    {
+      "trial": 0,
+      "name": "Rabby",
+      "loadMs": 809.450742,
+      "signMs": 273.64249700000005,
+      "sendToPromptMs": 462.7211219999999,
+      "loadingReadCount": 37,
+      "signingReadCount": 3,
+      "sendingReadCount": 5
+    },
+    {
+      "trial": 0,
+      "name": "MetaMask",
+      "loadMs": 846.4683550000004,
+      "signMs": 286.00573299999996,
+      "sendToPromptMs": 462.1561730000003,
+      "loadingReadCount": 37,
+      "signingReadCount": 3,
+      "sendingReadCount": 5
+    },
+    {
+      "trial": 1,
+      "name": "Rabby",
+      "loadMs": 778.8251879999998,
+      "signMs": 275.4154129999997,
+      "sendToPromptMs": 462.68811000000005,
+      "loadingReadCount": 37,
+      "signingReadCount": 3,
+      "sendingReadCount": 5
+    },
+    {
+      "trial": 1,
+      "name": "MetaMask",
+      "loadMs": 812.5044490000009,
+      "signMs": 274.89200300000084,
+      "sendToPromptMs": 462.0504550000005,
+      "loadingReadCount": 37,
+      "signingReadCount": 3,
+      "sendingReadCount": 5
+    },
+    {
+      "trial": 2,
+      "name": "Rabby",
+      "loadMs": 829.4937030000001,
+      "signMs": 274.8401620000004,
+      "sendToPromptMs": 461.7570649999998,
+      "loadingReadCount": 37,
+      "signingReadCount": 3,
+      "sendingReadCount": 5
+    },
+    {
+      "trial": 2,
+      "name": "MetaMask",
+      "loadMs": 792.5088419999993,
+      "signMs": 276.0696390000012,
+      "sendToPromptMs": 461.2074459999985,
+      "loadingReadCount": 37,
+      "signingReadCount": 3,
+      "sendingReadCount": 5
+    }
+  ],
+  "candidateMedians": {
+    "Rabby": {
+      "loadMs": 809.450742,
+      "signMs": 274.8401620000004,
+      "sendToPromptMs": 462.68811000000005
+    },
+    "MetaMask": {
+      "loadMs": 812.5044490000009,
+      "signMs": 276.0696390000012,
+      "sendToPromptMs": 462.0504550000005
+    }
+  }
+}
