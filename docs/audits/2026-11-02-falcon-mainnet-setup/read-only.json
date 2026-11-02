@@ -1,0 +1,80 @@
+{
+  "observedAt": "2026-11-02T19:44:18.270Z",
+  "contracts": [
+    {
+      "id": "verifier",
+      "chain": "l2",
+      "address": "0x9008864A079AE0eB3239729d10b9721759d261bf",
+      "runtimeCodeHash": "0x28402fe675b2e0b8fdcb281c7b5bef4c441ba32adae6b68c30f9471d87af0e66",
+      "deployed": false
+    },
+    {
+      "id": "controllerFactory",
+      "chain": "l2",
+      "address": "0x38a2767eAA74c2B0978F0fD6B86d1500bF7038BB",
+      "runtimeCodeHash": "0x9cab06abcf633f88403ac85875ded0d4fe2ddc12cb41fc9335063e123a007de0",
+      "deployed": false
+    },
+    {
+      "id": "safeFactory",
+      "chain": "l1",
+      "address": "0x531dfEe95daAE616a747550b1db9D21bfba27e86",
+      "runtimeCodeHash": "0x44b00a0c5c8fabd29f6b6704d7093a3d3f4df43ab0a585d9f42c3e466ee29435",
+      "deployed": false
+    }
+  ],
+  "networks": {
+    "l1": {
+      "chainId": 1,
+      "anchor": {
+        "number": "26329121",
+        "hash": "0xd57ec0fbcda87ba920051701982e14e5a9ffd5012a63a8b06a9b3e3a63b31138"
+      },
+      "contracts": {
+        "manager": {
+          "address": "0x4B2760F84B83d6b3829E30A7573B0172B6d6402C",
+          "bytes": 752,
+          "hash": "0xf75bd9c201197ef3c8ffd71d80769022b18a10634c1223f8696074d0e594b762"
+        },
+        "create2": {
+          "address": "0x4e59b44847b379578588920ca78fbf26c0b4956c",
+          "bytes": 69,
+          "hash": "0x2fa86add0aed31f33a762c9d88e807c475bd51d0f52bd0955754b2608f7e4989"
+        },
+        "safeL2": {
+          "address": "0x29fcB43b46531BcA003ddC8FCB67FFE91900C762",
+          "bytes": 24421,
+          "hash": "0xb1f926978a0f44a2c0ec8fe822418ae969bd8c3f18d61e5103100339894f81ff"
+        },
+        "handler": {
+          "address": "0xfd0732Dc9E303f09fCEf3a7388Ad10A83459Ec99",
+          "bytes": 5637,
+          "hash": "0x7c6007a5d711cea8dfd5d91f5940ec29c7f200fe511eb1fc1397b367af3c42f9"
+        }
+      }
+    },
+    "l2": {
+      "chainId": 696991,
+      "anchor": {
+        "number": "0",
+        "hash": "0xb6bd210b7e824a1aabc4c1ae5b64f5643715441b332c7152e641a36ba01835b2"
+      },
+      "routing": {
+        "rollupId": "2",
+        "useGasLeft": false
+      },
+      "contracts": {
+        "manager": {
+          "address": "0x4B2760F84B83d6b3829E30A7573B0172B6d6402C",
+          "bytes": 752,
+          "hash": "0x88068de4c46d94b72f5d39f17b5407c958ec6920376ff1dd366995f65564372a"
+        },
+        "create2": {
+          "address": "0x4e59b44847b379578588920ca78fbf26c0b4956c",
+          "bytes": 69,
+          "hash": "0x2fa86add0aed31f33a762c9d88e807c475bd51d0f52bd0955754b2608f7e4989"
+        }
+      }
+    }
+  }
+}

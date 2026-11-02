@@ -50,7 +50,7 @@ try {
   await fresh.page.goto(origin + '/#/falcon-demo'); await fresh.nav.waitFor();
   assert.equal(await fresh.tab.count(), 0, 'another session starts hidden');
   await fresh.open();
-  await fresh.page.getByText(/On-chain demo requires the verified/).waitFor();
+  await fresh.page.getByText(/On-chain demo requires RollupX/).waitFor();
   assert.equal(await fresh.page.locator('#safe-load, #send-l2').count(), 0, 'mismatched networks cannot initiate contract actions');
   await fresh.page.locator('#generate').click();
   await fresh.page.waitForFunction(() => document.querySelector('#key-status').textContent.includes('Key generated'));

@@ -5,6 +5,7 @@ import styles from './FalconPanel.module.css';
 import { L2Verification } from './L2Verification.tsx';
 import type { FalconWallet } from '../../hooks/useFalconWallet.ts';
 import { FalconSafe } from './FalconSafe.tsx';
+import { FalconInfrastructure } from './FalconInfrastructure.tsx';
 import type { FeeConfig } from '../../lib/falcon/l2Fees.ts';
 import { WalletNetworkSetup } from '../WalletNetworkSetup';
 import { type CrossChainDeployment } from '../../lib/falcon/crossChainDeployment.ts';
@@ -175,7 +176,9 @@ export function FalconPanel({ wallet, crossChain, fees }: { wallet: FalconWallet
     {!wallet.address && <p className={styles.hint}>Connect your wallet in the dashboard header to use the on-chain demo.</p>}
     {setupNetwork && <WalletNetworkSetup address={wallet.address} chainId={wallet.chainId}
       network={setupNetwork} setup={wallet.networkSetup} knownNetwork={wallet.hasNetwork(setupNetwork.chainId)} onConnect={() => void wallet.connectNetwork(setupNetwork)} />}
-    {crossChain && fees ? <FalconSafe signer={falcon} wallet={wallet} deployment={crossChain} fees={fees} /> : <section className={styles.card}>
+    {crossChain && fees ? crossChain.walletSetup ? <FalconInfrastructure key={`${crossChain.l2.chainId}:${crossChain.l2.anchor.blockHash}`} wallet={wallet} deployment={crossChain}>
+      <FalconSafe signer={falcon} wallet={wallet} deployment={crossChain} fees={fees} />
+    </FalconInfrastructure> : <FalconSafe signer={falcon} wallet={wallet} deployment={crossChain} fees={fees} /> : <section className={styles.card}>
       <h2>Your Falcon Safe</h2>
       <p className={styles.hint}>On-chain actions are unavailable for this dashboard configuration. You can still create a key and verify signatures in the browser.</p>
     </section>}

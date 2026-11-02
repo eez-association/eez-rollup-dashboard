@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import { chromium } from 'playwright';
 import { decodeFunctionData, encodeAbiParameters, encodeEventTopics, encodeFunctionResult, keccak256, pad, stringToHex, toHex, zeroAddress } from 'viem';
 import { falcon512padded } from '@noble/post-quantum/falcon.js';
@@ -12,9 +11,9 @@ import { recoveryKey, scopedRecoveryKey } from '../src/lib/falcon/recoveryJourna
 import { fromHex } from '../src/lib/falcon/falcon.ts';
 import { COMPOSER_DISCOVERY_ABI, COMPOSER_DISCOVERY_ADDRESS, COMPOSER_DISCOVERY_MARKER } from '../src/lib/composerDiscovery.ts';
 import { fixture, origin } from './falcon/fixture.mjs';
+import { deploymentCode } from './falcon/deploymentCode.ts';
+import testnetCode from './falcon/fixtures/testnet-deployed-code.json' with { type: 'json' };
 
-const devnetCode = JSON.parse(readFileSync(new URL('./falcon/fixtures/deployed-code.json', import.meta.url), 'utf8'));
-const testnetCode = JSON.parse(readFileSync(new URL('./falcon/fixtures/testnet-deployed-code.json', import.meta.url), 'utf8'));
 const account = '0x'+'88'.repeat(20), controller = '0x'+'11'.repeat(20), owner = '0x'+'22'.repeat(20), safe = '0x'+'33'.repeat(20);
 const txHash = '0x'+'ab'.repeat(32), blockHash = '0x'+'cd'.repeat(32);
 const transferTxHash = '0x'+'bc'.repeat(32);
@@ -27,7 +26,7 @@ const browser = await chromium.launch({ headless: true, chromiumSandbox: process
 try {
   for (const d of crossChainDeployments) for (const [name, type] of [['Rabby','0x0'], ['MetaMask','0x2']]) for (const missingNetwork of [false, true]) {
     const blockNumber = d.l1.anchor.blockNumber + 100n;
-    const code = d.l2.chainId === 699169 ? { ...devnetCode, ...testnetCode } : devnetCode;
+    const code = deploymentCode(d);
     let publicKey, publicKeyHashForReads, consumed = 0n, safeNonce = 0n, sent;
     let holdSettlement = d.l2.chainId === 699169 && name === 'MetaMask' && !missingNetwork;
     const needsController = d.l2.chainId === 699169 && missingNetwork;
@@ -170,11 +169,11 @@ try {
       const { args: [target, payload, nonce, deadline] } = decodeFunctionData({ abi: l1ControllerAbi, data });
       return { target, data: payload, nonce, deadline };
     }
-    await page.addInitScript(({ name, account, controller, missingNetwork, l2Chain }) => {
+    await page.addInitScript(({ name, account, controller, missingNetwork, l1Chain, l2Chain }) => {
       const listeners = new Map();
       Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async value => { window.copiedSafeAddress = value; } } });
-      const mock = window.falconWalletTest = { account, chain: '0x27d8', calls: [], holdRead: false, holdSend: false, release: null, pendingChainEvent: null,
-        knownChains: missingNetwork ? ['0x27d8'] : ['0x27d8', l2Chain], rejectAdd: false, rejectNextSend: false, loseNextSendReply: false };
+      const mock = window.falconWalletTest = { account, chain: l1Chain, calls: [], holdRead: false, holdSend: false, release: null, pendingChainEvent: null,
+        knownChains: missingNetwork ? [l1Chain] : [l1Chain, l2Chain], rejectAdd: false, rejectNextSend: false, loseNextSendReply: false };
       mock.emit = (event, value) => { for (const fn of listeners.get(event) ?? []) fn(value); };
       const provider = { isMetaMask: true, isRabby: name === 'Rabby',
         on: (event, fn) => listeners.set(event, [...(listeners.get(event) ?? []), fn]),
@@ -217,7 +216,7 @@ try {
       };
       const detail = { info: { uuid: 'falcon-wallet-test', name, rdns: name === 'Rabby' ? 'io.rabby' : 'io.metamask' }, provider };
       window.addEventListener('eip6963:requestProvider', () => window.dispatchEvent(new CustomEvent('eip6963:announceProvider', { detail })));
-    }, { name, account, controller, missingNetwork, l2Chain: toHex(d.l2.chainId) });
+    }, { name, account, controller, missingNetwork, l1Chain: toHex(d.l1.chainId), l2Chain: toHex(d.l2.chainId) });
     await page.goto(origin + '/');
     await page.getByRole('button', { name: 'Connect Wallet', exact: true }).click();
     await page.getByRole('button', { name, exact: true }).click();
@@ -241,7 +240,7 @@ try {
     if (missingNetwork) {
       const added = await page.evaluate(() => window.falconWalletTest.calls.filter(c => c.method === 'wallet_addEthereumChain').at(-1).params[0]);
       assert.deepEqual(added, { chainId: toHex(d.l2.chainId), chainName: d.l2.chainName,
-        rpcUrls: [new URL('/composer/l2', origin).href], nativeCurrency: { name: 'xDAI', symbol: 'xDAI', decimals: 18 }, blockExplorerUrls: [d.l2.explorer] });
+        rpcUrls: [new URL('/composer/l2', origin).href], nativeCurrency: { name: d.l1.chainId === 1 ? 'Ether' : 'xDAI', symbol: d.l1.safe.nativeSymbol, decimals: 18 }, blockExplorerUrls: [d.l2.explorer] });
     }
     assert.equal(sends.length, 0, 'network setup never sends a transaction');
     await page.locator('#generate').click();
@@ -586,13 +585,28 @@ try {
       assert.equal(sends.length, attemptsBeforeSuccess + 2, 'missing-network recovery must not send another Safe transaction');
     }
     if (name === 'Rabby') {
+      const sentBeforeKeyChange = sends.length;
       await page.locator('#generate').click();
       await page.waitForFunction(() => document.querySelector('#key-status')?.textContent.includes('Key generated'));
       await status('Safe loaded');
       assert.equal(await page.locator('#safe-trace, #safe-cost-comparison').count(), 0, 'a new Falcon key never inherits the prior transaction cost');
-      assert.equal(sends.length, attemptsBeforeSuccess + 1, 'key lookup does not send a transaction');
+      assert.equal(sends.length, sentBeforeKeyChange, 'key lookup does not send a transaction');
+      publicKey = await page.getByTestId('public-key').inputValue();
+    }
+    if (d.walletSetup && !missingNetwork) {
+      await page.locator('#safe-fund-amount').fill('0.02');
+      await page.locator('#safe-fund').click();
+      await page.getByRole('status').filter({ hasText: 'Safe funded with 0.02' }).waitFor();
+      assert.equal(fundingSends.length, 1); assert.equal(fundingSends[0].chainId, '0x1');
+      await page.locator('#safe-recipient').fill('0x'+'99'.repeat(20));
+      await page.locator('#safe-sign').click(); await status('Falcon signature ready');
+      await page.locator('#safe-send').click(); await status('Transfer confirmed on Ethereum');
+      assert.equal(sends.length, attemptsBeforeSuccess + 2);
+      assert.equal(sends.at(-1).type, type); assert.equal(sends.at(-1).chainId, toHex(d.l2.chainId));
+      await page.waitForFunction(() => document.querySelector('[data-testid="cost-actual"]')?.textContent === '0.000004¢');
+      assert(f.requests.some(request => request.url.startsWith('https://api.coinbase.com/')), 'Ethereum costs use the configured ETH/USD price path');
     }
     await f.close();
   }
-  console.log('Falcon dashboard wallet checks passed on both networks for Rabby/legacy and MetaMask/EIP-1559 (mock RPC, real browser signatures; no live settlement).');
+  console.log('Falcon dashboard wallet checks passed on all three networks for Rabby/legacy and MetaMask/EIP-1559 (mock RPC, real browser signatures; no live settlement).');
 } finally { await browser.close(); }

@@ -25,6 +25,11 @@ private keys are ephemeral and are never committed.
   captured after deployment and full explorer verification on eez.dev chain
   699169 on 2026-10-30. Chiado Safe contracts are shared with the original
   deployment. Both networks' wallet scenarios check their respective code hashes.
+- The mainnet fixture in `../deploymentCode.ts` combines reproduced Falcon
+  artifacts with the same Safe implementation/handler runtimes at their canonical
+  Ethereum addresses. These are planned deployment fixtures, not mainnet receipt
+  evidence. `tests/integration/falcon-shared-setup.mjs` executes their actual CREATE2
+  deployment and checks the resulting code on isolated Anvil nodes.
 - `existing-safes.json`: public Ethereum mainnet and Chiado Safe observations
   captured on 2026-11-01 at the recorded canonical block numbers/hashes. Contains
   proxy code, singleton hashes, owner code, threshold, nonce, modules and Guard
