@@ -1,4 +1,4 @@
-import { decodeAbiParameters, decodeEventLog, encodeFunctionData, getAddress, hashTypedData, isAddress, maxUint256, pad, parseAbi, parseUnits, toHex, zeroAddress, zeroHash, type Address, type Hex, type TransactionReceipt } from 'viem';
+import { decodeAbiParameters, decodeEventLog, encodeFunctionData, getAddress, hashTypedData, isAddress, keccak256, maxUint256, pad, parseAbi, parseUnits, toHex, zeroAddress, zeroHash, type Address, type Hex, type TransactionReceipt } from 'viem';
 import { inspectSafe } from '../treasury/safeSetup.ts';
 import { loadTreasuryArtifacts } from '../treasury/release.ts';
 import { decodeSafeExecution } from '../treasury/safeEvents.ts';
@@ -26,7 +26,7 @@ const sentinel = '0x0000000000000000000000000000000000000001' as Address;
 const guardSlot = '0x4a204f620c8c5ccdca3fd54d003badd85ba500436a431f0cbda4f558c93c34c8' as Hex;
 const fallbackSlot = '0x6c9a6c4a39284e37ed1cf53d337577d14212a4870fb976a4366c693b939918d5' as Hex;
 export type SafeAttachment = { target: Address; walletOwner: Address };
-export type RemoteSafe = { attachment?: SafeAttachment; owner: Address; target: Address | null; nonce: bigint | null; balance: bigint | null };
+export type RemoteSafe = { attachment?: SafeAttachment; factoryMissing?: boolean; owner: Address; target: Address | null; nonce: bigint | null; balance: bigint | null };
 export type SafeOperation = { kind: 'create' } | {
   kind: 'transfer'; attachment?: SafeAttachment; target: Address; owner: Address; recipient: Address; value: bigint; data?: Hex; safeNonce: bigint; safeTxHash: Hex;
 };
@@ -77,11 +77,22 @@ export async function loadRemoteSafe(client: EezClient, d: CrossChainDeployment,
     checkChain(client, d.l1), atBlock ?? client.getBlockNumber(),
   ]);
   if (attachment) return loadAttachedSafe(client, d, controller, attachment, signal, blockNumber);
+  // A wallet-setup network can attach an existing Safe before the creation
+  // factory exists. Nonempty conflicting code still fails closed.
+  if (d.walletSetup) {
+    const code = await client.getCode({ address: cfg.factory.address, blockNumber });
+    if (!code || code === '0x') {
+      const owner = await controllerOwner(client, d, controller, blockNumber);
+      signal.throwIfAborted();
+      return { owner, target: null, nonce: null, balance: null, factoryMissing: true };
+    }
+    if (keccak256(code) !== cfg.factory.runtimeCodeHash) throw new Error('Safe factory bytecode does not match this deployment.');
+  }
   const factory = { address: cfg.factory.address, abi: safeFactoryAbi, blockNumber } as const;
   const [singleton, handler, owner] = await Promise.all([
     client.readContract({ ...factory, functionName: 'singleton' }), client.readContract({ ...factory, functionName: 'fallbackHandler' }),
     client.readContract({ address: d.l1.registry, abi: managerAbi, functionName: 'computeCrossChainProxyAddress', args: [controller, d.l2.rollupId], blockNumber }),
-    checkCode(client, cfg.factory, 'Safe factory', blockNumber), checkCode(client, cfg.singleton, 'Safe implementation', blockNumber),
+    d.walletSetup ? undefined : checkCode(client, cfg.factory, 'Safe factory', blockNumber), checkCode(client, cfg.singleton, 'Safe implementation', blockNumber),
     checkCode(client, cfg.fallbackHandler, 'Safe fallback handler', blockNumber),
   ]);
   if (!sameAddress(singleton, cfg.singleton.address) || !sameAddress(handler, cfg.fallbackHandler.address)) throw new Error('Safe factory configuration does not match this deployment.');

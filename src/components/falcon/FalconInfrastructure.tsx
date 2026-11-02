@@ -10,18 +10,20 @@ import { errorCode, UnknownFeeSubmission } from '../../lib/falcon/l2Fees';
 import { falconReadProvider } from '../../lib/falcon/readOnly';
 import { recoveryKey, type RecoveryAttempt } from '../../lib/falcon/recoveryJournal';
 import { checkNoObservedSubmission, checkRecoveryOutcome } from '../../lib/falcon/recoveryChecks';
-import { confirmSharedSetup, inspectSetupChain, inspectSharedSetup, setupAttemptContract, type SetupStatus } from '../../lib/falcon/sharedSetup';
+import { confirmSharedSetup, inspectSetupChain, setupAttemptContract, type SetupStatus } from '../../lib/falcon/sharedSetup';
 import { matchingDeployer } from '../../lib/treasury/matchingSafes';
 import styles from './FalconPanel.module.css';
 
-/** One-time, permissionless infrastructure. This gate does not need a Falcon key
- * and never sends on mount or retries an ambiguous wallet submission.
+/** L2 infrastructure is required for either Safe path; L1 creation setup is
+ * requested explicitly. Both retain the same journal, including older L1 requests.
+ * This gate never sends on mount or retries an ambiguous wallet submission.
  */
 export function FalconInfrastructure({ wallet, deployment, children }: {
-  wallet: FalconWallet; deployment: CrossChainDeployment; children: ReactNode;
+  wallet: FalconWallet; deployment: CrossChainDeployment; children: (requestSafeFactory: () => void) => ReactNode;
 }) {
   const journal = useFalconRecovery(recoveryKey(deployment, 'infrastructure'), wallet.address ? { account: wallet.address, publicKey: '0x' } : null);
   const [status, setStatus] = useState<SetupStatus[] | null>(null);
+  const [selection, setSelection] = useState<{ chain: 'l1' | 'l2' }>({ chain: 'l2' });
   const [notice, setNotice] = useState('Checking shared contracts…');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -36,7 +38,7 @@ export function FalconInfrastructure({ wallet, deployment, children }: {
   });
 
   async function refresh(signal: AbortSignal) {
-    const next = await inspectSharedSetup(reads(signal), deployment, signal);
+    const next = await inspectSetupChain(reads(signal)[selection.chain], deployment, selection.chain, signal);
     signal.throwIfAborted();
     setStatus(next); setNotice('');
     return next;
@@ -46,12 +48,17 @@ export function FalconInfrastructure({ wallet, deployment, children }: {
     const abort = new AbortController();
     void refresh(abort.signal).catch(cause => { if (!abort.signal.aborted) setError(cause.message); });
     return () => { mounted.current = false; abort.abort(); operation.current?.abort(); };
-  }, [deployment]);
+  }, [deployment, selection]);
   useEffect(() => {
     operation.current?.abort(); operation.current = null;
     setBusy(false); setRecoveryHash(''); setAcknowledged(false);
     return () => { operation.current?.abort(); };
   }, [journal.key]);
+
+  function selectSetup(chain: 'l1' | 'l2') {
+    setStatus(null); setError(''); setNotice('Checking shared contracts…');
+    setSelection({ chain });
+  }
 
   async function run(action: (signal: AbortSignal) => Promise<void>) {
     if (operation.current) return;
@@ -124,10 +131,12 @@ export function FalconInfrastructure({ wallet, deployment, children }: {
 
   const pending = journal.attempt;
   const next = status?.find(step => !step.deployed);
-  if (status && !next && !pending && !journal.error && !error && !busy) return <>{children}</>;
+  if (status && !next && !pending && !journal.error && !error && !busy) return <>{children(() => selectSetup('l1'))}</>;
   return <section className={styles.card} id="falcon-infrastructure" aria-label="Falcon network setup">
-    <h2>Set up Falcon on this network</h2>
-    <p className={styles.hint}>Your connected wallet deploys the missing shared contracts and pays the network fees. This is needed once per network.</p>
+    <h2>{selection.chain === 'l1' ? 'Set up Safe creation' : 'Set up Falcon on this network'}</h2>
+    <p className={styles.hint}>{selection.chain === 'l1'
+      ? 'The Safe factory is needed once to create new Safes. Your connected wallet pays the deployment fee. Existing Safes do not need it.'
+      : 'Your connected wallet deploys the missing shared contracts on L2 and pays the network fees. This is needed once per network.'}</p>
     {status && <ul>{status.map(step => <li key={step.id}>
       {step.label} · {deployment[step.chain].chainName} · {step.deployed ? 'Ready' : 'Not deployed'}
     </li>)}</ul>}
@@ -139,6 +148,7 @@ export function FalconInfrastructure({ wallet, deployment, children }: {
         Deploy {next.id === 'verifier' ? next.label : next.label.toLowerCase()} on {deployment[next.chain].chainName}
       </button>}
       <button className="btn btn-outline" disabled={busy} onClick={() => void run(async signal => { await refresh(signal); })}>Check setup</button>
+      {selection.chain === 'l1' && <button className="btn btn-outline" disabled={busy || !!journal.error} onClick={() => selectSetup('l2')}>Back to Safe options</button>}
     </div>}
     {!wallet.address && <p className={styles.hint}>Connect your wallet in the header to continue.</p>}
     {pending && <fieldset className={styles.fields} disabled={busy}>

@@ -53,17 +53,25 @@ retain their separate gas estimation path.
 
 ### Mainnet shared setup
 
-If shared contracts are missing, **Set up Falcon on this network** replaces Safe
+If L2 shared contracts are missing, **Set up Falcon on this network** replaces Safe
 discovery. The connected wallet deploys the Falcon verifier and controller factory
-on RollupX, then the Safe factory on Ethereum. Each button requests one ordinary
+on RollupX. Each button requests one ordinary
 wallet transaction, with live gas estimation and wallet fee review. No separate
 operator address, private key, Falcon signature or new `.env` setting is needed.
 The dashboard must already discover the matching mainnet route and enable L2 fees.
 
+After L2 setup, create or find your Falcon controller and choose your Safe.
+**Add to existing Safe** needs no Safe factory on Ethereum. Saved attachments
+also load without it. **Create a Safe** opens **Set up Safe creation** if the
+factory is missing; deploy it from the connected wallet or choose **Back to Safe
+options** to use an existing Safe. Finishing factory setup returns to the Safe
+choices and requires a fresh **Create a Safe** action.
+
 This setup is needed once for the network. Any wallet can pay; it gains no
 administration or Safe ownership. The UI reuses matching contracts deployed by
-another user, checking exact code and constructor bindings. Ethereum's existing
-SafeL2 1.4.1 singleton and fallback handler are reused. CREATE2 addresses derive
+another user, checking exact code and constructor bindings. New Safe creation
+reuses Ethereum's existing SafeL2 1.4.1 singleton and fallback handler; existing
+Safes are checked against their own implementation. CREATE2 addresses derive
 from the retained [sources and build](../../contracts/falcon/README.md); the
 mainnet profile contains expected targets, not an assertion that they are live.
 An incompatible occupied address, deployer or dependency stops setup.
@@ -75,6 +83,8 @@ an unsent request requires the same checks and explicit cancelled-prompt
 acknowledgement as controller recovery; clearing storage does not cancel a signed
 transaction. Records are scoped to the network and gas wallet, independent of the
 Falcon key. A late wallet reply stays with the original account.
+Previously saved L1 factory requests still require reconciliation, even though
+the factory is now optional for existing Safes. No storage migration is needed.
 
 Once ready, the normal per-key controller and Safe choices appear. No user Safe
 is created by infrastructure setup. The application still requires a fresh

@@ -4,17 +4,20 @@ import { decodeFunctionData, encodeFunctionResult, stringToHex, toHex, zeroAddre
 import { mainnetDeployment as d } from '../src/lib/falcon/crossChainDeployment.ts';
 import { deploymentSetupPlan } from '../src/lib/falcon/sharedSetup.ts';
 import { managerAbi } from '../src/lib/falcon/l1Controller.ts';
-import { l1ControllerFactoryAbi } from '../src/lib/falcon/l1Action.ts';
+import { l1ControllerAbi, l1ControllerFactoryAbi } from '../src/lib/falcon/l1Action.ts';
+import { safeFactoryAbi } from '../src/lib/falcon/safe.ts';
 import { matchingDeployer } from '../src/lib/treasury/matchingSafes.ts';
 import { COMPOSER_DISCOVERY_ABI, COMPOSER_DISCOVERY_ADDRESS, COMPOSER_DISCOVERY_MARKER } from '../src/lib/composerDiscovery.ts';
 import { deploymentCode } from './falcon/deploymentCode.ts';
 import { fixture, origin } from './falcon/fixture.mjs';
 
 const account = '0x'+'88'.repeat(20), other = '0x'+'99'.repeat(20), blockHash = '0x'+'ab'.repeat(32);
+const controller = toHex(300, { size: 20 }), owner = toHex(301, { size: 20 });
 const plan = deploymentSetupPlan(d), same = (a,b) => a.toLowerCase() === b.toLowerCase();
 const browser = await chromium.launch({ headless: true, chromiumSandbox: true });
-async function setup(name, { partial = false, wrongCode = false, receiptError = false } = {}) {
+async function setup(name, { partial = false, wrongCode = false, receiptError = false, controllerExists = false } = {}) {
   const deployed = new Set(partial ? ['verifier'] : []), transactions = [], codes = Object.values(deploymentCode(d));
+  let keyHash;
   const rpc = async ({ method, params = [], chain }) => {
     const network = BigInt(chain) === 1n ? d.l1 : d.l2;
     const height = network.anchor.blockNumber + 100n;
@@ -59,10 +62,14 @@ async function setup(name, { partial = false, wrongCode = false, receiptError = 
           eezContracts: { eezRegistryAddress: d.l1.registry, eezL2Address: d.l2.manager },
         }))] });
       }
-      const abi = same(to, d.l2.factory.address) ? l1ControllerFactoryAbi : managerAbi;
-      const { functionName } = decodeFunctionData({ abi, data });
-      const values = { ROLLUP_ID: 2n, USE_GAS_LEFT: false, controllers: zeroAddress,
-        verifier: d.l2.verifier.address, eezL2: d.l2.manager, l1ChainId: 1n };
+      const abi = same(to, controller) ? l1ControllerAbi : same(to, d.l2.factory.address) ? l1ControllerFactoryAbi
+        : same(to, d.l1.safe.factory.address) ? safeFactoryAbi : managerAbi;
+      const { functionName, args } = decodeFunctionData({ abi, data });
+      if (functionName === 'controllers') keyHash = args[0];
+      const values = { ROLLUP_ID: 2n, USE_GAS_LEFT: false, controllers: controllerExists ? controller : zeroAddress,
+        verifier: d.l2.verifier.address, eezL2: d.l2.manager, l1ChainId: 1n, publicKeyHash: keyHash, nonce: 0n,
+        singleton: d.l1.safe.singleton.address, fallbackHandler: d.l1.safe.fallbackHandler.address,
+        computeCrossChainProxyAddress: owner, safes: zeroAddress };
       assert.notEqual(values[functionName], undefined, functionName);
       return encodeFunctionResult({ abi, functionName, result: values[functionName] });
     }
@@ -103,7 +110,7 @@ async function setup(name, { partial = false, wrongCode = false, receiptError = 
 }
 try {
   for (const name of ['Rabby', 'MetaMask']) {
-    const f = await setup(name), { page, next, transactions } = f;
+    const f = await setup(name, { controllerExists: true }), { page, next, transactions } = f;
     await next('Falcon verifier on RollupX').waitFor();
     assert.equal(transactions.length, 0); assert.equal(await page.getByTestId('public-key').count(), 0, 'shared setup needs no Falcon key');
     assert.equal(await page.evaluate(() => window.setupWallet.calls.filter(c => /^(eth_send|eth_sign|wallet_)/.test(c.method)).length), 0, 'opening does not prompt');
@@ -121,13 +128,40 @@ try {
     assert.equal(await page.locator('#falcon-deploy-shared').count(), 0, 'unknown broadcast blocks another deployment');
     await page.getByLabel('Transaction hash from wallet activity').fill(transactions[1].hash);
     await page.getByRole('button', { name: 'Recover deployment', exact: true }).click();
+    await page.locator('#falcon-infrastructure').waitFor({ state: 'hidden' });
+    assert.equal(transactions.length, 2, 'only L2 setup is required to access Safe choices');
+    assert.equal(await page.getByTestId('public-key').count(), 0, 'L2 infrastructure needs no Falcon key');
+    await page.locator('#generate').click();
+    await page.getByRole('button', { name: 'Add to existing Safe', exact: true }).click();
+    await page.getByLabel('L1 Safe address', { exact: true }).waitFor();
+    assert.equal(await next('safe factory on Ethereum').count(), 0);
+    assert.equal(transactions.length, 2, 'choosing an existing Safe never deploys its creation factory');
+    await page.getByRole('button', { name: 'Go back', exact: true }).click();
+    await page.locator('#safe-create').click();
     await next('safe factory on Ethereum').waitFor();
+    assert.equal(transactions.length, 2, 'choosing Create a Safe only opens the deployment review');
+    await page.getByRole('button', { name: 'Back to Safe options', exact: true }).click();
+    await page.getByRole('button', { name: 'Add to existing Safe', exact: true }).waitFor();
+    await page.locator('#safe-create').click();
+    if (name === 'MetaMask') await page.evaluate(() => { window.setupWallet.lose = true; });
     await next('safe factory on Ethereum').click();
+    if (name === 'MetaMask') {
+      await page.getByRole('button', { name: 'Recover deployment', exact: true }).waitFor();
+      await page.reload();
+      // The same pre-existing journal format covers L1 even though the initial
+      // setup gate now inspects L2 only. Reload must not bypass unresolved sends.
+      await page.getByRole('button', { name: 'Recover deployment', exact: true }).waitFor();
+      assert.equal(await page.locator('#safe-create').count(), 0);
+      assert.equal(transactions.length, 3);
+      await page.getByLabel('Transaction hash from wallet activity').fill(transactions[2].hash);
+      await page.getByRole('button', { name: 'Recover deployment', exact: true }).click();
+    }
     await page.locator('#falcon-infrastructure').waitFor({ state: 'hidden' });
     assert.deepEqual(transactions.map(t => t.tx.chainId), [toHex(d.l2.chainId), toHex(d.l2.chainId), '0x1']);
-    assert.equal(await page.getByTestId('public-key').count(), 0, 'no Falcon signing was requested by infrastructure setup');
-    await page.locator('#generate').click(); await page.locator('#controller-create').waitFor();
-    assert.equal(transactions.length, 3, 'per-key controller remains a separate explicit action');
+    if (name === 'MetaMask') await page.locator('#generate').click();
+    await page.locator('#safe-create').waitFor();
+    assert.equal(transactions.length, 3, 'Safe creation requires a fresh explicit action after factory setup');
+    assert(!f.requests.some(r => r.body && JSON.parse(r.body).method === 'eez_quoteFee'), 'no Falcon-authorized creation is prepared automatically');
     await f.close();
   }
   const partial = await setup('Rabby', { partial: true });
@@ -164,5 +198,5 @@ try {
   await late.next('controller factory on RollupX').waitFor();
   assert.equal(late.transactions.length, 1, 'late hash stays with its original wallet and is reconciled without a resend');
   await late.close();
-  console.log('Falcon wallet setup: both extensions, rejection, partial deployment, incompatible code, reload, uncertain broadcast and late account-switch reply passed (mock RPC).');
+  console.log('Falcon wallet setup: both extensions, optional L1 factory, Safe choices, back navigation, rejection, partial deployment, incompatible code, L1/L2 uncertain broadcast recovery and late account-switch reply passed (mock RPC).');
 } finally { await browser.close(); }

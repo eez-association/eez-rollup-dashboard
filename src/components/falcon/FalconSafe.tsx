@@ -28,7 +28,7 @@ type Funding = { hash: Hex; account: Address; safe: Address; controller: Address
 const initial: Notice = { kind: 'neutral', text: 'Unlock your Falcon key and connect your wallet to find your controller and Safe.' };
 
 /** Shared factories and network bindings come from the host; user addresses are discovered on chain. */
-export function FalconSafe({ signer, wallet, deployment, fees }: { signer: Signer; wallet: FalconWallet; deployment: CrossChainDeployment; fees: FeeConfig }) {
+export function FalconSafe({ signer, wallet, deployment, fees, onNeedSafeFactory }: { signer: Signer; wallet: FalconWallet; deployment: CrossChainDeployment; fees: FeeConfig; onNeedSafeFactory?: () => void }) {
   const recoveryOwner = wallet.address && signer.publicKeyHex
     ? { account: wallet.address, publicKey: `0x${signer.publicKeyHex}` as Hex } : null;
   const fundingJournal = useFalconRecovery(recoveryKey(deployment, 'funding'), recoveryOwner);
@@ -506,6 +506,11 @@ export function FalconSafe({ signer, wallet, deployment, fees }: { signer: Signe
         setRemote(current); setNotice({ kind: 'valid', text: 'Your Safe already exists. It is ready to load and use.' }); return;
       }
       setRemote(current);
+      if (current.factoryMissing) {
+        if (!onNeedSafeFactory) throw new Error('Deploy the Safe factory before creating a new Safe.');
+        onNeedSafeFactory();
+        return;
+      }
       const next = await prepareAction(signal, state, current);
       if (next.operation.kind !== 'create') throw new Error('A Safe already exists. Load it before continuing.');
       await sendPrepared(next, signal);

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { keccak256, pad, zeroAddress, zeroHash, type Address, type Hex } from 'viem';
-import { crossChainDeployments, type CrossChainDeployment } from '../../src/lib/falcon/crossChainDeployment.ts';
+import { crossChainDeployments, mainnetDeployment, type CrossChainDeployment } from '../../src/lib/falcon/crossChainDeployment.ts';
 import type { EezClient } from '../../src/lib/falcon/eez.ts';
 import { loadSafeAccount } from '../../src/lib/falcon/safeDiscovery.ts';
 import { deploymentCode } from './deploymentCode.ts';
@@ -110,6 +110,31 @@ test('no controller skips L1 reads; no Safe still returns its checked controller
   assert(!absentController.calls.some(c => c.chain === 'l1'));
   const absentSafe = fixture(); absentSafe.state.safe = zeroAddress;
   assert.deepEqual((await absentSafe.load()).remote, { owner, target: null, nonce: null, balance: null });
+});
+
+test('mainnet discovery offers Safe choices without the optional creation factory or its dependencies', async () => {
+  const d = mainnetDeployment, f = fixture(d);
+  for (const binding of [d.l1.safe!.factory, d.l1.safe!.singleton, d.l1.safe!.fallbackHandler]) {
+    delete f.state.codes[binding.address.toLowerCase()];
+  }
+  assert.deepEqual(await f.load(), {
+    controller: { controller, nonce: 3n, timestamp: 123n },
+    remote: { owner, target: null, nonce: null, balance: null, factoryMissing: true },
+  });
+  assert(!f.calls.some(c => ['singleton', 'fallbackHandler', 'safes'].includes(c.functionName ?? '')));
+  assert(!f.calls.some(c => [d.l1.safe!.singleton.address, d.l1.safe!.fallbackHandler.address].some(a => a.toLowerCase() === c.address?.toLowerCase())));
+});
+
+test('mainnet discovery still rejects conflicting factory bytecode', async () => {
+  const d = mainnetDeployment, f = fixture(d);
+  f.state.codes[d.l1.safe!.factory.address.toLowerCase()] = '0x6000';
+  await assert.rejects(f.load(), /Safe factory bytecode/);
+});
+
+for (const d of crossChainDeployments.filter(d => !d.walletSetup)) test(`missing predeployed Safe factory still fails on ${d.l2.chainId}`, async () => {
+  const f = fixture(d);
+  delete f.state.codes[d.l1.safe!.factory.address.toLowerCase()];
+  await assert.rejects(f.load(), /Safe factory bytecode/);
 });
 
 type Mutation = (f: ReturnType<typeof fixture>, d: CrossChainDeployment) => void;

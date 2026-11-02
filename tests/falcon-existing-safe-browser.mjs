@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { chromium } from 'playwright';
 import { decodeFunctionData, encodeAbiParameters, encodeEventTopics, encodeFunctionResult, keccak256, pad, toHex, zeroAddress, zeroHash } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
-import { crossChainDeployment as d } from '../src/lib/falcon/crossChainDeployment.ts';
+import { crossChainDeployment, mainnetDeployment } from '../src/lib/falcon/crossChainDeployment.ts';
 import { l1ControllerAbi, l1ControllerFactoryAbi } from '../src/lib/falcon/l1Action.ts';
 import { managerAbi } from '../src/lib/falcon/l1Controller.ts';
 import { safeAbi, safeFactoryAbi } from '../src/lib/falcon/safe.ts';
@@ -13,11 +13,17 @@ import { recoveryKey, scopedRecoveryKey } from '../src/lib/falcon/recoveryJourna
 import { COMPOSER_DISCOVERY_ABI, COMPOSER_DISCOVERY_ADDRESS, COMPOSER_DISCOVERY_MARKER } from '../src/lib/composerDiscovery.ts';
 import { fixture, origin } from './falcon/fixture.mjs';
 import { treasuryFixture } from './falcon/treasuryFixture.mjs';
+import { deploymentCode } from './falcon/deploymentCode.ts';
 
+const browser=await chromium.launch({headless:true,chromiumSandbox:process.env.TREASURY_BROWSER_SANDBOX!=='0'});
+async function checkExistingSafe(d) {
 const a=n=>toHex(n,{size:20}), eq=(a,b)=>a.toLowerCase()===b.toLowerCase();
 const wallet=privateKeyToAccount(toHex(12345,{size:32})),account=wallet.address,controller=a(300),owner=a(301),singleton=a(302),module=a(303);
 const treasury=treasuryFixture(d,origin),safe=treasury.config.safeL1,l2Safe=treasury.config.safeL2;
-const code=JSON.parse(readFileSync(new URL('./falcon/fixtures/deployed-code.json',import.meta.url),'utf8'));
+const code=deploymentCode(d);
+// An existing Safe uses its own implementation and handler. None of the L1
+// creation infrastructure is needed, including on a fresh mainnet deployment.
+const missing=d.walletSetup?[d.l1.safe.factory.address,d.l1.safe.singleton.address,d.l1.safe.fallbackHandler.address]:[];
 const snapshots=JSON.parse(readFileSync(new URL('./falcon/fixtures/existing-safes.json',import.meta.url),'utf8'));
 const safe150=JSON.parse(readFileSync(new URL('../contracts/test/fixtures/safe-150.json',import.meta.url),'utf8'));
 const blockNumber=d.l1.anchor.blockNumber+100n,blockHash=keccak256(toHex('owner-block')),txHash=keccak256(toHex('owner-transaction'));
@@ -37,7 +43,7 @@ async function rpc({method,params=[],chain,walletRead=false}) {
  if(method==='eth_getLogs')return [];
  if(method==='eth_getTransactionBySenderAndNonce')throw Object.assign(new Error('pruned history unavailable: earliest available '+(blockNumber-10n)),{code:4444});
  if(method==='eth_getTransactionCount')return confirmed && (['latest','pending'].includes(params[1]) || BigInt(params[1])>=blockNumber)?'0x3':'0x2';
- if(method==='eth_getCode')return eq(params[0],safe)?proxy:eq(params[0],singleton)?implementation:eq(params[0],account)?snapshots.mainnet.owners[0].code:eq(params[0],snapshots.chiado.owners[0].address)?snapshots.chiado.owners[0].code:Object.values(code).find(c=>eq(c.address,params[0]))?.code??'0x';
+ if(method==='eth_getCode')return missing.some(a=>eq(a,params[0]))?'0x':eq(params[0],safe)?proxy:eq(params[0],singleton)?implementation:eq(params[0],account)?snapshots.mainnet.owners[0].code:eq(params[0],snapshots.chiado.owners[0].address)?snapshots.chiado.owners[0].code:Object.values(code).find(c=>eq(c.address,params[0]))?.code??'0x';
  if(method==='eth_getStorageAt')return params[1]==='0x0'?pad(singleton):zeroHash;
  if(method==='eth_getBlockByNumber'){
   const side=BigInt(chain)===BigInt(d.l1.chainId)?d.l1:d.l2;
@@ -64,9 +70,7 @@ async function rpc({method,params=[],chain,walletRead=false}) {
  }
  throw Error('Unexpected RPC '+method);
 }
-const browser=await chromium.launch({headless:true,chromiumSandbox:process.env.TREASURY_BROWSER_SANDBOX!=='0'});
-try {
- const f=await fixture(browser,{rpc}),{page}=f;
+ const f=await fixture(browser,{rpc,deployment:d}),{page}=f;
  await page.exposeFunction('existingSafeWalletRpc',async request=>{
   if(request.method==='eth_signTypedData_v4'){
    assert.equal(request.chain,toHex(d.l1.chainId));assert(eq(request.params[0],account));
@@ -102,6 +106,7 @@ try {
  await page.locator('#generate').click();await page.waitForFunction(()=>document.querySelector('#key-status')?.textContent.includes('Key generated'));
  publicKey='0x'+await page.getByTestId('public-key').inputValue();
  try { await page.getByRole('button',{name:'Add to existing Safe',exact:true}).waitFor();
+  assert.equal(await page.locator('#falcon-infrastructure').count(),0,'L2 infrastructure is enough to choose an existing Safe');
   await page.locator('[aria-labelledby="safe-heading"]').screenshot({path:'/tmp/falcon-safe-choices.png'});
   await page.getByRole('button',{name:'Add to existing Safe',exact:true}).click(); } catch(error) { console.error(await page.locator('body').innerText()); throw error; }
  const input=page.getByLabel('L1 Safe address',{exact:true}),add=page.getByRole('button',{name:'Add Falcon controller',exact:true});
@@ -145,5 +150,12 @@ try {
  await page.reload();await page.locator('#unlock-saved').waitFor();await page.getByLabel('Saved key password',{exact:true}).fill('existing-safe-test-password');await page.locator('#unlock-saved').click();
  await page.getByRole('heading',{name:'Your Safe account',exact:true}).waitFor();assert.equal(sends.length,1);
  assert(!reads.some(r=>r.method==='eth_call'&&eq(r.params[0].to,l2Safe)),'attachment never reads or changes the L2 mirror');
- await f.close();console.log('PASS: Safe 1.5.0 1-of-2 with EIP-7702, Chiado contract-owner diagnosis, strict proxy checks, wallet/owner/nonce changes, typed signature, 1-of-3 recovery and reload, retained modules/menu');
+ if(d.walletSetup){
+  assert(!reads.some(r=>r.method==='eth_call'&&eq(r.params[0].to,d.l1.safe.factory.address)),'existing Safe never calls the absent creation factory');
+  assert(!reads.some(r=>r.chain===toHex(d.l1.chainId)&&r.method==='eth_getCode'&&missing.slice(1).some(a=>eq(a,r.params[0]))),'existing Safe does not need the creation singleton or handler');
+ }
+ await f.close();console.log(`PASS (${d.l2.chainId}): Safe 1.5.0 1-of-2 with EIP-7702, Chiado contract-owner diagnosis, strict proxy checks, wallet/owner/nonce changes, typed signature, 1-of-3 recovery and reload, retained modules/menu${d.walletSetup?', no L1 creation infrastructure':''}`);
+}
+try {
+ for(const d of [crossChainDeployment,mainnetDeployment])await checkExistingSafe(d);
 }finally{await browser.close();}
