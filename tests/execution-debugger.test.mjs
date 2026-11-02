@@ -278,6 +278,49 @@ test('live backfills the latest 50 posts, newest first, without loading receipts
   assert.ok(state.calls.every(call => ['eth_blockNumber', 'eth_getLogs', 'eez_getSettledL2RangesByL1Block'].includes(call.method)));
 });
 
+test('live can load only the selected settlement and expand metadata on demand', async () => {
+  const state = liveNode();
+  const first = await fetchLiveBatchHistory(null, state.rpc, 'latest');
+  assert.equal(first.batches.length, 50);
+  assert.equal(first.batches.filter(b => b.l2BlockCount !== undefined).length, 1);
+  assert.equal(state.calls.filter(c => c.method.startsWith('eez_get')).length, 1);
+  const selected = await fetchLiveBatchHistory(first, state.rpc, first.batches[10].transactionHash);
+  assert.equal(selected.batches.filter(b => b.l2BlockCount !== undefined).length, 2);
+  assert.equal(state.calls.filter(c => c.method.startsWith('eez_get')).length, 2);
+  const all = await fetchLiveBatchHistory(selected, state.rpc);
+  assert.equal(all.batches.filter(b => b.l2BlockCount !== undefined).length, 50);
+  assert.equal(state.calls.filter(c => c.method.startsWith('eez_get')).length, 50);
+});
+
+test('an index disappearance clears old settlement metadata and errors cannot refresh cached evidence', async () => {
+  const state = liveNode(); state.finalized = false;
+  const first = await fetchLiveBatchHistory(null, state.rpc, 'latest');
+  const expired = { ...first, batches: first.batches.map(b => ({ ...b, settlementCheckedAt: 0 })) };
+  state.indexed = false;
+  const missing = await fetchLiveBatchHistory(expired, state.rpc, 'latest');
+  assert.equal(missing.batches[0].l2BlockCount, undefined);
+  assert.equal(missing.batches[0].l2Range, undefined);
+  assert.equal(missing.batches[0].settlement, null);
+  state.failIndex = true;
+  const failed = await fetchLiveBatchHistory(expired, state.rpc, 'latest');
+  assert.equal(failed.batches[0].settlement, undefined);
+  assert.ok(failed.warnings.some(w => w.includes('index offline')));
+});
+
+test('batch inspection reuses only fresh settlement evidence bound to the posting block and transaction', async () => {
+  for (const variant of ['fresh', 'expired', 'wrong-block', 'wrong-tx', 'noncanonical']) {
+    const state = node();
+    const known = { ...settlement, canonicalL2: variant !== 'noncanonical',
+      ...(variant === 'wrong-block' ? { l1BlockHash: hash('ff') } : {}),
+      ...(variant === 'wrong-tx' ? { l1TransactionHash: hash('ff') } : {}) };
+    const context = await inspectPostedBatch({ transactionHash: l1TxHash, blockHash: l1Hash, blockNumber: '0x64',
+      settlement: known, settlementCheckedAt: variant === 'expired' ? 0 : Date.now() }, state.rpc);
+    assert.equal(state.calls.filter(c => c.method.startsWith('eez_get')).length,
+      ['fresh', 'noncanonical'].includes(variant) ? 0 : 1, variant);
+    assert.equal(context.blocks.some(b => b.chain === 'l2'), variant !== 'noncanonical', variant);
+  }
+});
+
 test('ordinary Chiado blocks preserve live history; new posts deduplicate and cap at 50, including same-block batches', async () => {
   const state = liveNode();
   const history = await fetchLiveBatchHistory(null, state.rpc);

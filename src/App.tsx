@@ -87,18 +87,24 @@ const DASHBOARD_TABS: { id: DashboardTab; label: string }[] = [
 
 export function App() {
   const configLoaded = useConfigLoader();
+  const [view, setView] = useState(getInitialView);
+  const [treasuryVisible, setTreasuryVisible] = useState(treasuryVisibleForSession);
+  const [dashboardTab, setDashboardTab] = useState<DashboardTab>(() => getInitialTab(treasuryVisible));
+  const bridgeActive = view === "dashboard" && dashboardTab === "dashboard";
+  const counterActive = view === "dashboard" && dashboardTab === "counter-demo";
 
   const { entries: _entries, log } = useLog();
   const wallet = useWallet(log, configLoaded);
   const [counterChain, setCounterChain] = useState<"l1" | "l2">("l2");
-  const counterL1 = useCounter(log, wallet.sendL1Tx, { chain: "l1", senderAddress: wallet.address, ready: configLoaded });
-  const counterL2 = useCounter(log, wallet.sendTx, { chain: "l2", senderAddress: wallet.address, ready: configLoaded });
+  const counterL1 = useCounter(log, wallet.sendL1Tx, { chain: "l1", senderAddress: wallet.address, ready: configLoaded, active: counterActive && counterChain === "l1" });
+  const counterL2 = useCounter(log, wallet.sendTx, { chain: "l2", senderAddress: wallet.address, ready: configLoaded, active: counterActive && counterChain === "l2" });
   const counter = counterChain === "l1" ? counterL1 : counterL2;
   const counterDirection: CrossChainDirection = counterChain === "l1" ? "l2-to-l1" : "l1-to-l2";
   const crossChainOptions = { sendL2Tx: wallet.sendTx, sendL2ProxyTx: wallet.sendL2ProxyTx, senderAddress: wallet.address, ready: configLoaded };
   const crossChain = useCrossChain(log, wallet.sendL1Tx, wallet.sendL1ProxyTx, crossChainOptions);
   const crossChainGeneric = useCrossChain(log, wallet.sendL1Tx, wallet.sendL1ProxyTx, crossChainOptions);
-  const bridgeHook = useBridge(log, wallet.sendTx, wallet.sendL2ProxyTx, wallet.sendL1Tx, wallet.sendL1ProxyTx, wallet.address, configLoaded, wallet.quoteProxyFees);
+  const bridgeHook = useBridge(log, wallet.sendTx, wallet.sendL2ProxyTx, wallet.sendL1Tx, wallet.sendL1ProxyTx, wallet.address, configLoaded, wallet.quoteProxyFees,
+    { active: bridgeActive, l1Balance: wallet.l1BalanceRaw, l2Balance: wallet.l2BalanceRaw });
   const bridgeFromL1 = bridgeHook.state.direction === "l1-to-l2";
   const bridgeFeesEnabled = bridgeFromL1 ? config.l1FeesEnabled : config.l2FeesEnabled;
   const bridgeFeeCap = bridgeFromL1 ? config.l1FeeMaxTotalWei : config.l2FeeMaxTotalWei;
@@ -127,11 +133,8 @@ export function App() {
   const blockscoutAbi = useBlockscoutAbi(genericTargetAddr, destinationChain);
   const recentAddrs = useRecentAddresses(destinationChain);
 
-  const [view, setView] = useState(getInitialView);
-  const [treasuryVisible, setTreasuryVisible] = useState(treasuryVisibleForSession);
   const [visualizerRoute, setVisualizerRoute] = useState(() => window.location.hash);
   const visualizerParams = new URLSearchParams(visualizerRoute.split("?")[1] ?? "");
-  const [dashboardTab, setDashboardTab] = useState<DashboardTab>(() => getInitialTab(treasuryVisible));
   const [returnToTreasury, setReturnToTreasury] = useState(false);
   useEffect(() => {
     document.title = `${view === "debug" ? "Quote Debugger" : view === "visualizer" ? "Execution Visualizer" : view === "monitor" ? "Network Monitor" : dashboardTab === "counter-demo" ? "Counter Demo" : dashboardTab === "treasury-demo" ? "Treasury Demo" : dashboardTab === "cow-demo" ? "CoW Light Demo" : dashboardTab === "falcon-demo" ? "Falcon Safe Demo" : "Dashboard"} — ${config.rollupName}`;

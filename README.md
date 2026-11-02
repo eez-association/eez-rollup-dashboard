@@ -815,11 +815,17 @@ node tests/bridge-asset-swap.cjs
 
 ## Bridge gas and approvals
 
-Bridge gas is estimated against the source chain's Composer (`/composer/l1`
-or `/composer/l2`) using the connected wallet, bridge address, calldata, and
-value. The dashboard submits the raw estimate without a buffer or automatic
-fallback; an explicit manual gas override takes precedence. Ordinary estimation
-errors block submission. Older Composers that report a missing estimation method
+With compact fees enabled, Bridge requests one debounced quote from the source
+Composer (`/composer/l1` or `/composer/l2`), which resolves automatic gas. It does
+not call `eth_estimateGas` before the preview. An explicit manual limit is included
+unchanged. Send obtains a fresh quote and resolves automatic gas again, retaining
+the SDK's fee-cap, intent, wallet, chain and nonce checks. Failed previews block
+sending and can be retried with **Refresh fees**; old input responses are discarded.
+
+When fees are disabled, Bridge uses a separate source-Composer gas estimate and
+submits the raw estimate without a buffer or automatic fallback; an explicit
+manual gas override takes precedence. Ordinary estimation errors block submission.
+Older Composers that report a missing estimation method
 or `ExecutionNotInCurrentBlock()` require an explicit manual limit before
 submission is enabled. Wrapped bridge tokens burn directly without approval;
 native ERC20 tokens still require allowance for the source bridge.
@@ -830,7 +836,14 @@ unsigned estimate at most four times, with 1/2/4-second backoff, and cancels
 obsolete bridge-input requests. Other failures are not retried. Persistent
 unavailability remains a blocking error; no gas limit is invented. Upgrade
 Composer before relying on these hints: older unstructured errors still surface
-immediately, and no submission or wallet signature is retried.
+immediately, and no submission or wallet signature is retried. Preview preparation
+has a 12-second deadline. MAX retains its amount-dependent gas estimation and
+source fee reserve calculation.
+
+Bridge and the header share account-scoped native balances, refreshed after each
+completed ten-second polling interval. Reads have a ten-second deadline, and
+account changes cancel old reads. Bridge ERC-20 and saved-counter polling runs
+only in the active view; pending transaction receipt tracking continues separately.
 
 Wallets may apply their own gas policy. For cross-chain estimation, set Rabby's
 Chiado RPC to the L1 Composer URL shown by your current dashboard deployment.
@@ -851,8 +864,10 @@ node tests/wallet-startup.cjs
 Open **Visualizer** or `/dashboard/#/visualizer`. **Live** opens first by default.
 **Inspect** accepts a transaction hash, block number, block hash, or `latest` in
 one form. `latest` opens the newest EEZ batch; hashes are detected on either
-chain. Numeric blocks and **Latest block** use L1 unless L2 is selected. Transaction History's **View execution** action opens
-the source transaction in this same view. Failed transactions and contract creations are supported.
+chain. Numeric blocks and **Latest block** use L1 unless L2 is selected. Transaction
+History's **View execution** action opens the source transaction in Trace; its
+**Blocks & settlement** action opens Inspect. Failed transactions and contract
+creations are supported.
 
 The debugger uses mined receipts, EEZ events, posting/loading calldata, and an
 optional `debug_traceTransaction` call tracer. Expand execution/static entries
@@ -882,7 +897,9 @@ filter as transaction inspection. Live retains the latest 50 posted
 batches from the connected rollup, newest first. The configured registry or
 a matching canonical L2 settlement identifies that deployment; unrelated L1
 registries are excluded. Rows show linked L1 blocks, L2 ranges, settlement
-status, transaction hashes, and the total indexed L2 block count. Selecting
+status, transaction hashes, and the total indexed L2 block count when loaded.
+Initially only the selected/newest post's settlement is queried; other rows say
+**Not loaded**, rather than implying settlement is pending. Selecting
 a post loads its L1 receipt and terminal L2 sync block; new blocks preserve the
 selected transaction and trace. It polls every
 five seconds after each completed refresh, and can be paused. Export JSON saves
@@ -944,9 +961,14 @@ Batch search covers transaction hashes, block numbers (including the settled
 L2 range), registry addresses, and inspected contracts/call hashes. Settlement
 and execution filters distinguish indexed/finalized/pending/noncanonical
 batches, observed cross-chain calls, reverted transactions, and skipped entries.
-Live automatically loads entry details for the latest 50 batches in the
-background, using two concurrent inspections and retaining the selected batch
-and timeline step. **Pause** stops new inspections and **Resume** continues.
+Live initially inspects only the selected/newest batch. **Load all details**,
+search, or an execution-content filter loads the remaining batches with two
+concurrent inspections, retaining the selected batch and timeline step.
+Settlement filters load settlement metadata without inspecting all transactions.
+Recent index observations are reused only for the matching posting block and
+transaction; older observations are refreshed. **Pause** cancels history reads
+and stops new inspections; at most two already-owned background inspections can
+finish. **Resume** continues requested loading.
 Unavailable inspections retry after 30 seconds; **Retry unavailable batches**
 retries immediately. Coverage is explicit; pending or unavailable batches do
 not imply successful execution. Only the terminal L2 sync block is loaded for

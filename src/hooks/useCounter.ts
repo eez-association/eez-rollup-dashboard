@@ -16,9 +16,9 @@ const validAddress = (address: string) => /^0x[0-9a-f]{40}$/i.test(address);
 interface TxReceipt { contractAddress?: string; status?: string; }
 
 export function useCounter(log: Logger, sendTx: SendTx, options: {
-  chain: CounterChain; senderAddress: string | null; ready: boolean;
+  chain: CounterChain; senderAddress: string | null; ready: boolean; active: boolean;
 }) {
-  const { chain, senderAddress, ready } = options;
+  const { chain, senderAddress, ready, active } = options;
   const rpc = chain === "l1" ? config.l1Rpc : config.l2Rpc;
   const network = chain === "l1" ? config.l1NetworkName : config.rollupName;
   // Preserve the existing L2 cache; L1 counters have an independent entry.
@@ -42,21 +42,21 @@ export function useCounter(log: Logger, sendTx: SendTx, options: {
 
   // Clear wiped-chain caches only after configuration is loaded. RPC errors retain them.
   useEffect(() => {
-    if (!ready) return;
+    if (!ready || !active) return;
     const cached = localStorage.getItem(storageKey);
     if (!cached || !validAddress(cached)) return;
     let cancelled = false;
-    void rpcCall(rpc, "eth_getCode", [cached, "latest"]).then(code => {
+    void rpcCall(rpc, "eth_getCode", [cached, "latest"], AbortSignal.timeout(10_000)).then(code => {
       if (!cancelled && currentAddress.current === cached && (code === "0x" || code === "0x0")) setAddress("");
     }).catch(() => { /* Keep saved addresses during temporary RPC failures. */ });
     return () => { cancelled = true; };
-  }, [ready, rpc, storageKey, setAddress]);
+  }, [ready, active, rpc, storageKey, setAddress]);
 
   const refresh = useCallback(async () => {
     if (!ready || !validAddress(address)) return;
     const generation = ++readGeneration.current;
     try {
-      const result = await rpcCall(rpc, "eth_call", [{ to: address, data: COUNTER_ABI.getCount }, "latest"]);
+      const result = await rpcCall(rpc, "eth_call", [{ to: address, data: COUNTER_ABI.getCount }, "latest"], AbortSignal.timeout(10_000));
       if (generation !== readGeneration.current || currentAddress.current !== address) return;
       if (typeof result !== "string" || !/^0x[0-9a-f]{64}$/i.test(result)) throw new Error(`This address does not return a counter value on ${network}`);
       const next = BigInt(result);
@@ -69,10 +69,12 @@ export function useCounter(log: Logger, sendTx: SendTx, options: {
   }, [ready, address, rpc, network]);
 
   useEffect(() => {
-    void refresh();
-    const interval = setInterval(() => { void refresh(); }, 3000);
-    return () => { clearInterval(interval); readGeneration.current++; };
-  }, [refresh]);
+    if (!active) return;
+    let stopped = false, timer: ReturnType<typeof setTimeout>;
+    const poll = async () => { await refresh(); if (!stopped) timer = setTimeout(poll, 3000); };
+    void poll();
+    return () => { stopped = true; clearTimeout(timer); readGeneration.current++; };
+  }, [refresh, active]);
 
   const run = useCallback(async (action: "deploy" | "increment") => {
     if (inFlight.current || !ready || !senderAddress) return;
