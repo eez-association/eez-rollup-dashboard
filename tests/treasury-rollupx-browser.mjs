@@ -3,7 +3,7 @@ import { createServer } from 'vite';
 import react from '@vitejs/plugin-react';
 import { chromium } from 'playwright';
 import { mainnetSetupKey } from '../src/lib/treasury/mainnetSetup.ts';
-const server=await createServer({configFile:false,envFile:false,plugins:[react()],server:{host:'127.0.0.1',port:0},base:'/'});
+const server=await createServer({configFile:false,envFile:false,plugins:[react()],server:{host:'127.0.0.1',port:0,watch:null},base:'/'});
 await server.listen();let browser;
 try {
   browser=await chromium.launch({headless:true,chromiumSandbox:true});

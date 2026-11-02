@@ -364,12 +364,15 @@ test('submission guard uses the real HTTP transport and configured RPC paths',as
  const server=createServer(async(req,res)=>{
    let body='';for await(const chunk of req)body+=chunk;
    const request=JSON.parse(body),chain=req.url==='/configured/l1'?'l1':req.url==='/configured/l2'?'l2':null;
-   requests.push({chain,...request});
    res.setHeader('Content-Type','application/json');
+   const respond = request => {
+   requests.push({chain,...request});
    const pin=network.protocol.find(p=>p.chain===chain),block=state.completed.filter(tx=>tx.chain===chain).at(-1);
    const result=request.method==='eth_getStorageAt' && pin ? toHex(BigInt(pin.implementation),{size:32})
      : request.method==='eth_getBlockByNumber' && block ? {hash:block.blockHash} : null;
-   res.end(JSON.stringify({jsonrpc:'2.0',id:request.id,result}));
+   return {jsonrpc:'2.0',id:request.id,result};
+   };
+   res.end(JSON.stringify(Array.isArray(request)?request.map(respond):respond(request)));
  });
  server.listen(0,'127.0.0.1');await once(server,'listening');
  try {

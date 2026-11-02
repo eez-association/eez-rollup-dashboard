@@ -16,11 +16,11 @@ const same = (a?: string | null, b?: string | null) => !!a && !!b && a.toLowerCa
 
 export function TreasuryMainnetSetup({ wallet, target, onComplete, onBridgeGas, network = defaultNetwork }: { wallet: TreasuryWallet; target: MainnetTarget; network?: SetupNetwork; onComplete: (c: TreasuryConfig) => void; onBridgeGas?: (destination: "l1" | "l2") => void }) {
   const mainnetSetupKey = `eez:treasury:paired-setup:${setupIdentity(network)}`, mainnetManifestKey = `${mainnetSetupKey}:manifest`;
-  const l1Name = network.testnet ? "Chiado" : "Ethereum";
+  const l1Name = network.discovered ? "L1" : network.testnet ? "Chiado" : "Ethereum";
   const [state, setState] = useState<MainnetSetupState | null>(null), [engine, setEngine] = useState<MainnetSetup | null>(null);
   const [safeL1, setSafeL1] = useState(""), [safeL2, setSafeL2] = useState(""), [existingMirror, setExistingMirror] = useState(false);
   const [createBoth, setCreateBoth] = useState(true);
-  const steps = mainnetSetupStepsFor(state).map(step => ({ ...step, label: step.label.split("Ethereum").join(l1Name), details: step.details.map(text => text.split("Ethereum").join(l1Name)) }));
+  const steps = mainnetSetupStepsFor(state).map(step => ({ ...step, label: step.label.split("Ethereum").join(l1Name), details: step.details.map(text => text.split("Ethereum").join(l1Name).split("USDC").join(network.discovered?.symbol ?? "USDC")) }));
   const pairedReady = !!engine && pairedSetupAvailable(engine.artifacts);
   const [busy, setBusy] = useState(false), [error, setError] = useState("");
   const [status, setStatus] = useState("Loading setup…");
@@ -125,8 +125,8 @@ export function TreasuryMainnetSetup({ wallet, target, onComplete, onBridgeGas, 
   const wrongDeployer = !!state && !needsOwners && !same(wallet.address, state.deployer);
   const gasKnown = !!balances && same(balances.address, wallet.address);
   const noGas = !!step && gasKnown && balances![step.chain] === 0n;
-  const symbol = network.testnet ? "test xDAI" : "ETH";
-  const assetName = network.testnet ? "Test USDC" : "USDC";
+  const symbol = network.discovered ? "native gas token" : network.testnet ? "test xDAI" : "ETH";
+  const assetName = network.discovered?.symbol ?? (network.testnet ? "Test USDC" : "USDC");
   const descriptions = [
     state?.matching ? `Create your ${l1Name} Safe at the address reserved for both chains, with your wallet as sole owner (1 of 1).` : state?.creation === "create-both" ? `Create your ${l1Name} Safe with your selected wallet as its only owner (threshold 1), then prepare its local policy.` : `Prepare the local policy for your existing ${l1Name} Safe. Spending is authorized by the Safe’s owners later.`,
     state?.creation === "create-both" ? `Create the EEZ-X Safe with the same wallet owner. Its first Safe transaction will hand ownership to L1Owners during final setup.` : `Connect the EEZ-X mirror directly to your ${l1Name} Safe’s live owners and approval threshold.`,
@@ -171,7 +171,7 @@ export function TreasuryMainnetSetup({ wallet, target, onComplete, onBridgeGas, 
     <div className={styles.heading}><div><p className="eez-eyebrow">[ {l1Name.toUpperCase()} + EEZ-X ]</p>
       <h2 ref={heading} tabIndex={-1}>{state?.completed.length === steps.length ? "Verify your treasury" : "Set up your shared treasury"}</h2>
       <p>Create two new Safes, or connect your existing {l1Name} Safe and its EEZ-X mirror.</p>
-    </div><span className={styles.badge}>{network.testnet ? "Shared testnet" : "Ethereum + EEZ-X"}</span></div>
+    </div><span className={styles.badge}>{network.discovered ? "Dashboard network" : network.testnet ? "Shared testnet" : "Ethereum + EEZ-X"}</span></div>
     {!state ? <section className={styles.card}><h3>Choose your Safes</h3>
       <p className={styles.safeExplanation}>Manage owners on {l1Name}, and <strong>both Safes stay in sync automatically.</strong></p>
       <div className={styles.setupOptions} role="group" aria-label="Safe setup options">
@@ -237,7 +237,7 @@ export function TreasuryMainnetSetup({ wallet, target, onComplete, onBridgeGas, 
       {state.pending ? <div className={styles.notice} role="status">
         <p>{state.pending.hash ? "Waiting for confirmation…" : "Waiting for the wallet transaction…"} Keep this recorded request; it will be checked automatically after reload.</p>
         {state.pending.hash && <p>{confirmationElapsed}s checking confirmation on this screen. Network confirmation time varies.</p>}
-        {state.pending.hash && <a href={`${target[state.pending.chain].explorer.replace(/\/$/, "")}/tx/${state.pending.hash}`} target="_blank" rel="noreferrer">View transaction ↗</a>}
+        {state.pending.hash && target[state.pending.chain].explorer && <a href={`${target[state.pending.chain].explorer.replace(/\/$/, "")}/tx/${state.pending.hash}`} target="_blank" rel="noreferrer">View transaction ↗</a>}
       </div> : <>
         {needsOwners && <div className={styles.approvalStep}>
           <p>Approve with {review ? `${review.threshold} current owner${review.threshold === 1 ? "" : "s"}` : "this Safe’s current owners"}, then submit the transaction.</p>

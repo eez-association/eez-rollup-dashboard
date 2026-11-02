@@ -53,7 +53,7 @@ export function TreasuryPairedHistory({ target, network }: { target: MainnetTarg
       const status = o?.status === 'included' ? 'confirmed' : o?.status === 'failed' ? 'failed' : 'pending';
       return <li key={row.id} className={`${styles.row} ${layout.row}`} data-tx-hash={row.hash} data-status={label.toLowerCase()}>
         <div className={styles.actionCol}><span className={styles.typeLabel}>Step {index + 1}</span><span className={`${styles.detail} ${layout.detail}`}>{row.label}</span></div>
-        <div className={styles.routeCol}><NetworkIcon chain={row.chain} decorative /><span>{row.chain === 'l1' ? network.testnet ? 'Chiado' : 'Ethereum' : 'EEZ-X'}</span></div>
+        <div className={styles.routeCol}><NetworkIcon chain={row.chain} decorative /><span>{row.chain === 'l1' ? network.discovered ? 'L1' : network.testnet ? 'Chiado' : 'Ethereum' : 'EEZ-X'}</span></div>
         <div className={styles.transactionCol}>{row.hash ? link(row, 'tx', row.hash, `${row.hash.slice(0, 10)}…${row.hash.slice(-6)}`) : <span className={styles.noHash}>Awaiting wallet</span>}</div>
         <div className={styles.blockCol}>{o?.blockNumber ? link(row, 'block', String(BigInt(o.blockNumber)), `#${BigInt(o.blockNumber).toLocaleString()}`) : '—'}</div>
         <div className={styles.statusCol}><span className={`${styles.badge} ${styles[status]}`} title={o?.detail}>{label}</span></div>

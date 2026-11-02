@@ -16,7 +16,9 @@ x-cow-common: &cow-common
     - ALL
   pids_limit: 128
   environment: &cow-environment
-    COW_NETWORK: "${COW_NETWORK:-mainnet}"
+    # Let a selected deployment profile choose its network. With neither set,
+    # network_config.py retains the standalone mainnet default.
+    COW_NETWORK: "${COW_NETWORK:-}"
     COW_DEPLOYMENT_ENV: "${COW_DEPLOYMENT_ENV:-}"
     L2_GENESIS_HASH: "${L2_GENESIS_HASH:-}"
     L1_RPC: "${L1_RPC:-}"
@@ -45,12 +47,14 @@ x-cow-common: &cow-common
     COW_WRAPPER_EXPLORER_API: "${COW_WRAPPER_EXPLORER_API:-}"
     EEZ_UI_L1_RPC_UPSTREAM: "${EEZ_UI_L1_RPC_UPSTREAM:-}"
     EEZ_UI_L2_RPC_UPSTREAM: "${EEZ_UI_L2_RPC_UPSTREAM:-}"
+    EEZ_UI_L1_FRONT_UPSTREAM: "${EEZ_UI_L1_FRONT_UPSTREAM:-}"
     EEZ_UI_L2_FRONT_UPSTREAM: "${EEZ_UI_L2_FRONT_UPSTREAM:-}"
     EEZ_UI_L1_EXPLORER_URL: "${EEZ_UI_L1_EXPLORER_URL:-}"
     EEZ_UI_L2_EXPLORER_URL: "${EEZ_UI_L2_EXPLORER_URL:-}"
     EEZ_L1_BRIDGE_SENDER: "${EEZ_L1_BRIDGE_SENDER:-}"
     EEZ_L2_BRIDGE_RECEIVER: "${EEZ_L2_BRIDGE_RECEIVER:-}"
     EEZL2_ADDRESS: "${EEZL2_ADDRESS:-}"
+    EEZ_REGISTRY_ADDRESS: "${EEZ_REGISTRY_ADDRESS:-}"
     EEZ_ROLLUP_ID: "${EEZ_ROLLUP_ID:-}"
   volumes:
     - cow-runtime:/app/runtime
@@ -73,6 +77,7 @@ services:
       EEZ_UI_L1_NETWORK_NAME: "${EEZ_UI_L1_NETWORK_NAME:-}"
       EEZ_UI_L1_NETWORK_LOGO_URL: "${EEZ_UI_L1_NETWORK_LOGO_URL:-}"
       EEZ_UI_L1_EXPLORER_API_URL: "${EEZ_UI_L1_EXPLORER_API_URL:-}"
+      EEZ_UI_TREASURY_TOKEN_ADDRESS: "${EEZ_UI_TREASURY_TOKEN_ADDRESS:-}"
       EEZ_UI_TOKEN_LIST_URL: "${EEZ_UI_TOKEN_LIST_URL:-}"
       EEZ_UI_ENCLAVE: "${EEZ_UI_ENCLAVE:-standalone}"
       EEZ_UI_LISTEN: "8080"

@@ -31,7 +31,8 @@ export function TreasuryPaymentHistory({ history, deployment }: { history: Retur
     return historyStatus(entry, observation?.checking && observation.outcome ? { ...observation, checking: false } : observation);
   };
   const entries = ordered.filter(e => filter === "all" || category(e) === filter);
-  const names = { l1: deployment.l1.chainId === 10200 ? "Chiado" : "Ethereum", l2: "EEZ-X" };
+  const assetLabel = deployment.network?.discovered?.symbol ?? "USDC";
+  const names = { l1: deployment.l1.chainId === 10200 ? "Chiado" : deployment.l1.chainId === 1 ? "Ethereum" : "L1", l2: "EEZ-X" };
   return <section className={styles.card} aria-label="Payment history">
     <div className={styles.cardHeader}><div><h3 className={styles.cardTitle}>Payment history</h3><p className={styles.noHash}>Newest first · Saved in this browser</p></div>
       <div className={styles.headerRight}><span className={styles.count}>{ordered.length} {ordered.length === 1 ? "payment" : "payments"}</span>
@@ -61,9 +62,9 @@ export function TreasuryPaymentHistory({ history, deployment }: { history: Retur
       const badge = status === "settled" ? styles.confirmed : status === "pending" ? styles.pending : styles.failed;
       return <li key={entry.id} className={layout.paymentEntry} data-testid="history-entry" data-status={status} data-safe-hash={intent?.safeHash}>
         <div className={`${styles.row} ${layout.paymentRow}`}>
-          <div className={styles.actionCol}><strong className={styles.typeLabel}>{amount} USDC → {names[payment.destination]}</strong>
+          <div className={styles.actionCol}><strong className={styles.typeLabel}>{amount} {assetLabel} → {names[payment.destination]}</strong>
             <span className={styles.detail}>{payment.kind === "invoice" ? "Invoice" : payment.kind === "transfer" ? "Transfer between Safes" : "Fixed payment"}</span>
-            {actual && <div className={layout.paymentSplit} aria-label="Actual funding split"><span><span className={treasury.chainLabel} data-chain="l1">{names.l1}</span> {formatUSDC(BigInt(actual.fromL1))} USDC</span><span><span className={treasury.chainLabel} data-chain="l2">EEZ-X</span> {formatUSDC(BigInt(actual.fromL2))} USDC</span></div>}</div>
+            {actual && <div className={layout.paymentSplit} aria-label="Actual funding split"><span><span className={treasury.chainLabel} data-chain="l1">{names.l1}</span> {formatUSDC(BigInt(actual.fromL1))} {assetLabel}</span><span><span className={treasury.chainLabel} data-chain="l2">EEZ-X</span> {formatUSDC(BigInt(actual.fromL2))} {assetLabel}</span></div>}</div>
           <div className={`${styles.routeCol} ${layout.paymentRoute}`}><NetworkIcon chain={source} decorative /><span>{names[source]} → {names[payment.destination]}</span></div>
           <div className={styles.transactionCol} role="group" aria-label="Transaction links">{transactions.length ? transactions.map(tx =>
             <div className={layout.paymentTransaction} key={`${tx.chain}:${tx.hash}`}>

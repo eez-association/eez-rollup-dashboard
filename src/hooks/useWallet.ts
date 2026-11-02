@@ -403,5 +403,6 @@ export function useWallet(log: Logger, configLoaded = false) {
     sendL1Tx,
     sendL1ProxyTx,
     quoteProxyFees,
+    refreshBalances: () => { const address = stateRef.current.address; return address ? refreshBalance(address) : Promise.resolve(); },
   };
 }

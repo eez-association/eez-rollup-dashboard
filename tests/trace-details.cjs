@@ -41,7 +41,7 @@ model.recordedView = { ...model, mode: "physical", recordedView: null,
   process.env.TMPDIR = `${directory}/tmp`;
   let server, browser;
   try {
-    let url = process.env.EEZ_UI_URL;
+    let url = process.env.EEZ_UI_URL ? process.env.EEZ_UI_URL.replace(/\/$/, '') + '/' : undefined;
     if (!url) {
       const { createServer } = await import("vite");
       const { default: react } = await import("@vitejs/plugin-react");
@@ -50,7 +50,7 @@ model.recordedView = { ...model, mode: "physical", recordedView: null,
       await server.listen();
       url = `http://127.0.0.1:${server.httpServer.address().port}/dashboard/`;
     }
-    browser = await chromium.launch({ headless: true, chromiumSandbox: true });
+    browser = await chromium.launch({ headless: true, chromiumSandbox: process.env.TREASURY_BROWSER_SANDBOX !== '0', executablePath: process.env.EEZ_UI_CHROMIUM_EXECUTABLE });
     const page = await browser.newPage();
     page.setDefaultTimeout(15000);
     const errors = [];
@@ -183,6 +183,218 @@ model.recordedView = { ...model, mode: "physical", recordedView: null,
     await page.waitForFunction(() => !document.fullscreenElement);
     const inspector = page.getByRole("link", { name: "Blocks & settlement →" });
     assert.ok((await inspector.getAttribute("href")).includes("mode=inspect"));
+    // Use a decoded L2 fixture: both callers must reach one existing call box.
+    const { scenario, frame, address: fixtureAddress } = await import("../trace-decoder/tests/fixtures/scenarios.mjs");
+    const { decodeCrossChainTrace } = await import("../trace-decoder/src/engine.mjs");
+    const { buildFlowModel } = await import("../trace-decoder/flow/model.mjs");
+    const { traceRows } = await import("../trace-decoder/flow/rows.mjs");
+    const fixture = scenario({ direction: "L2", repeat: 2, sharedAttempt: true, unrelatedAttempts: true });
+    const linked = buildFlowModel(await decodeCrossChainTrace(fixture.config, fixture.trigger));
+    await page.route("**/trace/api/jobs/*/result", route => route.fulfill({ json: {
+      apiVersion: 1, partial: false, observedAt: "2026-10-14T12:00:00Z", model: linked,
+    } }));
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.getByRole("button", { name: "Refresh", exact: true }).click();
+    await page.getByRole("button", { name: "Call map", exact: true }).click();
+    const protocol = page.getByRole("checkbox", { name: "Show protocol calls", exact: true });
+    await protocol.check();
+    const tableLoad = linked.nodes.find(node => node.fn.startsWith('loadExecutionTable'));
+    const sourceRoot = linked.nodes.find(node => node.tx === fixture.trigger && node.path === '0');
+    const loadBox = page.locator(`[data-map-node="${tableLoad.id}"]`);
+    assert.match(await loadBox.getAttribute('title'), /^1\. /);
+    const loadPosition = await loadBox.boundingBox(), triggerPosition = await page.locator(`[data-map-node="${sourceRoot.id}"]`).boundingBox();
+    assert.ok(loadPosition.y + loadPosition.height < triggerPosition.y, 'L2 table load is above the trigger transaction');
+    const otherAttempts = linked.nodes.filter(node => node.flowAttempt === "other");
+    assert.equal(otherAttempts.length, 2);
+    for (const node of otherAttempts) assert.equal(await page.locator(`[data-map-node="${node.id}"]`).count(), 0);
+    await page.getByText("Unrelated L1 attempts are hidden.", { exact: false }).waitFor();
+    const link = linked.protocolLinks[0];
+    const proxyArrow = `[data-protocol-link="true"][data-from="${link.from}"][data-to="${link.to}"]`;
+    await page.locator(proxyArrow).waitFor({ state: "attached" });
+    assert.equal(await page.locator('[data-protocol-link="true"]').count(), 2);
+    for (const crossing of linked.crossChainLinks) {
+      assert.notEqual(crossing.manager,undefined);
+      await page.locator(`path[data-from="${crossing.from}"][data-to="${crossing.manager}"][data-crossing="false"]`).waitFor({state:'attached'});
+      await page.locator(`path[data-from="${crossing.manager}"][data-to="${crossing.to}"][data-crossing="true"]`).waitFor({state:'attached'});
+      assert.equal(await page.locator(`path[data-from="${crossing.from}"][data-to="${crossing.to}"][data-crossing="true"]`).count(),0,'crossing must not bypass EEZL2');
+    }
+    assert.equal(await page.locator(`[data-map-node="${link.to}"]`).count(), 1);
+    assert.equal(await page.locator(`path[data-crossing="true"][data-to="${link.to}"]`).count(), 1);
+    await page.locator(`[data-map-node="${link.from}"]`).click();
+    assert.equal(await page.locator(proxyArrow).evaluate(el => el.parentElement.dataset.active), "true");
+    await page.getByRole("button", { name: "Hide call details", exact: true }).click();
+    await page.getByRole("button", { name: "100%", exact: true }).click();
+    for (const connection of linked.protocolLinks) {
+      const proxy = await page.locator(`[data-map-node="${connection.from}"]`).boundingBox();
+      const target = await page.locator(`[data-map-node="${connection.to}"]`).boundingBox();
+      assert.ok(target.x > proxy.x + proxy.width, 'recorded targets sit to the right of their proxies');
+      assert.ok(Math.abs(proxy.y + proxy.height / 2 - target.y - target.height / 2) < 1, 'proxy and target align for a straight arrow');
+    }
+    assert.ok(await page.evaluate(() => {
+      const boxes = [...document.querySelectorAll('[data-map-node]')].map(box => box.getBoundingClientRect());
+      return [...document.querySelectorAll('path[data-protocol-link="true"]')].every(path => {
+        const matrix = path.getScreenCTM(), length = path.getTotalLength();
+        for (let at = 2; at < length - 2; at += 4) {
+          const point = path.getPointAtLength(at).matrixTransform(matrix);
+          if (boxes.some(box => point.x > box.left + 1 && point.x < box.right - 1 && point.y > box.top + 1 && point.y < box.bottom - 1)) return false;
+        }
+        return true;
+      });
+    }), "recorded proxy connectors stay clear of call boxes");
+    await page.getByRole('button', { name: 'Fit width', exact: true }).click();
+    await canvas.evaluate(element => { element.style.maxHeight = "none"; element.scrollTo(0, 0); });
+    await page.screenshot({ path: `${directory}/protocol-links.png`, fullPage: true });
+    await canvas.evaluate(element => { element.style.maxHeight = ""; });
+    await page.getByRole("region", { name: "Related transactions" }).getByRole("button", { name: /Settlement batch/ }).click();
+    for (const node of otherAttempts) await page.locator(`[data-map-node="${node.id}"]`).waitFor();
+    await page.getByRole("button", { name: "Show connected flow", exact: true }).click();
+    for (const node of otherAttempts) assert.equal(await page.locator(`[data-map-node="${node.id}"]`).count(), 0);
+    await protocol.uncheck();
+    assert.equal(await page.locator('[data-protocol-link="true"]').count(), 0);
+    assert.equal(await page.locator(`[data-map-node="${link.to}"]`).count(), 1);
+    await protocol.check();
+    // Search and folding must not leave connectors to absent boxes.
+    await page.getByRole("textbox", { name: "Find a call" }).fill("executeOnBehalf");
+    assert.equal(await page.locator('[data-protocol-link="true"]').count(), 0);
+    await page.getByRole("textbox", { name: "Find a call" }).fill("");
+    await page.locator(proxyArrow).waitFor({ state: "attached" });
+    const root = linked.nodes.find(node => node.children.includes(link.from));
+    await page.locator(`[data-map-node="${root.id}"]`).locator("..").getByRole("button", { name: `Fold the calls made by ${root.contract} ${root.fn}`, exact: true }).click();
+    assert.equal(await page.locator(proxyArrow).count(), 0);
+    await page.getByRole("button", { name: "Expand all", exact: true }).click();
+    await page.getByRole("button", { name: "Lanes", exact: true }).click();
+    await page.locator(proxyArrow).waitFor({ state: "attached" });
+    assert.equal(await page.locator(`[data-flow-node="${link.to}"]`).count(), 1);
+    assert.equal(await page.locator(`path[data-crossing="true"][data-to="${link.to}"]`).count(), 1);
+    for (const width of [1440, 1024, 768, 390]) {
+      await page.setViewportSize({ width, height: 1000 });
+      await page.waitForFunction(() => [...document.querySelectorAll('path[data-protocol-link="true"]')].every(path => {
+        const boxes = [...document.querySelectorAll('[data-flow-node]')].map(box => box.getBoundingClientRect());
+        const matrix = path.getScreenCTM(), length = path.getTotalLength();
+        for (let at = 2; at < length - 2; at += 4) {
+          const point = path.getPointAtLength(at).matrixTransform(matrix);
+          if (boxes.some(box => point.x > box.left + 1 && point.x < box.right - 1 && point.y > box.top + 1 && point.y < box.bottom - 1)) return false;
+        }
+        return true;
+      }), undefined, { timeout: 3000 });
+      assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `no page overflow at ${width}px`);
+    }
+    // L1 origins need the same recorded proxy connections for every reentry,
+    // including the later L2 delivery and its nested callback.
+    const l1Fixture = scenario({ deep: true });
+    const l1Linked = buildFlowModel(await decodeCrossChainTrace(l1Fixture.config, l1Fixture.trigger));
+    await page.route('**/trace/api/jobs/*/result', route => route.fulfill({ json: {
+      apiVersion: 1, partial: false, observedAt: '2026-10-14T12:00:00Z', model: l1Linked,
+    } }));
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.getByRole('button', { name: 'Refresh', exact: true }).click();
+    await page.getByRole('button', { name: 'Call map', exact: true }).click();
+    await protocol.check();
+    assert.equal(l1Linked.protocolLinks.length, 3);
+    for(const crossing of l1Linked.crossChainLinks){
+      assert.notEqual(crossing.manager,undefined);
+      await page.locator(`path[data-from="${crossing.manager}"][data-to="${crossing.to}"][data-crossing="true"]`).waitFor({state:'attached'});
+    }
+    await page.waitForFunction(() => document.querySelector('[aria-label="Initiating transactions"]')?.textContent.includes('L1'));
+    const protocolRows = traceRows(l1Linked, { protocol: true, localReads: false });
+    for (const [index, row] of protocolRows.entries()) {
+      const box = page.locator(`[data-map-node="${row.node.id}"]`);
+      assert.equal(Number((await box.getAttribute('title')).match(/^\d+/)[0]), index + 1, 'number calls in recorded tree order');
+      if (row.parent !== null) {
+        assert.equal(l1Linked.nodes[row.parent].chain, row.node.chain);
+        await page.locator(`path[data-from="${row.parent}"][data-to="${row.node.id}"][data-crossing="false"]`).waitFor({ state: 'attached' });
+      }
+    }
+    assert.match(await page.getByLabel('Initiating transactions', { exact: true }).textContent(), /L1/);
+    assert.equal(await page.getByRole('combobox', { name: 'Search network', exact: true }).count(), 1);
+    for (const connection of l1Linked.protocolLinks) {
+      await page.locator(`[data-protocol-link="true"][data-from="${connection.from}"][data-to="${connection.to}"]`).waitFor({ state: 'attached' });
+      assert.equal(await page.locator(`[data-map-node="${connection.to}"]`).count(), 1);
+      assert.equal(await page.locator(`path[data-crossing="true"][data-to="${connection.to}"]`).count(), 1);
+    }
+    assert.equal(await page.locator('[data-protocol-link="true"]').count(), 3);
+    await page.screenshot({ path: `${directory}/l1-reentrant-protocol-links.png`, fullPage: true });
+    await page.getByRole('button', { name: 'Lanes', exact: true }).click();
+    for (const connection of l1Linked.protocolLinks) {
+      await page.locator(`[data-protocol-link="true"][data-from="${connection.from}"][data-to="${connection.to}"]`).waitFor({ state: 'attached' });
+      assert.equal(await page.locator(`[data-flow-node="${connection.to}"]`).count(), 1);
+    }
+    await protocol.uncheck();
+    await page.waitForFunction(() => document.querySelectorAll('[data-protocol-link="true"]').length === 0);
+    const ordinaryRows = traceRows(l1Linked, { protocol: false, localReads: false });
+    assert.deepEqual(await page.locator('[data-flow-node]').evaluateAll(nodes => nodes.map(node => Number(node.dataset.flowNode))), ordinaryRows.map(row => row.node.id), 'turning protocol calls off restores the unchanged logical application flow');
+    assert.equal(await page.locator('[data-protocol-link="true"]').count(), 0);
+    await protocol.check();
+    await page.getByRole('textbox', { name: 'Find a call' }).fill('executeOnBehalf');
+    await page.waitForFunction(() => document.querySelectorAll('[data-protocol-link="true"]').length === 0);
+    assert.equal(await page.locator('[data-protocol-link="true"]').count(), 0, 'search does not leave connections to hidden targets');
+    await page.getByRole('textbox', { name: 'Find a call' }).fill('');
+    // A user can call the L1 proxy directly. Its entry point must remain
+    // visible even with plumbing hidden, and earlier batch preparation belongs above it.
+    const { M, l1Entry } = await import('../trace-decoder/tests/fixtures/scenarios.mjs');
+    const { protocol: protocolAbi } = await import('../trace-decoder/src/protocol.mjs');
+    const directFixture = scenario({ deep: true });
+    const directTx = directFixture.txs.L1.get(directFixture.trigger);
+    directTx.trace = directTx.trace.calls[0];
+    Object.assign(directTx.transaction, {from:directTx.trace.from,to:directTx.trace.to,input:directTx.trace.input});
+    directFixture.txs.L1.get(directFixture.posting).trace.calls.push(frame(M.L1,M.L1,
+      protocolAbi.L1.encodeFunctionData('_attemptExecuteImmediateL2Txs',[l1Entry('0x'+'00'.repeat(32))])));
+    const directTrace = await decodeCrossChainTrace(directFixture.config,directFixture.trigger);
+    directTrace.transactionLinks = [{state:'complete',sourceChain:'L1',sourceHash:directFixture.trigger,
+      references:directTrace.transactions.map(tx=>({chain:tx.chain,hash:tx.hash,role:tx.hash===directFixture.trigger?'source':tx.chain==='L1'?'l1-post-batch':'l2-delivery'}))}];
+    const directModel=buildFlowModel(directTrace);
+    await page.route('**/trace/api/jobs/*/result',route=>route.fulfill({json:{apiVersion:1,partial:false,observedAt:'2026-10-14T12:00:00Z',model:directModel}}));
+    await page.getByRole('button',{name:'Refresh',exact:true}).click();
+    await page.getByRole('button',{name:'Call map',exact:true}).click();
+    await protocol.check();
+    const entry=directModel.nodes.find(n=>n.tx===directFixture.trigger&&n.path==='0');
+    const post=directModel.nodes.find(n=>n.tx===directFixture.posting&&n.path==='0');
+    const emptyAttempt=directModel.nodes.find(n=>n.fn.startsWith('_attemptExecute'));
+    await page.waitForFunction(({id,fn})=>document.querySelector(`[data-map-node="${id}"]`)?.getAttribute('title')?.includes(fn),{id:entry.id,fn:entry.fn});
+    assert.match(await page.locator(`[data-map-node="${post.id}"]`).getAttribute('title'),/^1\. /);
+    assert.equal(await page.locator(`[data-map-node="${emptyAttempt.id}"]`).count(),0);
+    const postBox=await page.locator(`[data-map-node="${post.id}"]`).boundingBox(),entryBox=await page.locator(`[data-map-node="${entry.id}"]`).boundingBox();
+    assert(postBox.y+postBox.height<entryBox.y,'L1 batch preparation is above the initiating user transaction');
+    await page.getByRole('region',{name:'Related transactions'}).getByRole('button',{name:/Settlement batch/}).click();
+    await page.locator(`[data-map-node="${emptyAttempt.id}"]`).waitFor();
+    await page.getByRole('button',{name:'Show connected flow',exact:true}).click();
+    await protocol.uncheck();
+    const entryCard=page.locator(`[data-map-node="${entry.id}"]`);await entryCard.waitFor();
+    assert.equal(await entryCard.getAttribute('data-chain'),'L1');
+    assert.match(await entryCard.getAttribute('title'),/^1\. /,'the initiating proxy is the first ordinary call');
+    const firstCross=directModel.crossChainLinks.find(link=>link.from===entry.id);
+    await page.locator(`path[data-from="${entry.id}"][data-to="${firstCross.to}"][data-crossing="true"]`).waitFor({state:'attached'});
+    assert.equal(await page.locator(`[data-map-node="${post.id}"]`).count(),0,'internal protocol calls stay hidden');
+    await page.screenshot({path:`${directory}/l1-direct-proxy-entry.png`,fullPage:true});
+    const accounts = scenario({ direction: 'L2' }), accountTx = accounts.txs.L2.get(accounts.trigger);
+    const callerAddress = fixtureAddress(900), eoaAddresses = [fixtureAddress(1000), fixtureAddress(1001)];
+    const codeAddress = fixtureAddress(1002);
+    Object.assign(accountTx.trace, { to: callerAddress, output: '0x', calls:
+      [...eoaAddresses, eoaAddresses[0], codeAddress].map(to => frame(callerAddress, to)) });
+    accountTx.transaction.to = callerAddress; accountTx.receipt.logs = [];
+    const accountRpc = accounts.config.rpc;
+    accounts.config.rpc = async (url, method, params) => method === 'eth_getCode'
+      ? params[0] === codeAddress ? '0x00' : '0x' : accountRpc(url, method, params);
+    const accountModel = buildFlowModel(await decodeCrossChainTrace(accounts.config, accounts.trigger));
+    await page.route('**/trace/api/jobs/*/result', route => route.fulfill({ json: {
+      apiVersion: 1, partial: false, observedAt: '2026-10-14T12:00:00Z', model: accountModel,
+    } }));
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.getByRole('button', { name: 'Refresh', exact: true }).click();
+    await page.getByRole('button', { name: 'Call map', exact: true }).click();
+    const eoaNodes = accountModel.nodes.filter(node => node.accountType === 'eoa');
+    assert.deepEqual(eoaNodes.map(node => node.contract), ['EOA_1', 'EOA_2', 'EOA_1']);
+    for (const node of eoaNodes) await page.locator(`[data-map-node="${node.id}"]`).getByText(node.contract, { exact: true }).waitFor();
+    const hasCode = accountModel.nodes.find(node => node.address === codeAddress);
+    await page.locator(`[data-map-node="${hasCode.id}"]`).getByText('Unknown contract', { exact: true }).waitFor();
+    await page.getByRole('textbox', { name: 'Find a call' }).fill('EOA_2');
+    await page.getByRole('region', { name: 'Call map canvas' }).getByText('EOA_2', { exact: true }).waitFor();
+    await page.getByRole('textbox', { name: 'Find a call' }).fill('');
+    await page.getByRole('button', { name: 'Show call details', exact: true }).click();
+    await page.locator(`[data-map-node="${eoaNodes[0].id}"]`).click();
+    await page.getByLabel('Selected call details').getByText('EOA · no bytecode at the transaction block', { exact: true }).waitFor();
+    for (const address of eoaAddresses) assert.equal(await page.getByRole('region', { name: 'Contracts touched' }).getByText(address, { exact: true }).count(), 0);
+    await page.screenshot({ path: `${directory}/eoa-labels.png`, fullPage: true });
     await page.route("**/trace/api/jobs/*/result", route => route.fulfill({ json: {
       apiVersion: 1, partial: true, observedAt: "2026-10-14T12:00:00Z",
       model: { ...model, nodes: [], roots: [], recordedView: null,

@@ -18,10 +18,10 @@ page.on('request', request => { if (/\/TreasuryDemo-[^/]+\.js$/.test(request.url
 await context.route('**/*', async route => {
   if (route.request().method() === 'POST') {
     const body = route.request().postDataJSON();
-    if (body?.method) {
-      methods.push(body.method);
-      if (/send|sign|anvil_|evm_|wallet_/i.test(body.method)) {
-        errors.push(`Unexpected write RPC: ${body.method}`); await route.abort(); return;
+    for (const item of Array.isArray(body) ? body : [body]) if (item?.method) {
+      methods.push(item.method);
+      if (/send|sign|anvil_|evm_|wallet_/i.test(item.method)) {
+        errors.push(`Unexpected write RPC: ${item.method}`); await route.abort(); return;
       }
     }
   }
@@ -68,6 +68,7 @@ try {
   const sharedRpc = async route => {
     if (route.request().method() !== 'POST') return route.fallback();
     const body = route.request().postDataJSON(); let result;
+    if (Array.isArray(body)) return route.fulfill({ json: { jsonrpc: '2.0', id: null, error: { code: -32600, message: 'Fixture supports individual RPC requests' } } });
     const safeTarget = (body.method === 'eth_call' ? body.params[0].to : body.params[0])?.toLowerCase?.();
     if (['eth_getCode', 'eth_getStorageAt', 'eth_call'].includes(body.method) && [existingSafe.toLowerCase(), existingSingleton.toLowerCase()].includes(safeTarget)) {
       if (body.method === 'eth_getCode') result = artifacts[safeTarget === existingSafe.toLowerCase() ? 'SafeProxy' : 'Safe'].runtime;
@@ -243,6 +244,7 @@ try {
   const historyRpc = async route => {
     if (route.request().method() !== 'POST') return route.fallback();
     const body = route.request().postDataJSON(); let result;
+    if (Array.isArray(body)) return route.fulfill({ json: { jsonrpc: '2.0', id: null, error: { code: -32600, message: 'Fixture supports individual RPC requests' } } });
     const i = body.method === 'eth_getTransactionReceipt' ? l2Pending.transactions.indexOf(body.params[0]) : -1;
     if (i >= 0) {
       if (historyOffline && i === 0) return route.fulfill({ json: { jsonrpc: '2.0', id: body.id, error: { code: -32000, message: 'History RPC unavailable' } } });
@@ -274,6 +276,7 @@ try {
   const trackingRpc = async route => {
     if (route.request().method() !== 'POST') return route.fallback();
     const body = route.request().postDataJSON();
+    if (Array.isArray(body)) return route.fulfill({ json: { jsonrpc: '2.0', id: null, error: { code: -32600, message: 'Fixture supports individual RPC requests' } } });
     let result;
     if (body?.method === 'eth_getBlockByNumber' && ['latest', '0x400'].includes(body.params[0])) result = { ...registrationBlock, number: '0x400', hash: keccak256(toHex('tracking head')) };
     else if (body?.method === 'eth_getTransactionCount' && body.params[0].toLowerCase() === pending.pending.sender.toLowerCase() && /^0x/.test(body.params[1]))

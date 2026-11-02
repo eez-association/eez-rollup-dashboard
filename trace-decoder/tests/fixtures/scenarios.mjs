@@ -14,7 +14,7 @@ export const l1Entry=(key,calls=[],extra={})=>({rollupUpdates:[{rollupId:1,ether
 export const l2Entry=(key,calls=[],extra={})=>({proxyEntryHash:key,incomingCalls:calls,expectedOutgoingCalls:[],rollingHash:ZERO,success:true,returnData:result,...extra});
 export const batch=(entries,staticEntries=[])=>({expectedRootPerRollup:[],entries,staticEntries,immediateEntryCount:0,immediateStaticEntryCount:0,proofSystems:[address(90)],rollupIdsWithProofSystems:[{rollupId:1,proofSystemIndexes:[0]}],blobIndices:[],callData:'0x',proofs:['0x'],blockNumber:0,bindMsgSenderInPublicInput:false});
 
-export function scenario({direction='L1',repeat=1,deep=false,isStatic=false,revert=false,rollback=false,ambiguous=false}={}) {
+export function scenario({direction='L1',repeat=1,deep=false,isStatic=false,revert=false,rollback=false,ambiguous=false,attempts=false,unrelatedAttempts=false,sharedAttempt=false}={}) {
   const calls=[],txs={L1:new Map(),L2:new Map()},blocks={L1:new Map(),L2:new Map()},registry={L1:new Map(),L2:new Map()};
   const source=address(10),target=address(11),callback=address(12),inner=address(13);
   const outProxy=address(20),inProxy=address(21),backProxy=address(22),callbackProxy=address(23),innerProxy=address(24),innerSourceProxy=address(25);
@@ -73,7 +73,26 @@ export function scenario({direction='L1',repeat=1,deep=false,isStatic=false,reve
   } else {
     add('L2',hash('table-load'),200,0,frame(address(98),M.L2,protocol.L2.encodeFunctionData('loadExecutionTable',[entriesL2,[]])));
     add('L2',trigger,200,1,frame(address(99),source,app.encodeFunctionData('run'),outs));
-    add('L1',posting,100,0,frame(address(99),M.L1,protocol.L1.encodeFunctionData('postAndVerifyBatch',[batch(entriesL1)]),Array.from({length:repeat},()=>delivery('L1',inProxy,target,data)),{logs:[event('L1','BatchPosted',[ZERO,[1]])]}));
+    const dispatches = Array.from({length:repeat},(_,i) => {
+      const dispatch = delivery('L1',inProxy,target,data);
+      return attempts ? frame(M.L1,M.L1,protocol.L1.encodeFunctionData('_attemptExecuteImmediateL2Txs',[entriesL1[i]]),[dispatch]) : dispatch;
+    });
+    if (sharedAttempt) {
+      const entry = l1Entry(ZERO, Array.from({length:repeat},()=>row(source,target,data,1,{isStatic})));
+      entriesL1.splice(0,entriesL1.length,entry);
+      dispatches.splice(0,dispatches.length,frame(M.L1,M.L1,protocol.L1.encodeFunctionData('_attemptExecuteImmediateL2Txs',[entry]),
+        Array.from({length:repeat},()=>delivery('L1',inProxy,target,data))));
+    }
+    if (unrelatedAttempts) {
+      const otherData = app.encodeFunctionData('run'), otherProxy = address(29);
+      registry.L1.set(lower(otherProxy), [true, address(77), 1]);
+      for (const calls of [[], [delivery('L1',otherProxy,address(88),otherData)]]) {
+        const entry = l1Entry(ZERO, calls.length ? [row(address(77),address(88),otherData,1)] : []);
+        entriesL1.push(entry);
+        dispatches.push(frame(M.L1,M.L1,protocol.L1.encodeFunctionData('_attemptExecuteImmediateL2Txs',[entry]),calls));
+      }
+    }
+    add('L1',posting,100,0,frame(address(99),M.L1,protocol.L1.encodeFunctionData('postAndVerifyBatch',[batch(entriesL1)]),dispatches,{logs:[event('L1','BatchPosted',[ZERO,[1]])]}));
     deliveries.push(posting);
   }
   const settlement={l1BlockNumber:'0x64',l1BlockHash:blocks.L1.get(100).hash,l1TransactionHash:posting,l1TransactionIndex:'0x0',l2Range:{firstBlockNumber:'0xc8',lastBlockNumber:'0xc8',blockCount:'0x1',firstBlockHash:blocks.L2.get(200).hash,lastBlockHash:blocks.L2.get(200).hash},l2Blocks:[{number:'0xc8',hash:blocks.L2.get(200).hash}],canonicalL2:true,l2Finalized:true};

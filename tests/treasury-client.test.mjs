@@ -40,18 +40,21 @@ test('outcome tracking routes Composer status separately from chain receipts and
   const server = createServer(async (req, res) => {
     const chunks = []; for await (const chunk of req) chunks.push(chunk);
     const body = JSON.parse(Buffer.concat(chunks).toString());
-    requests.push({ path: req.url, method: body.method });
     res.setHeader('Content-Type', 'application/json');
+    const respond = async body => {
+    requests.push({ path: req.url, method: body.method });
     const isStatus = body.method === 'eez_getCrossChainTransaction';
     if (req.url !== (isStatus ? '/composer/l2' : '/rpc/l2') || unavailable && isStatus) {
-      res.end(JSON.stringify({ jsonrpc: '2.0', id: body.id, error: { code: -32601, message: 'Method not found' } })); return;
+      return { jsonrpc: '2.0', id: body.id, error: { code: -32601, message: 'Method not found' } };
     }
     try {
       const result = await fixture(scenario).rpc('', body.method, body.params);
-      res.end(JSON.stringify({ jsonrpc: '2.0', id: body.id, result }));
+      return { jsonrpc: '2.0', id: body.id, result };
     } catch (error) {
-      res.end(JSON.stringify({ jsonrpc: '2.0', id: body.id, error: { code: -32603, message: String(error) } }));
+      return { jsonrpc: '2.0', id: body.id, error: { code: -32603, message: String(error) } };
     }
+    };
+    res.end(JSON.stringify(Array.isArray(body) ? await Promise.all(body.map(respond)) : await respond(body)));
   });
   server.listen(0, '127.0.0.1'); await once(server, 'listening');
   t.after(() => new Promise(resolve => { server.close(resolve); server.closeAllConnections(); }));

@@ -1,7 +1,7 @@
 import { createRoot } from 'react-dom/client';
-import { TreasuryDemo } from '../../src/components/TreasuryDemo';
+import { TreasuryMainnetNetwork } from '../../src/components/TreasuryMainnetNetwork';
 import { config, setConfig, L1_CHAIN, L2_CHAIN } from '../../src/config';
-import { MainnetSetup } from '../../src/lib/treasury/mainnetSetup';
+import { MainnetSetup, selectMainnetSetupNetwork } from '../../src/lib/treasury/mainnetSetup';
 import { DeploymentIO } from '../../src/lib/treasury/deploymentIO';
 import network from '../../src/lib/treasury/rollupx-mainnet-network.json';
 import '../../src/styles/global.css';
@@ -24,5 +24,13 @@ export function mount() {
   };
   const wallet: any = { address: '0x0000000000000000000000000000000000000044', chainId: '0x1', walletOptions: [],
     provider: { request() { control.walletCalls++; throw new Error('No wallet requests expected'); } } };
-  createRoot(document.getElementById('root')!).render(<TreasuryDemo wallet={wallet} ready />);
+  // Retained RollupX setups use this pinned provisioning gate. Fresh dashboard
+  // discovery is exercised separately by treasury-network-setup-browser.mjs.
+  const selected = selectMainnetSetupNetwork(L1_CHAIN.chainId, L2_CHAIN.chainId, config.rollupsAddress,
+    config.ccmL2Address, config.l1Bridge, config.l2Bridge);
+  if (!selected) throw new Error('RollupX fixture did not select its pinned setup network');
+  const target = { l1: { rpc: config.l1Rpc, front: config.l1ProxyRpc, explorer: config.l1Explorer },
+    l2: { rpc: config.l2Rpc, front: config.l2ProxyRpc, explorer: config.l2Explorer },
+    fees: { l1: config.l1FeeMaxTotalWei, l2: config.l2FeeMaxTotalWei } };
+  createRoot(document.getElementById('root')!).render(<TreasuryMainnetNetwork network={selected} target={target} wallet={wallet} onComplete={()=>{}} />);
 }

@@ -38,3 +38,42 @@ test('production preview serves browser config and preserves exact upstream RPC 
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test('CoW API aliases preserve paths under root, dashboard, and custom preview bases', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'eez-cow-preview-'));
+  const upstream = createServer((req, res) => {
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ path: req.url }));
+  }).listen(0, '127.0.0.1');
+  await once(upstream, 'listening');
+  const keys = ['EEZ_UI_RUNTIME_CONFIG', 'EEZ_UI_BASE_PATH', 'EEZ_UI_COW_UPSTREAM'];
+  const saved = Object.fromEntries(keys.map(key => [key, process.env[key]]));
+  let server;
+  try {
+    await mkdir(join(root, 'dist'));
+    await writeFile(join(root, 'dist/index.html'), '<p>SPA fallback must never reach the API client</p>');
+    const runtime = join(root, 'config.json');
+    await writeFile(runtime, JSON.stringify({ browser: {}, proxy: {} }));
+    process.env.EEZ_UI_RUNTIME_CONFIG = runtime;
+    process.env.EEZ_UI_COW_UPSTREAM = `http://127.0.0.1:${upstream.address().port}`;
+    for (const basePath of ['/', '/dashboard/', '/custom/']) {
+      process.env.EEZ_UI_BASE_PATH = basePath;
+      server = await preview({ root, configFile: resolve('vite.config.ts'), envFile: false,
+        preview: { host: '127.0.0.1', port: 0, strictPort: true } });
+      const origin = `http://127.0.0.1:${server.httpServer.address().port}`;
+      for (const prefix of new Set([basePath + 'cowdemo', '/cowdemo', '/dashboard/cowdemo'])) {
+        const response = await fetch(`${origin}${prefix}/api/quote?token=fixture`);
+        assert.equal(response.status, 200);
+        assert.match(response.headers.get('content-type'), /application\/json/);
+        assert.deepEqual(await response.json(), { path: '/api/quote?token=fixture' });
+      }
+      await server.close(); server = undefined;
+    }
+  } finally {
+    await server?.close(); upstream.closeAllConnections(); await new Promise(r => upstream.close(r));
+    for (const key of keys) {
+      if (saved[key] === undefined) delete process.env[key]; else process.env[key] = saved[key];
+    }
+    await rm(root, { recursive: true, force: true });
+  }
+});

@@ -3,6 +3,7 @@ import { writeFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { decodeFunctionResult, encodeFunctionData, getAddress, keccak256, parseAbi, toHex } from 'viem';
 import { ETHEREUM_USDC, USDC_IMPLEMENTATION_SLOT } from '../src/lib/treasury/mainnet.ts';
+import { readBridgeManager } from '../src/lib/bridgeManager.ts';
 const { values } = parseArgs({ options: { config: { type: 'string' }, output: { type: 'string' } } });
 if (!values.config || !values.output) throw new Error('Use --config PUBLIC_DASHBOARD_CONFIG_URL --output PATH');
 const url = new URL(values.config), config = await (await fetch(url)).json();
@@ -31,13 +32,13 @@ await capture('usdcProxy','l1',ETHEREUM_USDC);
 const slot = await rpc('l1','eth_getStorageAt',[ETHEREUM_USDC,USDC_IMPLEMENTATION_SLOT,snapshot.chains.l1.number]);
 await capture('usdcImplementation','l1',getAddress(`0x${slot.slice(-40)}`));
 const abi = parseAbi(['function getWrappedToken(address,uint64) view returns(address)','function wrappedTokenInfo(address) view returns(address,uint64)',
-  'function manager() view returns(address)','function canonicalBridgeAddress() view returns(address)','function rollupId() view returns(uint64)','function BRIDGE() view returns(address)']);
+  'function canonicalBridgeAddress() view returns(address)','function rollupId() view returns(uint64)','function BRIDGE() view returns(address)']);
 const read = async (chain,to,functionName,args=[]) => decodeFunctionResult({abi,functionName,data:await rpc(chain,'eth_call',[{to,data:encodeFunctionData({abi,functionName,args})},snapshot.chains[chain].number])});
 const wrapped = await read('l2',config.bridgeL2Address,'getWrappedToken',[ETHEREUM_USDC,0n]);
 await capture('wrappedUSDC','l2',wrapped);
 for (const chain of ['l1','l2']) {
   const bridge = snapshot.contracts[chain==='l1'?'bridgeL1':'bridgeL2'];
-  bridge.bindings = { manager:await read(chain,bridge.address,'manager'), counterpart:await read(chain,bridge.address,'canonicalBridgeAddress'), rollupId:String(await read(chain,bridge.address,'rollupId')) };
+  bridge.bindings = { manager:await readBridgeManager(data => rpc(chain,'eth_call',[{to:bridge.address,data},snapshot.chains[chain].number])), counterpart:await read(chain,bridge.address,'canonicalBridgeAddress'), rollupId:String(await read(chain,bridge.address,'rollupId')) };
   if (bridge.bindings.manager.toLowerCase() !== (chain==='l1'?snapshot.registry:snapshot.manager).toLowerCase()
     || bridge.bindings.counterpart.toLowerCase() !== snapshot.contracts[chain==='l1'?'bridgeL2':'bridgeL1'].address.toLowerCase()
     || bridge.bindings.rollupId !== (chain==='l1'?'0':snapshot.rollupId)) throw new Error('Bridge bindings changed');

@@ -1,0 +1,210 @@
+{
+  "network": "EEZ-X Testnet",
+  "chainId": 699169,
+  "rollupId": 2,
+  "deployer": "0x94c9Fe37A19d262A31B89a2763bBea023b99cd4E",
+  "contracts": {
+    "verifier": {
+      "address": "0x11CDD7bdefB845D13d75B3F8fB3bE3253D65d0B7",
+      "nonce": 4,
+      "transactionHash": "0x3765700d8eb819378f50fe5cfcbf97066ad7164a26f4e056b3f422f45b623c28",
+      "expectedRuntimeHash": "0x28402fe675b2e0b8fdcb281c7b5bef4c441ba32adae6b68c30f9471d87af0e66",
+      "maximumFeeWei": "219441306",
+      "status": "verified",
+      "runtimeCodeHash": "0x28402fe675b2e0b8fdcb281c7b5bef4c441ba32adae6b68c30f9471d87af0e66",
+      "blockNumber": "189626",
+      "blockHash": "0xeecbdaf20a9482e10c0545da475bb01127ef20f0140e45d88fab0577a12ae3a0",
+      "gasUsed": "1850147",
+      "effectiveGasPrice": "98",
+      "feeWei": "181314406"
+    },
+    "factory": {
+      "address": "0x5C30D7A2357AAe7D3586a06DbDdDC5a887B30646",
+      "nonce": 5,
+      "transactionHash": "0xa57a56224bc40ff2cc3ff968ea84a6241d145c7277b3646cef4d2f583279e175",
+      "expectedRuntimeHash": "0x325af632cc6f2d40d80b14376137ebee68f5c13462d7561406bf62a789198917",
+      "maximumFeeWei": "90193516",
+      "status": "verified",
+      "runtimeCodeHash": "0x325af632cc6f2d40d80b14376137ebee68f5c13462d7561406bf62a789198917",
+      "blockNumber": "189631",
+      "blockHash": "0x9bcc0a1f47421025ce8bf06ff278a133d6cbe3b2012ef36daf03a9df3ec7ff8a",
+      "gasUsed": "759755",
+      "effectiveGasPrice": "98",
+      "feeWei": "74455990"
+    }
+  },
+  "sources": {
+    "verifier": {
+      "originalVerifiedContract": "https://eez.asuscomm.com/explorer/address/0x1F7B6E9BfC86F2d72C44E3cEF9b133C59c57C6E9",
+      "compiler": "0.8.34+commit.80d5c536",
+      "recompiledCreationBytecodeMatches": true
+    },
+    "factory": {
+      "originalVerifiedContract": "https://eez.asuscomm.com/explorer/address/0x935808C804FC35a3C38BAf6Dd1cf4b408352a3CB",
+      "compiler": "0.8.34+commit.80d5c536",
+      "recompiledCreationBytecodeMatches": true
+    }
+  },
+  "explorerVerification": {
+    "verifier": {
+      "is_verified": true,
+      "is_fully_verified": true,
+      "is_partially_verified": false,
+      "name": "FalconVerifier",
+      "compiler_version": "v0.8.34+commit.80d5c536",
+      "verified_at": "2026-10-30T18:14:32.781858Z"
+    },
+    "factory": {
+      "is_verified": true,
+      "is_fully_verified": true,
+      "is_partially_verified": false,
+      "name": "FalconL1ControllerFactory",
+      "compiler_version": "v0.8.34+commit.80d5c536",
+      "verified_at": "2026-10-30T18:14:32.165554Z"
+    }
+  },
+  "validation": {
+    "checkedAt": "2026-10-30T18:15:48.703Z",
+    "chainId": 699169,
+    "rollupId": "2",
+    "composerDiscoveryAndControllerRouting": true,
+    "vectors": [
+      {
+        "vector": "NIST KAT 0",
+        "validAccepted": true,
+        "changedMessageRejected": true
+      },
+      {
+        "vector": "NIST KAT 1",
+        "validAccepted": true,
+        "changedMessageRejected": true
+      },
+      {
+        "vector": "NIST KAT 2",
+        "validAccepted": true,
+        "changedMessageRejected": true
+      },
+      {
+        "vector": "NIST KAT 3",
+        "validAccepted": true,
+        "changedMessageRejected": true
+      },
+      {
+        "vector": "NIST KAT 4",
+        "validAccepted": true,
+        "changedMessageRejected": true
+      },
+      {
+        "vector": "NIST KAT 5",
+        "validAccepted": true,
+        "changedMessageRejected": true
+      },
+      {
+        "vector": "NIST KAT 6",
+        "validAccepted": true,
+        "changedMessageRejected": true
+      },
+      {
+        "vector": "NIST KAT 7",
+        "validAccepted": true,
+        "changedMessageRejected": true
+      },
+      {
+        "vector": "NIST KAT 8",
+        "validAccepted": true,
+        "changedMessageRejected": true
+      },
+      {
+        "vector": "NIST KAT 9",
+        "validAccepted": true,
+        "changedMessageRejected": true
+      },
+      {
+        "vector": "browser fixture",
+        "validAccepted": true,
+        "changedMessageRejected": true
+      }
+    ],
+    "signatureRecordingGasEstimate": "5670139",
+    "controllerCreationSimulation": {
+      "successful": true,
+      "predictedController": "0x82ea81F41b2FdA2951F6f2CAab2Cd07b8B9E987B",
+      "broadcast": false
+    }
+  },
+  "safeContracts": "Existing Chiado Safe factory, singleton and fallback handler reused after runtime code-hash verification.",
+  "sourceVerificationFollowup": {
+    "checkedAt": "2026-10-30T18:34:00.571712+00:00",
+    "contracts": [
+      {
+        "name": "l2 controller",
+        "address": "0xaB65584dC854cbE409784EcA4958AF4C3a9dcbFe",
+        "base": "https://eez.dev/explorer",
+        "status": 200,
+        "is_verified": true,
+        "is_fully_verified": true,
+        "is_partially_verified": false,
+        "contractName": "FalconL1Controller"
+      },
+      {
+        "name": "l2 verifier",
+        "address": "0x11CDD7bdefB845D13d75B3F8fB3bE3253D65d0B7",
+        "base": "https://eez.dev/explorer",
+        "status": 200,
+        "is_verified": true,
+        "is_fully_verified": true,
+        "is_partially_verified": false,
+        "contractName": "FalconVerifier"
+      },
+      {
+        "name": "l2 factory",
+        "address": "0x5C30D7A2357AAe7D3586a06DbDdDC5a887B30646",
+        "base": "https://eez.dev/explorer",
+        "status": 200,
+        "is_verified": true,
+        "is_fully_verified": true,
+        "is_partially_verified": false,
+        "contractName": "FalconL1ControllerFactory"
+      },
+      {
+        "name": "L1 Safe factory",
+        "address": "0xB90b9d8305E5E6Dc87B9173B7c0dC3b4AE7ec04B",
+        "base": "https://gnosis-chiado.blockscout.com",
+        "status": 200,
+        "is_verified": true,
+        "is_fully_verified": true,
+        "is_partially_verified": false,
+        "contractName": "OwnedSafeFactory"
+      },
+      {
+        "name": "L1 Safe implementation",
+        "address": "0xC4a2532Bb5971Ff541f0B24A92ADa2E2ceEbA2c3",
+        "base": "https://gnosis-chiado.blockscout.com",
+        "status": 200,
+        "is_verified": true,
+        "is_fully_verified": true,
+        "is_partially_verified": false,
+        "contractName": "SafeL2"
+      },
+      {
+        "name": "L1 Safe fallback handler",
+        "address": "0x020f1891Acf82bA9127b5ccF86858e4dd55d8eA6",
+        "base": "https://gnosis-chiado.blockscout.com",
+        "status": 200,
+        "is_verified": true,
+        "is_fully_verified": true,
+        "is_partially_verified": false,
+        "contractName": "CompatibilityFallbackHandler"
+      }
+    ],
+    "userControllerCreatedByWallet": true
+  },
+  "latestUserSafe": {
+    "checkedAt": "2026-10-30T19:20:47.587641+00:00",
+    "sourceTransaction": "0x7023938650ca00f999a0132bc5693c5883beae8e42f11b30513e9c0e11fd9707",
+    "controller": "0xfF17A6B985251746f5ad7d0072d04BaB06e87092",
+    "l1Safe": "0xEf53dDC977A1693669D5193aC4517fE63E6f0631",
+    "l1OwnerProxy": "0xD0FAca9ddfCEfdEc290489c54F4B31d39fB651A0",
+    "allThreeSourceVerified": true
+  }
+}

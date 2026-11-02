@@ -7,10 +7,10 @@ import { readFileSync } from 'node:fs';
 const build = JSON.parse(readFileSync('src/lib/treasury/current-build.json')).build;
 const release = JSON.parse(readFileSync(`src/lib/treasury/builds/${build}.json`));
 const a = n => toHex(n, { size: 20 });
-const server = await createServer({ configFile: false, envFile: false, plugins: [react()], server: { host: '127.0.0.1', port: 0 }, base: '/' });
+const server = await createServer({ configFile: false, envFile: false, plugins: [react()], server: { host: '127.0.0.1', port: 0, watch: null }, base: '/' });
 await server.listen(); let browser;
 try {
-  browser = await chromium.launch({ headless: true, chromiumSandbox: true });
+  browser = await chromium.launch({ headless: true, chromiumSandbox: process.env.TREASURY_BROWSER_SANDBOX !== '0' });
   const page = await browser.newPage(), sends = [], errors = [], origin = `http://127.0.0.1:${server.httpServer.address().port}`;
   page.on('pageerror', e => errors.push(e.message));
   await page.exposeFunction('readWalletNonce', () => toHex(sends.length));
@@ -25,6 +25,9 @@ try {
   await mount(); await faucet('l1').waitFor(); await faucet('l2').waitFor();
   assert.equal(await page.getByRole('button', { name: 'Deploy Test USDC', exact: true }).count(), 0);
   await page.evaluate(() => { window.rejectNext = true; }); await faucet('l1').click();
+  await page.getByRole('alert').getByText('User rejected transaction', { exact: true }).waitFor();
+  await page.evaluate(() => window.rerenderFixture());
+  await page.waitForTimeout(100);
   await page.getByRole('alert').getByText('User rejected transaction', { exact: true }).waitFor();
   assert.equal(sends.length, 0); assert(!(await faucet('l1').isDisabled()));
   for (const [chain, method, safe] of [['l1','claim',a(10)],['l2','claimOnL2',a(11)]]) {
@@ -50,7 +53,7 @@ try {
   await page.getByRole('alert').filter({ hasText: 'L1 faucet: Temporary claim RPC failure' }).waitFor();
   await page.evaluate(() => { window.failTracking = ''; });
   await page.waitForFunction(() => window.refreshes === 2);
-  assert.equal(await page.getByText('1,000 test USDC received.', { exact: true }).count(), 0);
+  assert.equal(await page.getByText('1,000 Test USDC received.', { exact: true }).count(), 2);
   await page.evaluate(() => { window.confirmFixture = false; });
   // Presets follow the existing EEZ-X slider direction and preserve the exact total.
   const presets = page.getByRole('group', { name: 'EEZ-X share presets' });
@@ -84,6 +87,10 @@ try {
   await mount(); await faucet('l1').waitFor();
   await page.evaluate(() => { window.holdPreparation = true; }); await faucet('l1').click();
   await page.waitForFunction(() => !!window.releasePreparation);
+  await page.evaluate(() => window.rerenderFixture());
+  await page.waitForTimeout(100);
+  assert(await faucet('l1').isDisabled(), 'reparsing an unchanged manifest must keep the active claim locked');
+  await page.getByText('Preparing wallet request…', { exact: true }).waitFor();
   await page.evaluate(() => { window.unmountFixture(); window.releasePreparation(); });
   await page.waitForTimeout(100); assert.equal(sends.length, 2, 'Leaving during preparation must not open a stale wallet prompt');
   await mount('setup'); await page.getByRole('heading', { name: 'Choose your Safes', exact: true }).waitFor();

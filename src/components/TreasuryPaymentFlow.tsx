@@ -67,7 +67,8 @@ export function TreasuryPaymentFlow({ deployment, intent, outcome, settlement, s
 }) {
   const diagram = useRef<HTMLDivElement>(null);
   const payment = intent.payment!, amounts = outcome.contributions!;
-  const names = { l1: deployment.l1.chainId === 10200 ? "Chiado" : "Ethereum", l2: "EEZ-X" };
+  const assetLabel = deployment.network?.discovered?.symbol ?? "USDC";
+  const names = { l1: deployment.l1.chainId === 10200 ? "Chiado" : deployment.l1.chainId === 1 ? "Ethereum" : "L1", l2: "EEZ-X" };
   const source = payment.source ?? "l2", destination = payment.destination;
   const transport = intent.submissionChain ?? source;
   const relayHash = transport === "l1" && source === "l2" ? outcome.execution?.l1 ?? outcome.hash ?? intent.hash : undefined;
@@ -77,13 +78,13 @@ export function TreasuryPaymentFlow({ deployment, intent, outcome, settlement, s
   if (payment.kind === "transfer") return <figure className={styles.paymentFlow} aria-label="Transfer flow">
     <figcaption>How this transfer completed</figcaption>
     <div className={styles.transferFlow}>
-      <div className={styles.flowNode}><span className={styles.chainLabel} data-chain="l1">{names.l1} Safe</span><strong>{formatUSDC(total)} USDC sent</strong>
+      <div className={styles.flowNode}><span className={styles.chainLabel} data-chain="l1">{names.l1} Safe</span><strong>{formatUSDC(total)} {assetLabel} sent</strong>
         <TreasuryChainLink deployment={deployment} chain="l1" type="address" value={deployment.safeL1}>{deployment.safeL1.slice(0, 8)}…{deployment.safeL1.slice(-6)}</TreasuryChainLink>
         {sourceHash && <TreasuryChainLink deployment={deployment} chain="l1" value={sourceHash} testId={sourceTestId}>Safe transaction</TreasuryChainLink>}
         {outcome.sourceBlock && <TreasuryChainLink deployment={deployment} chain="l1" type="block" value={outcome.sourceBlock}>{names.l1} #{BigInt(outcome.sourceBlock).toLocaleString()}</TreasuryChainLink>}</div>
       <span aria-hidden="true">→</span><div className={styles.flowNode}><strong>Shared bridge</strong><p>Locked on {names.l1} and minted on EEZ-X.</p>
         {executionL2 && <TreasuryChainLink deployment={deployment} chain="l2" value={executionL2}>EEZ-X delivery transaction</TreasuryChainLink>}</div>
-      <span aria-hidden="true">→</span><div className={styles.flowNode}><span className={styles.chainLabel} data-chain="l2">EEZ-X Safe</span><strong>Received {formatUSDC(total)} USDC</strong>
+      <span aria-hidden="true">→</span><div className={styles.flowNode}><span className={styles.chainLabel} data-chain="l2">EEZ-X Safe</span><strong>Received {formatUSDC(total)} {assetLabel}</strong>
         <TreasuryChainLink deployment={deployment} chain="l2" type="address" value={deployment.safeL2}>{deployment.safeL2.slice(0, 8)}…{deployment.safeL2.slice(-6)}</TreasuryChainLink>
         {outcome.block && <TreasuryChainLink deployment={deployment} chain="l2" type="block" value={outcome.block}>EEZ-X #{BigInt(outcome.block).toLocaleString()}</TreasuryChainLink>}</div>
     </div><p className={styles.hint}>Funds stayed within your treasury. Payment budgets and allowances were unchanged.</p>
@@ -105,7 +106,7 @@ export function TreasuryPaymentFlow({ deployment, intent, outcome, settlement, s
       <div className={styles.flowNode} data-flow-node="policy">
         <span className={styles.chainLabel} data-chain="l2">EEZ-X · Treasury policy</span>
         <strong>Shared budget checked</strong>
-        <p>{formatUSDC(total)} USDC counted against the shared limit.</p>
+        <p>{formatUSDC(total)} {assetLabel} counted against the shared limit.</p>
         <div className={styles.flowLinks}>
           {executionL2 && <TreasuryChainLink deployment={deployment} chain="l2" value={executionL2}>EEZ-X policy transaction</TreasuryChainLink>}
           {outcome.block && <TreasuryChainLink deployment={deployment} chain="l2" type="block" value={outcome.block}>EEZ-X #{BigInt(outcome.block).toLocaleString()}</TreasuryChainLink>}
@@ -118,7 +119,7 @@ export function TreasuryPaymentFlow({ deployment, intent, outcome, settlement, s
         const hash = chain === "l1" ? outcome.execution?.l1 ?? (transport === "l1" ? relayHash ?? sourceHash : settlement?.l1Transaction) : executionL2;
         return <div key={chain} className={`${styles.flowNode} ${styles.flowContribution}`} data-flow-node={chain} data-chain={chain}>
           <span className={styles.chainLabel} data-chain={chain}><TreasuryChainLink deployment={deployment} chain={chain} type="address" value={chain === "l1" ? deployment.safeL1 : deployment.safeL2}>{names[chain]} Safe</TreasuryChainLink></span>
-          <strong>{formatUSDC(amount)} USDC</strong>
+          <strong>{formatUSDC(amount)} {assetLabel}</strong>
           <span className={styles.flowShare}>{total ? formatPercentage(amount * 10000n / total) : "0"}% of payment</span>
           <p>{amount === 0n ? "Not used for this payment" : chain === destination ? `Direct to ${names[destination]} recipient` : `Bridge to ${names[destination]} recipient`}</p>
           {amount > 0n && hash && <div className={styles.flowLinks}><TreasuryChainLink deployment={deployment} chain={chain} value={hash}>{names[chain]} payment transaction</TreasuryChainLink></div>}
@@ -126,7 +127,7 @@ export function TreasuryPaymentFlow({ deployment, intent, outcome, settlement, s
       })}</div>
       <div className={`${styles.flowNode} ${styles.flowRecipient}`} data-flow-node="recipient">
         <span className={styles.chainLabel} data-chain={destination}>{names[destination]} recipient</span>
-        <strong>Received {formatUSDC(total)} USDC</strong>
+        <strong>Received {formatUSDC(total)} {assetLabel}</strong>
         <TreasuryChainLink deployment={deployment} chain={destination} type="address" value={payment.recipient}>{payment.recipient.slice(0, 8)}…{payment.recipient.slice(-6)}</TreasuryChainLink>
         <div className={styles.flowLinks}>
           {settlement ? <>

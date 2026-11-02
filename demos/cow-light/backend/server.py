@@ -24,8 +24,10 @@ CATALOG=CFG['TOKEN_CATALOG']; QUEUE=CFG['ORDER_QUEUE']; QUEUE_LOCK=QUEUE.with_su
 SOLVER_LOG=CFG['SOLVER_LOG']
 L1_RPC=CFG['L1_RPC']; L2_RPC=CFG['L2_RPC']; L2_FRONT=CFG['L2_FRONT']
 L1_CHAIN=CFG['L1_CHAIN_ID']; L2_CHAIN=CFG['L2_CHAIN_ID']
-WETH=CFG['WETH_L1']; WETH_L2=CFG['WETH_L2']
-SETTLEMENT=CFG['SETTLEMENT_L2']; BRIDGE_L2=CFG['BRIDGE_L2']
+# Missing application bindings must disable trading, not take down the status
+# API. Every trading endpoint checks the complete deployment before using them.
+WETH=CFG.get('WETH_L1'); WETH_L2=CFG.get('WETH_L2')
+SETTLEMENT=CFG.get('SETTLEMENT_L2'); BRIDGE_L2=CFG['BRIDGE_L2']
 NATIVE_WETH_L2=CFG.get('NATIVE_WETH_L2')
 PAIR_ABI=[{"type":"function","name":"getReserves","stateMutability":"view","inputs":[],"outputs":[{"type":"uint112"},{"type":"uint112"},{"type":"uint32"}]},{"type":"function","name":"token0","stateMutability":"view","inputs":[],"outputs":[{"type":"address"}]}]
 BRIDGE_ABI=[{"type":"function","name":"getWrappedToken","stateMutability":"view","inputs":[{"type":"address"},{"type":"uint64"}],"outputs":[{"type":"address"}]}]
@@ -198,13 +200,37 @@ def order_debug(row, events):
             "error":solver.get("error") or (msg if state in ('failed','quote_rejected','worker_error') else None)}
 
 class Handler(BaseHTTPRequestHandler):
+    def error_message(self, error):
+        from urllib.parse import unquote
+        # Transport errors may include credentials or API keys, even when a
+        # library prints only the upstream path rather than its complete URL.
+        unavailable = 'CoW Light request failed. Check the service configuration and try again.'
+        if not isinstance(error, ValueError):
+            return unavailable
+        message = str(error)
+        for key in ('L1_RPC', 'L2_RPC', 'L2_FRONT'):
+            endpoint = globals().get(key)
+            if not isinstance(endpoint, str) or not endpoint:
+                continue
+            try:
+                parsed = urlparse(endpoint)
+                private = [endpoint, parsed.username, parsed.password,
+                           parsed.path if parsed.path != '/' else None,
+                           *(value for values in parse_qs(parsed.query).values() for value in values)]
+                private += [unquote(value) for value in private if value]
+            except ValueError:
+                return unavailable
+            if any(value and value in message for value in private):
+                return unavailable
+        return message
+
     def send_json(self,obj,code=200):
-        b=json.dumps(obj).encode();self.send_response(code);self.send_header("content-type","application/json");self.send_header("content-length",str(len(b)));self.send_header("access-control-allow-origin","*");self.end_headers();self.wfile.write(b)
+        b=json.dumps(obj).encode();self.send_response(code);self.send_header("content-type","application/json");self.send_header("content-length",str(len(b)));self.send_header("cache-control","no-store");self.send_header("access-control-allow-origin","*");self.end_headers();self.wfile.write(b)
     def do_OPTIONS(self):self.send_response(204);self.send_header("access-control-allow-origin","*");self.send_header("access-control-allow-headers","content-type");self.end_headers()
     def do_GET(self):
         p=urlparse(self.path)
         try:
-            if p.path in ('/api/config', '/api/quote', '/api/wrapper', '/api/allowance', '/api/balances', '/api/faucet'):
+            if p.path in ('/api/config', '/api/tokens', '/api/quote', '/api/wrapper', '/api/allowance', '/api/balances', '/api/faucet'):
                 try:
                     CFG.check_deployment(l1=l1,l2=l2)
                 except Exception:
@@ -212,7 +238,15 @@ class Handler(BaseHTTPRequestHandler):
                         'error':'Deployment required or network verification unavailable. Check the configured RPCs and deployment identity.'},503)
             if p.path in ("/","/index.html"):
                 b=(UI/"index.html").read_bytes();self.send_response(200);self.send_header("content-type","text/html; charset=utf-8");self.send_header("content-length",str(len(b)));self.end_headers();self.wfile.write(b);return
-            if p.path=="/api/config":return self.send_json({"network":CFG['NETWORK'],"l1NativeSymbol":CFG['L1_NATIVE_SYMBOL'],"l2NativeSymbol":CFG['L2_NATIVE_SYMBOL'],"l1Explorer":CFG.get('L1_EXPLORER'),"l2Explorer":CFG.get('L2_EXPLORER'),"l1ChainId":L1_CHAIN,"l2ChainId":L2_CHAIN,"l1Rpc":CFG.get('COW_PUBLIC_L1_RPC',L1_RPC),"l2Front":CFG.get('COW_PUBLIC_L2_FRONT',L2_FRONT),"settlement":SETTLEMENT,"vaultRelayer":vault_relayer(),"wethL1":WETH,"wethL2":WETH_L2,"nativeWethL2":NATIVE_WETH_L2,"bridgeL2":BRIDGE_L2})
+            if p.path=="/api/config":
+                # Initial loading needs both configuration and the catalog. Return
+                # them after one full deployment check instead of repeating it.
+                return self.send_json({"network":CFG['NETWORK'],"l1NativeSymbol":CFG['L1_NATIVE_SYMBOL'],
+                    "l2NativeSymbol":CFG['L2_NATIVE_SYMBOL'],"l1Explorer":CFG.get('L1_EXPLORER'),
+                    "l2Explorer":CFG.get('L2_EXPLORER'),"l1ChainId":L1_CHAIN,"l2ChainId":L2_CHAIN,
+                    "l1Rpc":CFG.get('COW_PUBLIC_L1_RPC','/rpc/l1'),"l2Front":CFG.get('COW_PUBLIC_L2_FRONT','/composer/l2'),
+                    "settlement":SETTLEMENT,"vaultRelayer":vault_relayer(),"wethL1":WETH,"wethL2":WETH_L2,
+                    "nativeWethL2":NATIVE_WETH_L2,"bridgeL2":BRIDGE_L2,"tokens":catalog()})
             if p.path=="/api/health":
                 # Keep this endpoint read-only and bounded: it is used by the UI
                 # as an operator signal, not as a transaction submission path.
@@ -255,7 +289,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not t:return self.send_json({"error":"unknown token"},404)
                 return self.send_json(quote(t,int(a.get("amount",["0"])[0])))
             return self.send_json({"error":"not found"},404)
-        except Exception as e:return self.send_json({"error":str(e)},500)
+        except Exception as e:return self.send_json({"error":self.error_message(e)},500)
     def do_POST(self):
         if urlparse(self.path).path!="/api/orders":return self.send_json({"error":"not found"},404)
         try:
@@ -271,11 +305,11 @@ class Handler(BaseHTTPRequestHandler):
             expected=wrapper(l1token)["address"]
             if order["buyToken"].lower()!=expected.lower(): raise ValueError("buyToken is not the deterministic wrapper for l1Token")
             return self.send_json(queue(order,sig,signer,q),202)
-        except Exception as e:return self.send_json({"error":str(e)},400)
+        except Exception as e:return self.send_json({"error":self.error_message(e)},400)
 
 if __name__=="__main__":
     # Keep the status API available after a reset; trading requests and the
     # solver independently validate the live deployment before proceeding.
-    catalog()
-    port=int(os.getenv("PORT","8787"));print(f"EEZ CoW Light UI: http://127.0.0.1:{port}",flush=True)
-    ThreadingHTTPServer((os.getenv("HOST","127.0.0.1"),port),Handler).serve_forever()
+    server=ThreadingHTTPServer((os.getenv("HOST","127.0.0.1"),int(os.getenv("PORT","8787"))),Handler)
+    print(f"EEZ CoW Light UI: http://127.0.0.1:{server.server_port}",flush=True)
+    server.serve_forever()

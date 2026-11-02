@@ -1,16 +1,18 @@
 import { useId, useEffect, useState, type RefObject } from "react";
-import type { TraceRow } from "../../../trace-decoder/flow/rows.mjs";
+import { traceConnections, type TraceRow } from "../../../trace-decoder/flow/rows.mjs";
+import type { TraceProtocolLink, TraceCrossChainLink } from "../../../trace-decoder/service/types";
 import styles from "./TraceDetailView.module.css";
 
 interface Connection {
   from: number; to: number; chain: "L1" | "L2"; path: string;
-  uncertain: boolean; failed: boolean; crosses: boolean;
+  uncertain: boolean; failed: boolean; crosses: boolean; protocol: boolean;
 }
 
 /** Measure the actual cards so connectors follow wrapping, folding and resizing. */
-export function FlowConnections({ container, rows, physical, selected }: {
+export function FlowConnections({ container, rows, physical, selected, protocolLinks, crossChainLinks }: {
   container: RefObject<HTMLDivElement | null>; rows: TraceRow[];
   physical: boolean; selected: number | null;
+  protocolLinks: TraceProtocolLink[]; crossChainLinks: TraceCrossChainLink[];
 }) {
   const marker = "trace-" + useId().replace(/[^a-zA-Z0-9_-]/g, "");
   const [layout, setLayout] = useState<{ width: number; height: number; edges: Connection[] }>({
@@ -24,9 +26,24 @@ export function FlowConnections({ container, rows, physical, selected }: {
       const cards = new Map(Array.from(element.querySelectorAll<HTMLElement>("[data-flow-node]"))
         .map(card => [Number(card.dataset.flowNode), card.getBoundingClientRect()] as const));
       const byId = new Map(rows.map(row => [row.node.id, row.node]));
+      const laneLeft = { L1: Infinity, L2: Infinity };
+      for (const [id, card] of cards) {
+        const node = byId.get(id);
+        if (node) laneLeft[node.chain] = Math.min(laneLeft[node.chain], card.left - bounds.left);
+      }
       const edges: Connection[] = [];
-      for (const { node, parent } of rows) {
-        if (parent === null) continue;
+      const connections = traceConnections(rows, protocolLinks, crossChainLinks);
+      const crossings = connections.filter(edge => byId.has(edge.from) && byId.has(edge.to)
+        && byId.get(edge.from)!.chain !== byId.get(edge.to)!.chain);
+      const crossingIndex = new Map(crossings.map((edge, index) => [`${edge.from}:${edge.to}`, index]));
+      const leftEdge = Math.max(...rows.filter(row => row.node.chain === 'L1').map(row => (cards.get(row.node.id)?.right ?? bounds.left) - bounds.left));
+      const rightEdge = Math.min(...rows.filter(row => row.node.chain === 'L2').map(row => (cards.get(row.node.id)?.left ?? bounds.right) - bounds.left));
+      const gap = Number.isFinite(leftEdge + rightEdge) ? Math.max(0, rightEdge - leftEdge - 24) : 0;
+      const spacing = crossChainLinks.length ? Math.min(10, gap / Math.max(1, crossings.length - 1)) : 0;
+      const middle = crossChainLinks.length && gap > 0 ? (leftEdge + rightEdge) / 2 : bounds.width / 2;
+      for (const { from: parent, to, protocol } of connections) {
+        const node = byId.get(to);
+        if (!node) continue;
         const caller = byId.get(parent), start = cards.get(parent), end = cards.get(node.id);
         // Never fabricate a connection across pages or independent recorded transactions.
         if (!caller || !start || !end || physical && (caller.chain !== node.chain || caller.tx !== node.tx)) continue;
@@ -39,16 +56,19 @@ export function FlowConnections({ container, rows, physical, selected }: {
           const forward = caller.chain === "L1";
           const sx = (forward ? start.right : start.left) - bounds.left;
           const tx = (forward ? end.left : end.right) - bounds.left;
-          const rail = bounds.width / 2;
+          const index = crossingIndex.get(`${parent}:${to}`) ?? 0;
+          const rail = middle + (index - (crossings.length - 1) / 2) * spacing;
           path = `M ${sx} ${sy} H ${rail} V ${ty} H ${tx}`;
         } else {
           const sx = start.left - bounds.left, tx = end.left - bounds.left;
-          const rail = Math.max(8, Math.min(sx, tx) - 16);
+          // A recorded proxy connection can span earlier roots with less
+          // indentation. Keep its rail outside every card in this chain lane.
+          const rail = Math.max(8, Math.min(sx, tx, protocol ? laneLeft[caller.chain] : Infinity) - 16);
           path = `M ${sx} ${sy} H ${rail} V ${ty} H ${tx}`;
         }
-        const crossing = node.crossing;
+        const crossing = protocol ? undefined : node.crossing;
         edges.push({
-          from: parent, to: node.id, chain: node.chain, path, crosses,
+          from: parent, to: node.id, chain: node.chain, path, crosses, protocol,
           uncertain: node.kind === "ghost" || !!crossing && crossing.status !== "matched",
           failed: node.failed || node.reverted,
         });
@@ -61,7 +81,7 @@ export function FlowConnections({ container, rows, physical, selected }: {
     observer.observe(element);
     element.querySelectorAll("[data-flow-node]").forEach(card => observer.observe(card));
     return () => observer.disconnect();
-  }, [container, rows, physical]);
+  }, [container, rows, physical, protocolLinks, crossChainLinks]);
 
   return <svg className={styles.connections} width={layout.width} height={layout.height} aria-hidden="true">
     <defs>{(["L1", "L2", "uncertain", "failed"] as const).map(tone =>
@@ -79,11 +99,12 @@ export function FlowConnections({ container, rows, physical, selected }: {
       const active = selected === edge.from || selected === edge.to;
       const tone = edge.failed ? "failed" : edge.uncertain ? "uncertain" : edge.chain;
       const verified = edge.crosses && tone === edge.chain;
-      return <g key={edge.to} data-active={active} data-dimmed={selected !== null && !active}>
+      return <g key={`${edge.from}:${edge.to}`} data-active={active} data-dimmed={selected !== null && !active}>
         {verified && <path d={edge.path} className={styles.connectionGlow} style={{ stroke: `url(#${marker}-cross)` }} />}
         <path d={edge.path} className={styles.connection}
           data-tone={tone} data-uncertain={edge.uncertain} data-crossing={edge.crosses}
           data-from={edge.from} data-to={edge.to}
+          data-protocol-link={edge.protocol || undefined}
           style={verified ? { stroke: `url(#${marker}-cross)` } : undefined}
           markerEnd={`url(#${marker}-${tone})`} />
       </g>;

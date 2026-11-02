@@ -20,6 +20,15 @@ export type MainnetBindings = {
 };
 const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 function check(value: unknown, message: string): asserts value { if (!value) throw new Error(message); }
+/** Explorer links are optional on dashboard-discovered networks, including
+ * local deployments served over HTTP. Validate before any setup transaction. */
+export function treasuryExplorerUrl(value: string | undefined, dashboardNetwork = false): string | undefined {
+  if (value === undefined || dashboardNetwork && value.trim() === '') return undefined;
+  const url = new URL(value);
+  check((url.protocol === 'https:' || dashboardNetwork && url.protocol === 'http:')
+    && !url.username && !url.password && !url.search && !url.hash, 'Invalid treasury explorer URL');
+  return value;
+}
 const address = (a: unknown): a is Address => typeof a === "string" && isAddress(a) && BigInt(a) > 1n;
 function bound(c: TreasuryConfig, chain: "l1" | "l2", a: Address) {
   return c.code.some(b => b.chain === chain && same(b.address, a));

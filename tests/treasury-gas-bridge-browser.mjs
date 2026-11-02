@@ -6,12 +6,13 @@ import react from '@vitejs/plugin-react';
 import { chromium } from 'playwright';
 import { keccak256, toHex } from 'viem';
 import { setupIdentity } from '../src/lib/treasury/mainnetSetup.ts';
+import { savedNetworkKey } from '../src/lib/treasury/savedNetwork.ts';
 
 const read = path => JSON.parse(readFileSync(path));
 const mainnet = read('src/lib/treasury/mainnet-network.json');
 const profile = read('src/lib/treasury/paired-testnet-network.json');
 const account = toHex(200n, { size: 20 }), hash = toHex(9n, { size: 32 });
-const server = await createServer({ configFile: false, envFile: false, plugins: [react()], server: { host: '127.0.0.1', port: 0 }, base: '/' });
+const server = await createServer({ configFile: false, envFile: false, plugins: [react()], server: { host: '127.0.0.1', port: 0, watch: null }, base: '/' });
 await server.listen();
 const origin = `http://127.0.0.1:${server.httpServer.address().port}`;
 const browser = await chromium.launch({ headless: true, chromiumSandbox: true });
@@ -29,13 +30,19 @@ try {
       bridgeL1Address: testnet ? profile.bridges.l1.address : network.contracts.bridgeL1.address,
       bridgeL2Address: testnet ? profile.bridges.l2.address : network.contracts.bridgeL2.address,
       treasuryTokenAddress: toHex(30n, { size: 20 }), l1FeesEnabled: true, l2FeesEnabled: true };
+    const selectionKey = testnet ? savedNetworkKey({
+      l1: { rpc: origin + '/rpc/l1', front: origin + '/composer/l1', explorer: '' },
+      l2: { rpc: origin + '/rpc/l2', front: origin + '/composer/l2', explorer: '' },
+      fees: { l1: '100000000000000000', l2: '100000000000000000' },
+    }, runtime.bridgeL1Address, runtime.bridgeL2Address, runtime.treasuryTokenAddress) : null;
     const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
     const page = await context.newPage(), errors = [];
     activePage = page;
     page.setDefaultTimeout(10000);
     page.on('pageerror', error => errors.push(error.message));
-    await page.addInitScript(({ account, key, state, chain }) => {
+    await page.addInitScript(({ account, key, state, chain, selectionKey, network }) => {
       localStorage.setItem(key, JSON.stringify(state)); localStorage.setItem('walletConnected', 'true'); localStorage.setItem('walletProvider', 'legacy:0');
+      if (selectionKey) localStorage.setItem(selectionKey, JSON.stringify(network));
       sessionStorage.setItem('eez:treasury-demo:visible', '1');
       window.gasBridgeTest = { l2Gas: '0x0', walletOps: [] };
       window.ethereum = { isMetaMask: true, chain, on() {}, removeListener() {}, async request({ method, params }) {
@@ -51,14 +58,16 @@ try {
         if (method === 'eth_getTransactionCount') return '0x0';
         throw Error('Unexpected wallet request: ' + method);
       } };
-    }, { account, key, state, chain: toHex(network.chains.l2.chainId) });
+    }, { account, key, state, chain: toHex(network.chains.l2.chainId), selectionKey, network });
     await page.route('**/*', async route => {
       const request = route.request(), url = new URL(request.url());
       assert.equal(url.origin, origin, 'Fixture must not contact live services');
       if (url.pathname === '/gas-bridge') return route.fulfill({ contentType: 'text/html', body: '<meta name="viewport" content="width=device-width,initial-scale=1"><div id="root"></div><script type="module">import R from "/@react-refresh";R.injectIntoGlobalHook(window);window.$RefreshReg$=()=>{};window.$RefreshSig$=()=>type=>type;window.__vite_plugin_react_preamble_installed__=true;</script>' });
       if (url.pathname.endsWith('/config.json')) return route.fulfill({ json: runtime });
       if (request.method() !== 'POST') return route.continue();
-      const { id, method, params = [] } = request.postDataJSON();
+      const payload = request.postDataJSON();
+      if (Array.isArray(payload)) return route.fulfill({ json: { jsonrpc: '2.0', id: null, error: { code: -32600, message: 'Fixture supports individual RPC requests' } } });
+      const { id, method, params = [] } = payload;
       assert(!/send|sign/i.test(method), 'No real broadcast');
       const reply = result => route.fulfill({ json: { jsonrpc: '2.0', id, result } });
       if (method === 'eth_chainId') return reply(toHex(network.chains[url.pathname.endsWith('l2') ? 'l2' : 'l1'].chainId));

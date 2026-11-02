@@ -3,6 +3,7 @@ import { ChainReader, makeRpc, validateSettlement } from './rpc.mjs';
 import { protocol, hex, lower, number, parseEvent, same } from './protocol.mjs';
 import { buildGraph } from './logical.mjs';
 import { enrichTokenMetadata } from './token-metadata.mjs';
+import { enrichAccountTypes } from './account-types.mjs';
 import { lookupTransactionLinks, validateTransactionLinks, recheckTransactionLinks, isolateL2Execution } from './transaction-links.mjs';
 
 async function concurrent(items, fn, limit = 8) {
@@ -302,6 +303,7 @@ export async function decodeCrossChainTrace(inputConfig, txHash) {
     originalTraces: transactions.map(r => ({ chain: r.chain, transactionHash: r.hash, trace: r.traceResult.trace })),
     settlements, transactionLinks, ...graph, unresolved, diagnostics,
   };
+  await enrichAccountTypes(trace, readers, typeof config.metadataBudget === 'function' ? config.metadataBudget() : undefined);
   await enrichTokenMetadata(trace, readers, typeof config.metadataBudget === 'function' ? config.metadataBudget() : undefined);
   return trace;
 }

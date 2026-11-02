@@ -151,14 +151,20 @@ the selected wallet, and the shared collapsed gas controls and transaction popup
 Missing source proxies can be created from the demo; existing proxies are
 verified before use. Cross-chain history records the actual call direction.
 
-The experimental **Treasury Demo** and **CoW Light Demo** are hidden from the normal dashboard. Press
+The experimental **Treasury Demo**, **CoW Light Demo** and **Falcon Safe Demo** are hidden from the normal dashboard. Press
 **Ctrl+Alt+Shift+T** (or **Cmd+Option+Shift+T** on macOS), outside an editable field,
-to reveal both tabs beside Counter Demo and open Treasury. Press the same shortcut again
-to hide both; either open demo returns to Counter Demo. Visibility is kept in
+to reveal the tabs beside Counter Demo and open Treasury. Falcon follows CoW Light. Press the same shortcut again
+to hide all three; any open hidden demo returns to Counter Demo. Visibility is kept in
 `sessionStorage` for this browser tab's session and survives reloads. A fresh
-session starts hidden; neither `#/treasury-demo` nor `#/cow-demo` enables the tabs. This is a
+session starts hidden; `#/treasury-demo`, `#/cow-demo` and `#/falcon-demo` do not enable the tabs. This is a
 navigation preference, not access control: anyone who knows the shortcut can
 open the example, and its code ships with the application.
+
+[Falcon Safe](docs/runbooks/falcon-safe-demo.md) integrates browser Falcon-512 signing,
+encrypted key backups/storage, L2 verification and L1 Safe control. It reuses the
+header wallet and compact fee SDK. Its cryptography loads only when the tab opens;
+leaving the tab clears the unlocked key. Contract actions require the pinned
+916969/Chiado deployment; browser signing works on other dashboard networks too.
 
 CoW Light uses the native dashboard tab and the API in `demos/cow-light`, proxied through
 `/dashboard/cowdemo/`. Run its API and solver for the dashboard's network;
@@ -190,20 +196,33 @@ approvals without opening wallet confirmation. These checks run once per
 submission attempt, not while collecting owner signatures; they supplement the
 existing simulation and final deployment validation.
 
-On **Chiado 10200 / EEZ-X 699069**, configure the normal bridges and an existing
-`treasuryTokenAddress` in the local runtime configuration. The configured
-`TestUSDC` and its normal-bridge wrapped representation must already exist.
-The user supplies an existing L1 Safe and creates or reuses its L2 mirror;
-the six Safe setup steps neither deploy the token nor require a faucet claim.
+New treasury setups use the dashboard's existing RPCs, Composer endpoints,
+protocol addresses and normal bridges. No separate per-chain treasury JSON is
+required. The configured bridges are trusted; setup checks their presence and
+connections without a bridge bytecode allowlist. Saved setup records retain
+observed contract identities so reloads resume the same deployment.
 
-After setup, **Get USDC from faucet** appears beside each Safe only when the
-configured token matches the current `TestUSDC` bytecode and bridge bindings.
-It is hidden for ordinary tokens and Ethereum-mainnet configurations. Clicking
-the L1 button calls `claim(safeL1)`; the L2 button calls `claimOnL2(safeL2)` through
-the normal bridge. Each sends exactly **1,000 test tokens**, with a normal wallet
-confirmation and gas paid on Chiado. Each Safe has its own claim journal and pending button. The other faucet and
-payment controls remain usable; wallet requests are sequenced to avoid reusing
-an L1 nonce. Both claims remain recoverable after reload. No separate faucet screen is part of setup.
+The only additional environment setting is optional:
+`EEZ_UI_TREASURY_TOKEN_ADDRESS`, rendered as `treasuryTokenAddress` in the dashboard
+runtime configuration. Set it to the L1 ERC-20 address (six decimals). Setup reads
+its symbol once and obtains the L2 token from the configured bridge. If unset,
+users can select an existing token or choose **Deploy demo token**, followed by
+**Initialize on L2**. Each action requires a wallet confirmation;
+initialization sends 1,000 demo tokens to that wallet on L2. Pending requests are
+saved before submission and tracked across reloads without automatic resubmission.
+For an ordinary token without an L2 representation, bridge it once and check again.
+
+New Safes retain matching addresses on both chains and require the Arachnid
+deterministic deployer at `0x4e59b44847b379578588920ca78fbf26c0b4956c` on each chain.
+Readiness identifies the missing chain and asks for deployment before Safe
+creation. The original Safe deployment batches and internal-transfer helper
+selection remain unchanged. Existing treasury journals retain their original
+network bindings and continue through their existing recovery flow.
+
+After setup, the faucet appears only for the demo's verified `TestUSDC` contract.
+Each claim sends 1,000 demo tokens to the chosen Safe with wallet confirmation.
+Ordinary tokens do not get a faucet. The existing 100-token per-Safe and 150-token
+shared spending limits remain unchanged.
 
 The contribution slider includes **25%**, **50%**, and **75%** presets for the
 EEZ-X share. They preserve the exact total, use the same balance/allowance checks

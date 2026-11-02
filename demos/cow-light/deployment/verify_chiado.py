@@ -10,6 +10,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from deployment.bootstrap_chiado import atomic_json
+from network_config import environment
 
 
 def compiler_input(artifact, source_root, hash_source):
@@ -49,7 +50,8 @@ def main():
     manifest = json.loads((directory / 'bootstrap.json').read_text())
     if manifest['identity']['l1ChainId'] != 10200:
         raise ValueError('Chiado verification only')
-    rpc = os.environ.get('L1_RPC') or os.environ.get('EEZ_UI_L1_RPC_UPSTREAM')
+    shared = environment(os.environ)
+    rpc = shared.get('L1_RPC') or shared.get('EEZ_UI_L1_RPC_UPSTREAM')
     client = Web3(Web3.HTTPProvider(rpc, request_kwargs={'timeout': 30})) if rpc else None
     if client is not None and client.eth.chain_id != 10200:
         raise ValueError('Verification RPC must be Chiado')

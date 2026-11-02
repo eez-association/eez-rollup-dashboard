@@ -4,8 +4,10 @@ import { renderTrace } from '../src/logical.mjs';
 import { decodeCrossChainTrace } from '../src/engine.mjs';
 import { buildFlowModel, explorerSite, standardRevert } from '../flow/model.mjs';
 import { inlineModelSource, preferSavedTrace, renderFlowHtml } from '../flow/render-flow.mjs';
-import { scenario, address } from './fixtures/scenarios.mjs';
+import { scenario, address, frame, M, l1Entry } from './fixtures/scenarios.mjs';
+import { protocol } from '../src/protocol.mjs';
 import { largeTrace } from './fixtures/large-trace.mjs';
+import { traceRows, traceConnections } from '../flow/rows.mjs';
 
 const plain = value => JSON.parse(JSON.stringify(value, (_, v) => typeof v === 'bigint' ? v.toString() : v));
 const decode = async (opts = {}, edit) => {
@@ -37,6 +39,225 @@ test('an L2-started flow is matched to the L2Tx batch entry (proxyEntryHash = 0)
   assert.equal(trigger.hash, f.trigger);
   assert.ok(trigger.evidence.some(e => /L2Tx entry #0 .*started on L2/.test(e)), trigger.evidence.join('; '));
   assert.equal(byRole(m, 'table-load').length, 1);
+});
+
+test('L2-started repeated calls retain their exact L1 proxy callers without duplicating execution', async () => {
+  const { trace } = await decode({ direction: 'L2', repeat: 2, attempts: true });
+  const model = buildFlowModel(trace), frames = new Map(trace.frames.map(frame => [frame.id, frame]));
+  assert.equal(model.protocolLinks.length, 2);
+  assert.equal(new Set(model.protocolLinks.map(link => link.to)).size, 2);
+  for (const link of model.protocolLinks) {
+    const caller = model.nodes[link.from], target = model.nodes[link.to];
+    assert.equal(caller.role, 'incoming-proxy');
+    assert.match(caller.fn, /^executeOnBehalf\(/);
+    assert.equal(caller.chain, 'L1');
+    assert.equal(frames.get(target.frameId).parentId, caller.frameId);
+    assert.equal(target.crossing.status, 'matched');
+    const logicalCaller = model.nodes.find(node => node.children.includes(target.id));
+    assert.equal(logicalCaller.chain, 'L2', 'the original cross-chain arrow is preserved');
+    assert.ok(!caller.children.includes(target.id), 'the recorded connection is not another tree traversal');
+    assert.equal(model.nodes.filter(node => node.frameId === target.frameId).length, 1);
+    const shown = traceRows(model, { protocol: true });
+    assert.equal(shown.filter(row => row.node.id === target.id).length, 1);
+    assert.ok(shown.some(row => row.node.id === caller.id));
+    assert.ok(!traceRows(model, { protocol: false }).some(row => row.node.id === caller.id));
+  }
+  physicalLinks(trace);
+  assert.deepEqual(buildFlowModel(trace, { mode: 'physical' }).protocolLinks, [], 'recorded trees already contain these edges');
+});
+
+test('L1-started reentrant calls retain both chains’ recorded proxy callers', async () => {
+  const { trace } = await decode({ deep: true });
+  const model = buildFlowModel(trace), frames = new Map(trace.frames.map(frame => [frame.id, frame]));
+  assert.equal(model.protocolLinks.length, 3, 'initial delivery, L1 reentry and nested L2 reentry are connected');
+  assert.deepEqual(model.protocolLinks.map(link => model.nodes[link.from].chain).sort(), ['L1', 'L2', 'L2']);
+  const shown = traceRows(model, { protocol: true });
+  for (const link of model.protocolLinks) {
+    const caller = model.nodes[link.from], target = model.nodes[link.to];
+    assert.equal(caller.role, 'incoming-proxy');
+    assert.match(caller.fn, /^executeOnBehalf\(/);
+    assert.equal(caller.chain, target.chain);
+    assert.equal(caller.tx, target.tx);
+    assert.equal(frames.get(target.frameId).parentId, caller.frameId);
+    assert.equal(target.crossing.status, 'matched');
+    assert.equal(shown.filter(row => row.node.id === target.id).length, 1);
+    assert(shown.some(row => row.node.id === caller.id));
+    assert(!caller.children.includes(target.id), 'preserve logical parentage');
+    assert.notEqual(model.nodes.find(node => node.children.includes(target.id)).chain, target.chain);
+  }
+  physicalLinks(trace);
+  assert.deepEqual(buildFlowModel(trace, { mode: 'physical' }).protocolLinks, []);
+});
+
+test('protocol rows follow recorded ancestry while proxy crossings remain explicit', async () => {
+  for (const options of [{ deep: true }, { direction: 'L1', repeat: 2 }, { direction: 'L2', repeat: 2, attempts: true }]) {
+    const { trace } = await decode(options), model = buildFlowModel(trace);
+    const rows = traceRows(model, { protocol: true, localReads: false });
+    const index = new Map(rows.map((row, i) => [row.node.id, i]));
+    assert.equal(new Set(rows.map(row => row.node.id)).size, rows.length);
+    for (const link of model.protocolLinks) {
+      const row = rows.find(row => row.node.id === link.to);
+      assert.equal(row.parent, link.from);
+      assert(index.get(link.from) < index.get(link.to), 'executeOnBehalf precedes its real target');
+    }
+    const edges = traceConnections(rows, model.protocolLinks, model.crossChainLinks);
+    assert.equal(new Set(edges.map(e => `${e.from}:${e.to}`)).size, edges.length);
+    assert.equal(model.crossChainLinks.length, model.stats.matched);
+    for (const link of model.crossChainLinks) {
+      const source = model.nodes[link.from], target = model.nodes[link.to];
+      assert(source.outgoing);assert.equal(target.crossing.status, 'matched');
+      assert.notEqual(source.chain, target.chain);
+      assert(edges.some(edge => edge.from === (link.manager ?? link.from) && edge.to === link.to && !edge.protocol));
+      const manager = rows.find(row => row.node.frameId === source.outgoing.managerFrameId);
+      if (manager) {
+        assert.equal(manager.parent, source.id, 'proxy still calls EEZ locally');
+        assert.equal(link.manager, manager.node.id, 'the visible crossing leaves the observed EEZ manager call');
+      }
+    }
+  }
+});
+
+test('crossing boundary is the observed manager call, never another transaction at the same address', async () => {
+ const { f, trace }=await decode({deep:true});const original=buildFlowModel(trace);
+ const first=original.crossChainLinks.find(link=>original.nodes[link.from].chain==='L1');
+ const source=original.nodes[first.from],manager=original.nodes[first.manager];
+ assert.equal(manager.role,'manager');assert.equal(manager.tx,source.tx);assert.equal(manager.recordedParent,source.id);
+ const changed=structuredClone(trace);changed.outgoing.find(out=>out.frameId===source.frameId).managerFrameId=`L1:${f.posting}:0`;
+ const model=buildFlowModel(changed),link=model.crossChainLinks.find(link=>model.nodes[link.from].frameId===source.frameId);
+ assert.equal(link.manager,undefined,'do not attach the crossing to an unrelated batch manager');
+});
+
+test('searching an L1 settlement does not label its L2 initiating user transaction as L1', async () => {
+  const { f, trace } = await decode({ direction: 'L2' });
+  trace.origin = { chain: 'L1', transactionId: `L1:${f.posting}` };trace.txHash = f.posting;
+  const model = buildFlowModel(trace), sources = model.transactions.filter(tx => tx.role === 'trigger' && tx.inFlow === true);
+  assert.equal(model.origin.chain, 'L1', 'origin records the searched transaction');
+  assert.deepEqual(sources.map(tx => [tx.chain, tx.hash]), [['L2', f.trigger]], 'initiator follows decoded calls and verified links');
+  const rows = traceRows(model, { protocol: true });
+  const table = rows.findIndex(row => row.node.fn.startsWith('loadExecutionTable'));
+  const source = rows.findIndex(row => row.node.tx === f.trigger && row.node.path === '0');
+  assert(table >= 0 && table < source, 'the actual L2 table load precedes its L2 user transaction');
+});
+
+test('static incoming proxy calls remain visible as cross-chain evidence when local reads are hidden', async () => {
+  const { trace } = await decode({ direction: 'L2', isStatic: true });
+  const model = buildFlowModel(trace);
+  assert.equal(model.protocolLinks.length, 1);
+  const caller = model.nodes[model.protocolLinks[0].from];
+  assert.equal(caller.isStatic, true);
+  assert.equal(caller.crossChainRead, true);
+  const rows = traceRows(model, { protocol: true, localReads: false });
+  assert(rows.some(row => row.node.id === caller.id));
+  assert(rows.some(row => row.node.id === model.protocolLinks[0].to));
+});
+
+test('L1 proxy links require the exact observed parent and matching execution', async () => {
+  const { trace } = await decode({ deep: true });
+  const model = buildFlowModel(trace);
+  const targetFrame = model.nodes[model.protocolLinks[0].to].frameId;
+  const changed = structuredClone(trace);
+  changed.frames.find(frame => frame.id === targetFrame).parentId = changed.logicalRoots[0];
+  const changedModel = buildFlowModel(changed);
+  assert(!changedModel.protocolLinks.some(link => changedModel.nodes[link.to].frameId === targetFrame));
+  for (const status of ['unresolved', 'ambiguous']) {
+    const unlinked = structuredClone(trace);
+    const outgoing = unlinked.outgoing.find(out => out.remoteFrameId === targetFrame);
+    outgoing.status = status;
+    const unlinkedModel = buildFlowModel(unlinked);
+    assert(!unlinkedModel.protocolLinks.some(link => unlinkedModel.nodes[link.to].frameId === targetFrame));
+  }
+});
+
+test('proxy connections do not infer ambiguous or unavailable remote execution', async () => {
+  const { trace: ambiguous } = await decode({ direction: 'L2', repeat: 2, ambiguous: true });
+  assert.deepEqual(buildFlowModel(ambiguous).protocolLinks, []);
+  const { trace: missing } = await decode({ direction: 'L2' }, f => {
+    f.failure.transactionTrace.add(f.posting); f.failure.allTrace.add(f.posting);
+  });
+  assert.deepEqual(buildFlowModel(missing).protocolLinks, []);
+});
+
+test('a verified L1 user flow excludes unrelated immediate batch calls but keeps them in full inspection', async () => {
+ const { f, trace } = await decode({ deep: true }, f => {
+  f.txs.L1.get(f.posting).trace.calls.push(frame(M.L1,M.L1,protocol.L1.encodeFunctionData('_attemptExecuteImmediateL2Txs',[l1Entry('0x'+'00'.repeat(32))])));
+ });
+ physicalLinks(trace);
+ const model=buildFlowModel(trace),attempt=model.nodes.find(n=>n.fn.startsWith('_attemptExecute'));
+ assert.equal(attempt.flowAttempt,'other');
+ const rows=traceRows(model,{protocol:true});
+ assert.equal(rows[0].node.tx,f.posting,'verified earlier batch is above the user transaction');
+ assert(!rows.some(r=>r.node.id===attempt.id));
+ assert(traceRows(model,{protocol:true,transaction:`L1:${f.posting}`}).some(r=>r.node.id===attempt.id));
+ const recorded=buildFlowModel(trace,{mode:'physical'});
+ assert(traceRows(recorded,{protocol:true}).some(r=>r.node.fn.startsWith('_attemptExecute')));
+ delete trace.transactionLinks;
+ assert(traceRows(buildFlowModel(trace),{protocol:true}).some(r=>r.node.fn.startsWith('_attemptExecute')),'without verified source attribution, preserve batch evidence');
+});
+
+test('hiding protocol calls never hides the user initiating proxy or changes the apparent starting chain', async () => {
+ for(const direction of ['L1','L2']){
+  const { f, trace }=await decode({direction},f=>{
+   const tx=f.txs[direction].get(f.trigger);tx.trace=tx.trace.calls[0];
+   Object.assign(tx.transaction,{from:tx.trace.from,to:tx.trace.to,input:tx.trace.input});
+  });
+  const model=buildFlowModel(trace),entry=model.nodes.find(n=>n.tx===f.trigger&&n.path==='0');
+  assert.equal(entry.role,'outgoing-proxy');assert(entry.protocol);assert(entry.outgoing);
+  const rows=traceRows(model,{protocol:false,localReads:false});
+  assert.equal(rows[0].node.id,entry.id);assert.equal(rows[0].node.chain,direction);
+  assert(rows.some(r=>r.parent===entry.id&&r.node.chain!==direction),'the first crossing remains connected to its real source');
+  assert(rows.filter(r=>r.node.protocol).every(r=>r.node.id===entry.id),'internal protocol plumbing stays hidden');
+ }
+});
+
+test('the connected L2 flow prunes unrelated L1 attempts and their entire subtrees', async () => {
+  const { f, trace } = await decode({ direction: 'L2', repeat: 2, attempts: true, unrelatedAttempts: true });
+  const model = buildFlowModel(trace);
+  assert.equal(model.nodes.filter(node => node.flowAttempt === 'related').length, 2);
+  const others = model.nodes.filter(node => node.flowAttempt === 'other');
+  assert.equal(others.length, 2, 'empty and nonempty unrelated entries are classified');
+  const excluded = new Set(), collect = id => {
+    excluded.add(id); model.nodes[id].children.forEach(collect);
+  };
+  others.forEach(node => collect(node.id));
+  assert.ok(excluded.size > 2, 'the nonempty attempt includes application calls');
+  for (const protocol of [false, true]) {
+    const rows = traceRows(model, { protocol });
+    assert.ok(rows.every(row => !excluded.has(row.node.id)), 'hidden wrappers must not promote unrelated children');
+    if (protocol) for (const link of model.protocolLinks) {
+      assert.ok(rows.some(row => row.node.id === link.from));
+      assert.ok(rows.some(row => row.node.id === link.to));
+    }
+  }
+  assert.ok(traceRows(model, { protocol: true, search: '_attempt' }).every(row => !excluded.has(row.node.id)));
+  const fullBatch = traceRows(model, { protocol: true, transaction: `L1:${f.posting}` });
+  assert.ok([...excluded].every(id => fullBatch.some(row => row.node.id === id)), 'explicit settlement inspection restores the complete batch');
+});
+
+test('L2 attempt attribution follows the initiating transaction when its L1 batch was searched', async () => {
+ const { f, trace }=await decode({direction:'L2',repeat:2,attempts:true,unrelatedAttempts:true});
+ trace.origin={chain:'L1',transactionId:`L1:${f.posting}`};trace.txHash=f.posting;
+ const model=buildFlowModel(trace),other=model.nodes.filter(n=>n.flowAttempt==='other');
+ assert.equal(other.length,2);assert.equal(model.nodes.filter(n=>n.flowAttempt==='related').length,2);
+ assert(traceRows(model,{protocol:true}).every(r=>!other.some(n=>n.id===r.node.id)));
+ const full=traceRows(model,{protocol:true,transaction:`L1:${f.posting}`});
+ assert(other.every(n=>full.some(r=>r.node.id===n.id)));
+});
+
+test('one L1 attempt retains each of its multiple verified proxy calls', async () => {
+  const { trace } = await decode({ direction: 'L2', repeat: 2, sharedAttempt: true, unrelatedAttempts: true });
+  const model = buildFlowModel(trace), attempts = model.nodes.filter(node => node.flowAttempt === 'related');
+  assert.equal(attempts.length, 1);
+  assert.equal(model.protocolLinks.length, 2);
+  for (const link of model.protocolLinks) assert.ok(attempts[0].children.includes(link.from));
+  assert.equal(new Set(model.protocolLinks.map(link => link.to)).size, 2, 'identical calldata remains separate execution occurrences');
+});
+
+test('unattributed and ambiguous attempts remain available as evidence', async () => {
+  const { trace } = await decode({ direction: 'L2', repeat: 2, attempts: true, ambiguous: true });
+  const model = buildFlowModel(trace);
+  assert.equal(model.protocolLinks.length, 0);
+  assert.equal(model.nodes.filter(node => node.flowAttempt === 'other').length, 0);
+  assert.equal(traceRows(model, { protocol: true }).filter(row => row.node.fn.startsWith('_attemptExecute')).length, 2);
 });
 
 test('a transaction without cross-chain calls in the settled range is not part of the flow', async () => {

@@ -8,6 +8,10 @@ export interface TraceRequest {
   refresh?: boolean;
 }
 export interface TraceArgument { name: string; type: string; value: unknown }
+/** A recorded proxy call whose target also has a logical cross-chain caller. */
+export interface TraceProtocolLink { from: number; to: number }
+/** The originating proxy and its observed EEZ boundary call. */
+export interface TraceCrossChainLink extends TraceProtocolLink { manager?: number }
 export interface TraceCrossing {
   from: TraceChain; to: TraceChain; status: string; isStatic: boolean;
   sourceAddress?: string; targetAddress?: string; remoteTx?: string | null;
@@ -20,7 +24,10 @@ export interface TraceTokenTransfer {
 }
 export interface TraceNode {
   id: number; kind: "call" | "ghost"; frameId: string | null; chain: TraceChain;
+  recordedParent?: number | null;
   role: string; protocol: boolean; inFlow?: boolean; callType: string; contract: string;
+  flowAttempt?: "related" | "other";
+  accountType?: "eoa";
   address: string | null; from?: string | null; fn: string; signature?: string | null;
   args: TraceArgument[];
   ret: { status: string; reason?: string | null; raw?: string | null; items?: TraceArgument[]; alternatives?: number };
@@ -48,6 +55,8 @@ export interface TraceModel {
   origin: { chain: TraceChain; transactionId: string } | null;
   chains: Record<TraceChain, { chainId: string | null; rollupId: string | null; manager: string | null; name: string; explorer: string | null }>;
   nodes: TraceNode[]; transactions: TraceTransaction[];
+  protocolLinks?: TraceProtocolLink[];
+  crossChainLinks?: TraceCrossChainLink[];
   roots: { node: number; chain: TraceChain; tx: string; block: number | null; isOrigin: boolean; inFlow?: boolean; preferred?: boolean; unisolatedEntry?: boolean; entryIndex?: number | null; role: string; relatedSettlement?: boolean; label: string }[];
   settlements: { id: string; l1Tx: string; l1Block: number | null; firstL2Block: number | null; lastL2Block: number | null }[];
   unresolved: { code: string; message: string; frameId: string | null }[];

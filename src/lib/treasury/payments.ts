@@ -11,7 +11,7 @@ export type PaymentDeployment = {
   pair?: { version: 1 | 2; policyL1: Address; peerProxyL2: Address };
   bridgeKind?: "standard"; bridgeExecutorL1?: Address; safeL2Alias?: Address;
   predecessor?: Address; aliasReaderL1?: Address; policy: Address; alias: Address; tokenL1: Address; tokenL2: Address; moduleL1: Address; moduleL2: Address;
-  bridgeL1: Address; bridgeL2: Address; invoiceMerchant?: Address; invoiceControl?: string; recipient: Address; decimals: 6; period: 600; globalLimit: "150000000"; assetLabel: "Devnet USDC" | "Test USDC" | "USDC" };
+  bridgeL1: Address; bridgeL2: Address; invoiceMerchant?: Address; invoiceControl?: string; recipient: Address; decimals: 6; period: 600; globalLimit: "150000000"; assetLabel: string };
 // For pair v2, epoch is display metadata; only deadline is signed as the time condition.
 type PaymentIdentity = { source?: "l1" | "l2"; recipient: Address; destination: "l1" | "l2"; epoch: string; deadline?: string };
 // Missing kind is the existing fixed-payment format, including saved submissions.

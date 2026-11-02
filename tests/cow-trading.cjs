@@ -25,6 +25,43 @@ async function open(browser, options = {}) {
 (async () => {
   const browser = await chromium.launch({ headless: true, chromiumSandbox: true });
   try {
+    {
+      const f = await fixture(browser, { wallet: true, wrongNetwork: true, unavailable: true });
+      await f.page.goto(origin + '/'); await f.nav.waitFor();
+      await f.page.getByRole('button', { name: 'Connect Wallet', exact: true }).click();
+      await f.page.getByRole('button', { name: 'MetaMask', exact: true }).click();
+      await f.toggle(); await f.cow.click();
+      await f.page.getByText('CoW Light is not available for this network yet.', { exact: true }).waitFor();
+      const prompt = f.page.getByRole('group', { name: 'EEZ test wallet connection', exact: true });
+      await prompt.getByRole('button', { name: 'Switch to EEZ test', exact: true }).click();
+      await prompt.waitFor({ state: 'hidden' });
+      assert.equal(f.transactions.length, 0); assert.equal(f.signed.length, 0);
+      assert.equal(await f.page.getByRole('region', { name: 'Swap form' }).count(), 0);
+      assert.deepEqual(f.errors, []); await f.context.close();
+    }
+    for (const missingNetwork of [false, true]) {
+      const setup = await fixture(browser, { wallet: true, wrongNetwork: true, missingNetwork });
+      await setup.page.goto(origin + '/'); await setup.nav.waitFor(); await setup.toggle(); await setup.cow.click();
+      await setup.page.getByRole('region', { name: 'Swap form' }).getByRole('button', { name: 'Connect wallet', exact: true }).click();
+      const prompt = setup.page.getByRole('group', { name: 'EEZ test wallet connection', exact: true });
+      const connect = prompt.getByRole('button');
+      await connect.waitFor();
+      assert.equal(setup.walletRequests.filter(c => /wallet_(switch|add)EthereumChain/.test(c.method)).length, 0, 'entering CoW does not prompt the wallet');
+      if (missingNetwork) {
+        await setup.page.evaluate(() => { window.rejectTestNetworkAdd = true; });
+        await connect.click(); await prompt.getByText(/Network setup cancelled/).waitFor();
+        assert.equal(setup.transactions.length, 0); assert.equal(setup.signed.length, 0);
+        await setup.page.evaluate(() => { window.rejectTestNetworkAdd = false; });
+      }
+      await connect.click(); await prompt.waitFor({ state: 'hidden' });
+      const additions = setup.walletRequests.filter(c => c.method === 'wallet_addEthereumChain');
+      assert.equal(additions.length, missingNetwork ? 2 : 0);
+      if (missingNetwork) assert.deepEqual(additions.at(-1).params[0], { chainId: '0x1892', chainName: 'EEZ test',
+        rpcUrls: [origin.replace(/\/dashboard$/, '') + '/composer/l2'], nativeCurrency: { name: 'xDAI', symbol: 'xDAI', decimals: 18 },
+        blockExplorerUrls: ['https://rollup.example'] });
+      assert.equal(setup.transactions.length, 0); assert.equal(setup.signed.length, 0);
+      assert.deepEqual(setup.errors, []); await setup.context.close();
+    }
     const f = await open(browser);
     const catalog = f.page.getByRole('region', { name: 'Available tokens' });
     await catalog.getByLabel('Search tokens').fill('second');

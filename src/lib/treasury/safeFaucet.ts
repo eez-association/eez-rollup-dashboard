@@ -10,14 +10,16 @@ export const safeFaucetKey = (c: TreasuryConfig, chain?: 'l1' | 'l2') => `eez:tr
 /** A symbol or label is not proof that an asset exposes the test-only mint. */
 export async function verifiedSafeFaucet(c: TreasuryConfig, artifacts: DeploymentArtifacts): Promise<TestnetAsset | null> {
   const p = c.payments;
-  if (c.environment !== 'dashboard-testnet' || !p?.pair || p.bridgeKind !== 'standard' || !c.fees || !c.l1.front) return null;
+  if ((c.environment !== 'dashboard-testnet' && c.network?.discovered?.kind !== 'demo') || !p?.pair || p.bridgeKind !== 'standard' || !c.fees || !c.l1.front) return null;
   const d = new TestnetAsset({ l1: { rpc: c.l1.rpc, front: c.l1.front, explorer: c.l1.explorer ?? '' },
     l2: { rpc: c.l2.rpc, front: c.l2.front, explorer: c.l2.explorer ?? '' },
-    fees: { l1: c.fees.l1MaxTotalWei!, l2: c.fees.maxTotalWei } }, artifacts, p.bridgeL1, p.bridgeL2);
+    fees: { l1: c.fees.l1MaxTotalWei!, l2: c.fees.maxTotalWei } }, artifacts, p.bridgeL1, p.bridgeL2, c.network);
   const code = await d.rpc<`0x${string}`>('l1', 'eth_getCode', [p.tokenL1, 'latest']);
   if (!d.runtimeMatches(code, 'TestUSDC')) return null;
-  await d.validate(); await d.validateToken(p.tokenL1);
-  const wrapped = await d.read<string>('l2', p.bridgeL2, 'Bridge', 'getWrappedToken', [p.tokenL1, 0n]);
+  const [, , wrapped] = await Promise.all([
+    d.validate(), d.validateToken(p.tokenL1),
+    d.read<string>('l2', p.bridgeL2, 'Bridge', 'getWrappedToken', [p.tokenL1, 0n]),
+  ]);
   if (!same(wrapped, p.tokenL2)) throw new Error('The treasury wrapped token does not match this faucet');
   return d;
 }

@@ -1,3 +1,4 @@
+import { treasuryReadRpc } from './rpcTransport.ts';
 import { decodeFunctionResult, encodeFunctionData, isAddress, keccak256, parseAbi, toHex } from "viem";
 import type { Address, Hex } from "viem";
 import type { Chain, DeploymentArtifacts, DeploymentPending, DeploymentTarget } from "./deployment.ts";
@@ -34,13 +35,7 @@ export class DeploymentIO {
       && artifacts.modules === "c95f03900bff99be090dadb9de1c74b162365485", "Unexpected treasury deployment artifacts");
   }
   async rpc<T>(chain: Chain, method: string, params: unknown[] = [], front = false): Promise<T> {
-    const request = async <R>(url: string, name: string, args: unknown[]): Promise<R> => {
-      const response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: name, params: args }), signal: AbortSignal.timeout(15_000) });
-      check(response.ok, `Deployment RPC HTTP ${response.status}`);
-      const body = await response.json(); if (body.error) throw new Error(body.error.message);
-      return body.result;
-    };
+    const request = <R>(url: string, name: string, args: unknown[]): Promise<R> => treasuryReadRpc<R>(url, name, args, 15_000);
     const primary = this.target[chain].rpc, alternate = this.target[chain].front;
     try { return await request<T>(front ? alternate : primary, method, params); }
     catch (error) {

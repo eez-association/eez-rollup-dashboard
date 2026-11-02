@@ -1,7 +1,7 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
-import { TreasuryDemo } from '../../src/components/TreasuryDemo';
-import { setConfig, L1_CHAIN, L2_CHAIN } from '../../src/config';
+import { TreasuryMainnetSetup } from '../../src/components/TreasuryMainnetSetup';
+import { config, setConfig, L1_CHAIN, L2_CHAIN } from '../../src/config';
 import { DeploymentIO } from '../../src/lib/treasury/deploymentIO';
 import { MainnetSetup } from '../../src/lib/treasury/mainnetSetup';
 import network from '../../src/lib/treasury/mainnet-network.json';
@@ -18,7 +18,12 @@ export function mount() {
   // its on-chain checks. It does not manufacture a deployment or open a wallet.
   MainnetSetup.prototype.configure=async function(deployer,safeL1,safeL2,_progress,options){w.selection={deployer,safeL1,safeL2,options};throw Error('Fixture stopped before network validation');};
   const wallet={address:'0x00000000000000000000000000000000000000C8',chainId:'0x1',provider:{request:async()=>{throw Error('Unexpected wallet prompt');}},walletOptions:[],connect:async()=>{},switchToL1:async()=>true,switchToL2:async()=>true};
-  createRoot(document.getElementById('root')!).render(<main style={{maxWidth:1200,margin:'32px auto',padding:20}}><TreasuryDemo ready wallet={wallet as any}/></main>);
+  // Test the Safe chooser independently of the dashboard's infrastructure/token
+  // discovery, which has its own network-setup browser regression.
+  const target = { l1: { rpc: config.l1Rpc, front: config.l1ProxyRpc, explorer: config.l1Explorer },
+    l2: { rpc: config.l2Rpc, front: config.l2ProxyRpc, explorer: config.l2Explorer },
+    fees: { l1: config.l1FeeMaxTotalWei, l2: config.l2FeeMaxTotalWei } };
+  createRoot(document.getElementById('root')!).render(<main style={{maxWidth:1200,margin:'32px auto',padding:20}}><TreasuryMainnetSetup network={network} target={target} wallet={wallet as any} onComplete={()=>{}}/></main>);
 }
 
 export async function mountUX(fixture: any) {
