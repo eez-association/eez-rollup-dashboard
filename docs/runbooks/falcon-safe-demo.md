@@ -33,8 +33,9 @@ its network switch when needed. Only a wallet-reported unknown network shows an
 **Add** action. Opening the demo never opens a wallet prompt. Setup uses the dashboard's Composer
 RPC, chain ID, native currency and explorer; it does not send a transaction.
 Existing network entries are not re-added or replaced automatically. The
-wallet's L2 broadcast endpoint must route through Composer; discovery checks
-its echoed nonce and deployment identity before the Safe flow.
+wallet's L2 broadcast endpoint must route through Composer; setup and submission
+check its echoed nonce and deployment identity. Read-only account discovery
+checks the chains and deployed contracts without probing the wallet route.
 
 The existing runtime configuration supplies `l2FrontUrl`, `l2FeesEnabled: true`
 and the positive decimal-wei `l2FeeMaxTotalWei` ceiling. The demo shares
@@ -55,7 +56,9 @@ retain their separate gas estimation path.
 3. The Safe is looked up automatically when a Falcon key is generated, unlocked
    or imported. This uses read-only RPCs and never opens a wallet prompt. The
    factory maps each Falcon key to its controller; routing, code and authority
-   are checked before the account is shown.
+   are checked before the account is shown. Independent deployment and account
+   checks run concurrently. Changing the gas-paying wallet keeps the same Safe
+   loaded; changing the Falcon key, deployment or attached Safe starts a new lookup.
 4. If no controller exists, click **Create Falcon controller** and confirm its
    deployment on L2. Confirmation opens the Safe choices; it never creates a Safe
    automatically. **Create a Safe** runs the existing Falcon-authorized creation

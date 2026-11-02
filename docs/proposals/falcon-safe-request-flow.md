@@ -32,3 +32,27 @@ nonce/key/input/wallet changes and settlement evidence; no quote, contract
 authorization call or full Safe inspection on Sign. Compare the same controlled
 browser workload against the retained deployed baseline. Document that signing
 no longer includes a fee preview, and measure the separate send path as well.
+
+## Safe discovery
+
+Accepted UI scope on 2026-11-02: reduce the remaining startup delay. The deployed
+PR #44 still performs 41 reads for a factory Safe, with deployment inspection,
+controller inspection and L1 discovery waiting on each other.
+
+Run independent deployment checks and account discovery concurrently, sharing one
+L2 block for the factory mapping and controller inspection. Start L1 discovery
+as soon as the controller address is known, while its authority is checked.
+Publish the result only after all chain, deployment and authority checks pass.
+Read-only discovery does not need the wallet's Composer probe; setup and Send
+retain that broadcast-route check. Switching the gas wallet must not restart a
+key-scoped lookup. Keep key, deployment and attachment invalidation and aborts.
+
+Do not cache mutable ownership or display an unchecked funding address. Retain
+the complete factory and attached-Safe checks, fresh signing nonces, fee-quote
+guards and settlement confirmation. Persistent discovery caches and new RPC or
+contract APIs are outside this change.
+
+Acceptance: compare cold browser loading against PR #44 with the same controlled
+RPC latency; verify both supported networks and wallets, absent controllers/Safes,
+invalid chains/bindings/authority, cancellation, attachment changes and wallet
+switches. Hold independent reads to prove that overlap never bypasses validation.
