@@ -1,7 +1,8 @@
-import { decodeAbiParameters, decodeEventLog, encodeFunctionData, getAddress, isAddress, maxUint256, pad, parseAbi, parseUnits, toHex, zeroAddress, zeroHash, type Address, type Hex, type TransactionReceipt } from 'viem';
+import { decodeAbiParameters, decodeEventLog, encodeFunctionData, getAddress, hashTypedData, isAddress, maxUint256, pad, parseAbi, parseUnits, toHex, zeroAddress, zeroHash, type Address, type Hex, type TransactionReceipt } from 'viem';
 import { inspectSafe } from '../treasury/safeSetup.ts';
 import { loadTreasuryArtifacts } from '../treasury/release.ts';
 import { decodeSafeExecution } from '../treasury/safeEvents.ts';
+import { buildSafeTransaction } from '../treasury/safeTransactions.ts';
 import type { EezClient } from './eez.ts';
 import type { CrossChainDeployment } from './crossChainDeployment.ts';
 import { canonicalReceipt, checkChain, checkCode, managerAbi, sameAddress, type Settlement } from './l1Controller.ts';
@@ -72,23 +73,21 @@ export function safeOperationCall(d: CrossChainDeployment, op: SafeOperation) {
 export async function loadRemoteSafe(client: EezClient, d: CrossChainDeployment, controller: Address, signal: AbortSignal, atBlock?: bigint, attachment?: SafeAttachment): Promise<RemoteSafe> {
   const cfg = d.l1.safe;
   if (!cfg) throw new Error('Safe deployment has not been configured.');
-  await checkChain(client, d.l1);
-  const blockNumber = atBlock ?? await client.getBlockNumber();
-  if (attachment) return loadAttachedSafe(client, d, controller, attachment, signal, blockNumber);
-  await Promise.all([
-    checkCode(client, cfg.factory, 'Safe factory', blockNumber), checkCode(client, cfg.singleton, 'Safe implementation', blockNumber),
-    checkCode(client, cfg.fallbackHandler, 'Safe fallback handler', blockNumber),
+  const [, blockNumber] = await Promise.all([
+    checkChain(client, d.l1), atBlock ?? client.getBlockNumber(),
   ]);
+  if (attachment) return loadAttachedSafe(client, d, controller, attachment, signal, blockNumber);
   const factory = { address: cfg.factory.address, abi: safeFactoryAbi, blockNumber } as const;
   const [singleton, handler, owner] = await Promise.all([
     client.readContract({ ...factory, functionName: 'singleton' }), client.readContract({ ...factory, functionName: 'fallbackHandler' }),
     client.readContract({ address: d.l1.registry, abi: managerAbi, functionName: 'computeCrossChainProxyAddress', args: [controller, d.l2.rollupId], blockNumber }),
+    checkCode(client, cfg.factory, 'Safe factory', blockNumber), checkCode(client, cfg.singleton, 'Safe implementation', blockNumber),
+    checkCode(client, cfg.fallbackHandler, 'Safe fallback handler', blockNumber),
   ]);
   if (!sameAddress(singleton, cfg.singleton.address) || !sameAddress(handler, cfg.fallbackHandler.address)) throw new Error('Safe factory configuration does not match this deployment.');
   const target = await client.readContract({ ...factory, functionName: 'safes', args: [owner] });
   signal.throwIfAborted();
   if (sameAddress(target, zeroAddress)) return { owner, target: null, nonce: null, balance: null };
-  await checkCode(client, { address: target, runtimeCodeHash: cfg.proxyRuntimeCodeHash }, 'Safe proxy', blockNumber);
   const read = { address: target, abi: safeAbi, blockNumber } as const;
   const [implementation, version, owners, threshold, nonce, balance, modules, guard, fallback, proxy] = await Promise.all([
     client.readContract({ ...read, functionName: 'masterCopy' }), client.readContract({ ...read, functionName: 'VERSION' }),
@@ -97,6 +96,7 @@ export async function loadRemoteSafe(client: EezClient, d: CrossChainDeployment,
     client.readContract({ ...read, functionName: 'getModulesPaginated', args: [sentinel, 1n] }),
     client.getStorageAt({ address: target, slot: guardSlot, blockNumber }), client.getStorageAt({ address: target, slot: fallbackSlot, blockNumber }),
     client.readContract({ address: d.l1.registry, abi: managerAbi, functionName: 'authorizedProxies', args: [owner], blockNumber }),
+    checkCode(client, { address: target, runtimeCodeHash: cfg.proxyRuntimeCodeHash }, 'Safe proxy', blockNumber),
   ]);
   if (!sameAddress(implementation, singleton) || version !== cfg.version || owners.length !== 1 || !sameAddress(owners[0]!, owner) || threshold !== 1n
     || modules[0].length !== 0 || !sameAddress(modules[1], sentinel) || guard !== zeroHash || fallback?.toLowerCase() !== pad(handler, { size: 32 }).toLowerCase()
@@ -105,16 +105,17 @@ export async function loadRemoteSafe(client: EezClient, d: CrossChainDeployment,
   return { owner, target, nonce, balance };
 }
 
-export async function prepareSafeTransfer(client: EezClient, d: CrossChainDeployment, controller: Address, recipient: Address, value: bigint, signal: AbortSignal, input: Hex = '0x', attachment?: SafeAttachment): Promise<SafeOperation> {
+export async function prepareSafeTransfer(client: EezClient, d: CrossChainDeployment, remote: RemoteSafe, recipient: Address, value: bigint, signal: AbortSignal, input: Hex = '0x'): Promise<SafeOperation> {
   const data = parseSafeData(input);
-  const blockNumber = await client.getBlockNumber();
-  const remote = await loadRemoteSafe(client, d, controller, signal, blockNumber, attachment);
-  if (!remote.target || remote.nonce === null || remote.balance === null) throw new Error('Create your Safe first.');
+  if (!remote.target) throw new Error('Create your Safe first.');
   if (sameAddress(recipient, remote.target)) throw new Error('Choose a recipient other than this Safe.');
-  if (remote.balance < value) throw new Error('Safe balance is too low. Fund this Safe on L1, then reload.');
-  const safeTxHash = await client.readContract({ address: remote.target, abi: safeAbi, functionName: 'getTransactionHash', args: [...safeCallFields(recipient, value, data), remote.nonce], blockNumber });
+  // The controller nonce protects the Falcon authorization. The Safe nonce/hash
+  // identify the exact L1 receipt we expect; they are not part of the Falcon digest.
+  const safeNonce = await client.readContract({ address: remote.target, abi: safeAbi, functionName: 'nonce' });
+  const transaction = buildSafeTransaction({ chainId: BigInt(d.l1.chainId), safe: remote.target, to: recipient, data, nonce: safeNonce });
+  const safeTxHash = hashTypedData({ ...transaction, message: { ...transaction.message, value } });
   signal.throwIfAborted();
-  return { kind: 'transfer', ...(attachment ? { attachment } : {}), target: remote.target, owner: remote.owner, recipient, value, data, safeNonce: remote.nonce, safeTxHash };
+  return { kind: 'transfer', ...(remote.attachment ? { attachment: remote.attachment } : {}), target: remote.target, owner: remote.owner, recipient, value, data, safeNonce, safeTxHash };
 }
 
 export function safeCallResult(op: SafeOperation, result: Hex): Address | true {

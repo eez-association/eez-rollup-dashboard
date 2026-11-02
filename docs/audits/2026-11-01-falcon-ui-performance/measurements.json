@@ -1,0 +1,802 @@
+{
+  "date": "2026-11-01",
+  "baseline": "bca8f244358e7e844c2f7cbeb19201bc01a95867",
+  "deployedEquivalentSource": "49459037fb9d7e189dfd66045673b871d6b432e6",
+  "sourceProtocol": "855fe0602484750861b4c31502a1a91355d33ed6",
+  "runtimeProtocol": "84a5b5207880f192a6a5896cbfe0bac5249db47f",
+  "branch": "codex/falcon-safe-performance",
+  "browser": "153.0.8010.12",
+  "node": "22.23.4",
+  "publicDeployedUi": {
+    "origin": "https://eez.asuscomm.com/dashboard/",
+    "observedFrom": "ROG host with fresh browser contexts; not the user device or connection",
+    "trials": [
+      {
+        "loadMs": 298.117808,
+        "generateMs": 144.002797,
+        "signMs": [
+          81.87593600000002,
+          69.68952200000012,
+          79.39649299999996
+        ],
+        "signInfo": [
+          "666 bytes \u00b7 signed in 12.7 ms",
+          "666 bytes \u00b7 signed in 5.2 ms",
+          "666 bytes \u00b7 signed in 4.6 ms"
+        ],
+        "verifyMs": 57.74328999999989,
+        "keyStatus": "Key generated in 86.8 ms. Save it in this browser or download a backup before reloading.",
+        "errors": [],
+        "writes": [],
+        "readCount": 23
+      },
+      {
+        "loadMs": 173.485459,
+        "generateMs": 143.21178299999997,
+        "signMs": [
+          75.4544800000001,
+          64.63754199999994,
+          62.82774399999994
+        ],
+        "signInfo": [
+          "666 bytes \u00b7 signed in 8.5 ms",
+          "666 bytes \u00b7 signed in 6.3 ms",
+          "666 bytes \u00b7 signed in 2.9 ms"
+        ],
+        "verifyMs": 64.68360900000016,
+        "keyStatus": "Key generated in 77.1 ms. Save it in this browser or download a backup before reloading.",
+        "errors": [],
+        "writes": [],
+        "readCount": 23
+      },
+      {
+        "loadMs": 275.20743400000015,
+        "generateMs": 130.51197000000002,
+        "signMs": [
+          78.44380799999999,
+          62.42492200000015,
+          64.65607999999975
+        ],
+        "signInfo": [
+          "666 bytes \u00b7 signed in 10.4 ms",
+          "666 bytes \u00b7 signed in 6.4 ms",
+          "666 bytes \u00b7 signed in 3.9 ms"
+        ],
+        "verifyMs": 64.63261299999976,
+        "keyStatus": "Key generated in 74.8 ms. Save it in this browser or download a backup before reloading.",
+        "errors": [],
+        "writes": [],
+        "readCount": 23
+      }
+    ],
+    "unlockMs": [
+      120.773326,
+      134.41219,
+      122.5511489999999
+    ],
+    "verificationRpc": [
+      {
+        "durationMs": 191.397109,
+        "valid": true
+      },
+      {
+        "durationMs": 170.52495199999998,
+        "valid": true
+      },
+      {
+        "durationMs": 14.777394000000015,
+        "valid": true
+      }
+    ]
+  },
+  "checks": {
+    "build": "passed",
+    "npmTest": {
+      "passed": 712,
+      "failed": 0,
+      "skipped": 0
+    },
+    "browser": [
+      "wallet: both networks, Rabby legacy and MetaMask type-2",
+      "existing Safe compatibility",
+      "transaction recovery",
+      "hidden navigation, unmount/key clearing, responsive layouts"
+    ],
+    "deployment": false,
+    "liveTransactions": false,
+    "contractOrProtocolChange": false,
+    "safeEvm": "Anvil 1.7.1: real Safe 1.5.0 and SafeL2 1.4.1 runtimes, local hash equality with getTransactionHash, nonzero transfer, receipt check; registry stubbed"
+  },
+  "localOnlyEvidence": {
+    "public.mjs": "09637be2a07ae0de7777c56c728febe21fcdde9b87c8b4592f297fcfb7b19c5e",
+    "wallet-profile.mjs": "260d73e47fa5ae39007b3d8bb4fce60a799cda57b4f72f97aa808a44b6b4589c",
+    "baseline-build.log": "3a6a3785c93bfcf890dca04ddfa876e248a102a81cfa5753081d16afd6213acd",
+    "candidate-build.log": "3915abc0680e76d9e52e9592df44d5343154f186738c3fed6057229768d36ece",
+    "unit.log": "7e69688c8b933aa8e299802fd12762a446846a04a96196601c0400cb089f0829",
+    "unit-initial-environment-failures.log": "6fca2665ef68bb8e6e51af7565a6ac89990304307d65c533182fc99241eac8ba",
+    "wallet-regression-first.log": "67b1f4bfd70b0da528e4aed2ecbdc762ec9909db4984fd497d4ba75cb852d63e",
+    "wallet-regression.log": "83f063de77cdb3d778c518c38e91068a51e595b33301879d4a335b004fc7f346",
+    "existing-safe-regression.log": "09a854c82ebe2721eb248e506f2dc868ab6dcf2d2627ffde8630198e2f6f7676",
+    "navigation-regression.log": "b66044551bdccb5c799aac1bd48c0c792f7d574ee7f1172745382adc028111ef",
+    "recovery-regression.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "wallet-simplified-profile.mjs": {
+      "sha256": "4a358ccad501a26a47ef54d903905354b270b3719c810087756b89fadcd3376a",
+      "bytes": 22786
+    },
+    "wallet-flow-baseline.log": {
+      "sha256": "4ac6a2da5526f88e6eca00cff3094ce0f83ce84b53c802cc97e54dddf63b9262",
+      "bytes": 1077
+    },
+    "wallet-flow-simplified.log": {
+      "sha256": "a66b938d958d6d1ffe8a8389650d87f50ea2b42412d6abe8633cadeda5a9a85c",
+      "bytes": 1100
+    },
+    "simplified-build.log": {
+      "sha256": "d9cfd98a88bf3601397892fa1d9ed5bbc141f93fdf56f4f27845ac05b9122bfb",
+      "bytes": 249
+    },
+    "simplified-build-fixed.log": {
+      "sha256": "5277e929ecab1b5976451513455fe3aaad9e03c6f2708378247c4b8f12b66db8",
+      "bytes": 7971
+    },
+    "simplified-unit.log": {
+      "sha256": "0de4bf5821990f068a1b3d448c553999c75fbbd0d9b41b360cb4d98a40a4e882",
+      "bytes": 167028
+    },
+    "simplified-safe-evm.log": {
+      "sha256": "9d7807f9d8c2e4d5cda91c0d887566fb33142e31bd72dde45a489703162d5193",
+      "bytes": 233
+    },
+    "simplified-wallet.log": {
+      "sha256": "e1d5ea45b9d3ae1784dd43a691f7879b1ef00cf15ac11fcd96ea3d45f8b87adb",
+      "bytes": 442
+    },
+    "simplified-wallet-fixed.log": {
+      "sha256": "83f063de77cdb3d778c518c38e91068a51e595b33301879d4a335b004fc7f346",
+      "bytes": 151
+    },
+    "simplified-existing-safe.log": {
+      "sha256": "09a854c82ebe2721eb248e506f2dc868ab6dcf2d2627ffde8630198e2f6f7676",
+      "bytes": 188
+    },
+    "simplified-recovery.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "simplified-navigation.log": {
+      "sha256": "b66044551bdccb5c799aac1bd48c0c792f7d574ee7f1172745382adc028111ef",
+      "bytes": 94
+    },
+    ".runtime/falcon-existing-safe/anvil-GobwMY/anvil.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "wallet-flow-baseline.json": {
+      "sha256": "008cc59103c6a6a8c8c37cb907139458df4bf74bf5118d27cd3c50b92e02f814",
+      "bytes": 25760
+    },
+    "wallet-flow-simplified.json": {
+      "sha256": "5ed17a0087e82a89ca5f9d9c8253778c67c477fbdf9f7c60222aaef12b54e1d5",
+      "bytes": 8677
+    }
+  },
+  "initialOptimizationSourceSha256": {
+    "src/components/falcon/FalconSafe.tsx": "6d7bdb273613640136836f49c778b8e1388b759e8ae16b275394de07c9994779",
+    "src/lib/falcon/l1Controller.ts": "f5c698e76cde36ae502f39996d79a1fe5a322b60fb72873df4c6a43c9b0ebd5b",
+    "src/lib/falcon/safe.ts": "b4fa56ba680cea925dbf54df708c0043e6c959453ff84ef5347ca19bca3e0233",
+    "tests/falcon-wallet.mjs": "544a8b3c8a5bf4f62ba1361c849fa6c59d67074a3f39559bc90a228a6730c552"
+  },
+  "initialOptimizationBenchmark": {
+    "rpcLatencyMs": 100,
+    "quoteLatencyMs": 100,
+    "realExtension": false,
+    "trialsPerWallet": 3,
+    "summary": [
+      {
+        "wallet": "Rabby",
+        "loadMs": {
+          "beforeMedian": 2261.251647000001,
+          "afterMedian": 1309.1430849999997,
+          "reductionPercent": 42.10537837587259
+        },
+        "signAndQuoteMs": {
+          "beforeMedian": 4123.591281000001,
+          "afterMedian": 1342.2231279999996,
+          "reductionPercent": 67.45014147778244
+        }
+      },
+      {
+        "wallet": "MetaMask",
+        "loadMs": {
+          "beforeMedian": 2271.398387999998,
+          "afterMedian": 1339.0733230000005,
+          "reductionPercent": 41.04630301428206
+        },
+        "signAndQuoteMs": {
+          "beforeMedian": 4123.053921000002,
+          "afterMedian": 1342.3442720000003,
+          "reductionPercent": 67.44296102549082
+        }
+      }
+    ],
+    "before": [
+      {
+        "trial": 0,
+        "name": "Rabby",
+        "loadMs": 2278.614615,
+        "signAndQuoteMs": 4137.583687999999,
+        "loadingReadCount": 41,
+        "signingReadCount": 82
+      },
+      {
+        "trial": 0,
+        "name": "MetaMask",
+        "loadMs": 2305.2465969999994,
+        "signAndQuoteMs": 4124.1598460000005,
+        "loadingReadCount": 41,
+        "signingReadCount": 82
+      },
+      {
+        "trial": 1,
+        "name": "Rabby",
+        "loadMs": 2261.251647000001,
+        "signAndQuoteMs": 4106.517200999999,
+        "loadingReadCount": 41,
+        "signingReadCount": 82
+      },
+      {
+        "trial": 1,
+        "name": "MetaMask",
+        "loadMs": 2271.398387999998,
+        "signAndQuoteMs": 4123.053921000002,
+        "loadingReadCount": 41,
+        "signingReadCount": 82
+      },
+      {
+        "trial": 2,
+        "name": "Rabby",
+        "loadMs": 2237.2987489999978,
+        "signAndQuoteMs": 4123.591281000001,
+        "loadingReadCount": 41,
+        "signingReadCount": 82
+      },
+      {
+        "trial": 2,
+        "name": "MetaMask",
+        "loadMs": 2243.2325889999993,
+        "signAndQuoteMs": 4107.063902999995,
+        "loadingReadCount": 41,
+        "signingReadCount": 82
+      }
+    ],
+    "after": [
+      {
+        "trial": 0,
+        "name": "Rabby",
+        "loadMs": 1308.0923779999998,
+        "signAndQuoteMs": 1354.664232,
+        "loadingReadCount": 41,
+        "signingReadCount": 49
+      },
+      {
+        "trial": 0,
+        "name": "MetaMask",
+        "loadMs": 1381.1893090000003,
+        "signAndQuoteMs": 1341.7774390000004,
+        "loadingReadCount": 41,
+        "signingReadCount": 49
+      },
+      {
+        "trial": 1,
+        "name": "Rabby",
+        "loadMs": 1330.4286059999995,
+        "signAndQuoteMs": 1342.2231279999996,
+        "loadingReadCount": 41,
+        "signingReadCount": 49
+      },
+      {
+        "trial": 1,
+        "name": "MetaMask",
+        "loadMs": 1337.1856449999996,
+        "signAndQuoteMs": 1342.3442720000003,
+        "loadingReadCount": 41,
+        "signingReadCount": 49
+      },
+      {
+        "trial": 2,
+        "name": "Rabby",
+        "loadMs": 1309.1430849999997,
+        "signAndQuoteMs": 1341.1006460000026,
+        "loadingReadCount": 41,
+        "signingReadCount": 49
+      },
+      {
+        "trial": 2,
+        "name": "MetaMask",
+        "loadMs": 1339.0733230000005,
+        "signAndQuoteMs": 1371.7520360000017,
+        "loadingReadCount": 41,
+        "signingReadCount": 49
+      }
+    ],
+    "requestCounts": {
+      "before": {
+        "loadingCalls": {
+          "ROLLUP_ID": 1,
+          "USE_GAS_LEFT": 1,
+          "VERSION": 1,
+          "authorizedProxies": 1,
+          "composerInfo": 1,
+          "computeCrossChainProxyAddress": 1,
+          "controllers": 1,
+          "eezL2": 2,
+          "eth_blockNumber": 2,
+          "eth_chainId": 4,
+          "eth_getBalance": 1,
+          "eth_getBlockByNumber": 3,
+          "eth_getCode": 6,
+          "eth_getStorageAt": 2,
+          "fallbackHandler": 1,
+          "getModulesPaginated": 1,
+          "getOwners": 1,
+          "getThreshold": 1,
+          "l1ChainId": 2,
+          "masterCopy": 1,
+          "nonce": 2,
+          "publicKeyHash": 1,
+          "safes": 1,
+          "singleton": 1,
+          "verifier": 2
+        },
+        "signingCalls": {
+          "ROLLUP_ID": 2,
+          "USE_GAS_LEFT": 2,
+          "VERSION": 2,
+          "actionDigest": 1,
+          "authorizedProxies": 2,
+          "checkAuthorization": 1,
+          "composerInfo": 2,
+          "computeCrossChainProxyAddress": 2,
+          "controllers": 2,
+          "eezL2": 4,
+          "eez_quoteFee": 1,
+          "eth_blockNumber": 4,
+          "eth_chainId": 2,
+          "eth_getBalance": 3,
+          "eth_getBlockByNumber": 6,
+          "eth_getCode": 12,
+          "eth_getStorageAt": 4,
+          "fallbackHandler": 2,
+          "getModulesPaginated": 2,
+          "getOwners": 2,
+          "getThreshold": 2,
+          "getTransactionHash": 2,
+          "l1ChainId": 4,
+          "masterCopy": 2,
+          "nonce": 4,
+          "publicKeyHash": 2,
+          "safes": 2,
+          "singleton": 2,
+          "verifier": 4
+        }
+      },
+      "after": {
+        "loadingCalls": {
+          "ROLLUP_ID": 1,
+          "USE_GAS_LEFT": 1,
+          "VERSION": 1,
+          "authorizedProxies": 1,
+          "composerInfo": 1,
+          "computeCrossChainProxyAddress": 1,
+          "controllers": 1,
+          "eezL2": 2,
+          "eth_blockNumber": 2,
+          "eth_chainId": 4,
+          "eth_getBalance": 1,
+          "eth_getBlockByNumber": 3,
+          "eth_getCode": 6,
+          "eth_getStorageAt": 2,
+          "fallbackHandler": 1,
+          "getModulesPaginated": 1,
+          "getOwners": 1,
+          "getThreshold": 1,
+          "l1ChainId": 2,
+          "masterCopy": 1,
+          "nonce": 2,
+          "publicKeyHash": 1,
+          "safes": 1,
+          "singleton": 1,
+          "verifier": 2
+        },
+        "signingCalls": {
+          "ROLLUP_ID": 1,
+          "USE_GAS_LEFT": 1,
+          "VERSION": 1,
+          "actionDigest": 1,
+          "authorizedProxies": 1,
+          "checkAuthorization": 1,
+          "composerInfo": 1,
+          "computeCrossChainProxyAddress": 1,
+          "controllers": 2,
+          "eezL2": 3,
+          "eez_quoteFee": 1,
+          "eth_blockNumber": 2,
+          "eth_chainId": 1,
+          "eth_getBalance": 1,
+          "eth_getBlockByNumber": 4,
+          "eth_getCode": 6,
+          "eth_getStorageAt": 2,
+          "fallbackHandler": 1,
+          "getModulesPaginated": 1,
+          "getOwners": 1,
+          "getThreshold": 1,
+          "getTransactionHash": 1,
+          "l1ChainId": 3,
+          "masterCopy": 1,
+          "nonce": 3,
+          "publicKeyHash": 2,
+          "safes": 1,
+          "singleton": 1,
+          "verifier": 3
+        }
+      }
+    }
+  },
+  "sourceSha256": {
+    "src/components/falcon/FalconSafe.tsx": "8f61d7f70e3b6b68cf8fec951d34cc74ce4ebebb61e7bb164ba47229e2ffc7a5",
+    "src/lib/falcon/l1Controller.ts": "eb9c4d0b81770d24cd137b238c9d51d3911b6d92d485fac3626d02a1b44a25d5",
+    "src/lib/falcon/safe.ts": "e3bcb458bfe094242722197b7259f5228afee6b6b17ae7a676a89cd30a6e9d1e",
+    "tests/falcon-wallet.mjs": "9a20c3b3c6a65f47b470137374b5c2346681b2cec28c16fc3db9a129535e0f01",
+    "tests/falcon/existingSafe.test.ts": "8e608d6e987bf10f3a5750fa05827d6385b6bd45b598bb319138804116b0a1ca",
+    "tests/integration/falcon-existing-safe.mjs": "1b8055ff4e5365b2e4d57930c5a3dab98b4c50dba837893b38c9b866aa4f5aa3"
+  },
+  "controlledFlowBenchmark": {
+    "rpcLatencyMs": 100,
+    "quoteLatencyMs": 100,
+    "trialsPerWallet": 3,
+    "realExtension": false,
+    "broadcast": false,
+    "scope": "Fresh funded Safe; wallet already on L2; stop at mocked wallet confirmation. Includes all mock network RPCs, excludes extension-local accounts/chainId reads. Sign no longer previews a fee; compare the combined path as well.",
+    "summary": {
+      "Rabby": {
+        "before": {
+          "loadMs": 2307.486676,
+          "signMs": 4154.073493,
+          "sendToPromptMs": 2330.083074000002,
+          "signThroughWalletPromptMs": 6500.0052399999995,
+          "requestCounts": {
+            "loadingCalls": [
+              41
+            ],
+            "signingCalls": [
+              82
+            ],
+            "sendingCalls": [
+              43
+            ]
+          }
+        },
+        "after": {
+          "loadMs": 1310.7094429999997,
+          "signMs": 275.7403999999997,
+          "sendToPromptMs": 462.5675680000004,
+          "signThroughWalletPromptMs": 738.3923429999995,
+          "requestCounts": {
+            "loadingCalls": [
+              41
+            ],
+            "signingCalls": [
+              3
+            ],
+            "sendingCalls": [
+              5
+            ]
+          }
+        }
+      },
+      "MetaMask": {
+        "before": {
+          "loadMs": 2277.659241000001,
+          "signMs": 4121.4190739999995,
+          "sendToPromptMs": 2325.497018000002,
+          "signThroughWalletPromptMs": 6446.916092000001,
+          "requestCounts": {
+            "loadingCalls": [
+              41
+            ],
+            "signingCalls": [
+              82
+            ],
+            "sendingCalls": [
+              43
+            ]
+          }
+        },
+        "after": {
+          "loadMs": 1331.7936629999986,
+          "signMs": 275.8323450000007,
+          "sendToPromptMs": 462.3574350000017,
+          "signThroughWalletPromptMs": 738.1973030000008,
+          "requestCounts": {
+            "loadingCalls": [
+              41
+            ],
+            "signingCalls": [
+              3
+            ],
+            "sendingCalls": [
+              5
+            ]
+          }
+        }
+      }
+    },
+    "before": [
+      {
+        "trial": 0,
+        "name": "Rabby",
+        "loadMs": 2307.486676,
+        "signMs": 4154.073493,
+        "sendToPromptMs": 2345.9317469999996,
+        "loadingReadCount": 41,
+        "signingReadCount": 82,
+        "sendingReadCount": 43
+      },
+      {
+        "trial": 0,
+        "name": "MetaMask",
+        "loadMs": 2273.807350000001,
+        "signMs": 4121.4190739999995,
+        "sendToPromptMs": 2325.497018000002,
+        "loadingReadCount": 41,
+        "signingReadCount": 82,
+        "sendingReadCount": 43
+      },
+      {
+        "trial": 1,
+        "name": "Rabby",
+        "loadMs": 2310.7287799999976,
+        "signMs": 4136.979238,
+        "sendToPromptMs": 2329.1514559999996,
+        "loadingReadCount": 41,
+        "signingReadCount": 82,
+        "sendingReadCount": 43
+      },
+      {
+        "trial": 1,
+        "name": "MetaMask",
+        "loadMs": 2280.957756,
+        "signMs": 4133.0057369999995,
+        "sendToPromptMs": 2329.850792999998,
+        "loadingReadCount": 41,
+        "signingReadCount": 82,
+        "sendingReadCount": 43
+      },
+      {
+        "trial": 2,
+        "name": "Rabby",
+        "loadMs": 2271.8104389999935,
+        "signMs": 4181.822704999999,
+        "sendToPromptMs": 2330.083074000002,
+        "loadingReadCount": 41,
+        "signingReadCount": 82,
+        "sendingReadCount": 43
+      },
+      {
+        "trial": 2,
+        "name": "MetaMask",
+        "loadMs": 2277.659241000001,
+        "signMs": 4108.090347999998,
+        "sendToPromptMs": 2315.357204,
+        "loadingReadCount": 41,
+        "signingReadCount": 82,
+        "sendingReadCount": 43
+      }
+    ],
+    "after": [
+      {
+        "trial": 0,
+        "name": "Rabby",
+        "loadMs": 1326.2531239999998,
+        "signMs": 275.7403999999997,
+        "sendToPromptMs": 462.65194299999985,
+        "loadingReadCount": 41,
+        "signingReadCount": 3,
+        "sendingReadCount": 5
+      },
+      {
+        "trial": 0,
+        "name": "MetaMask",
+        "loadMs": 1343.1674729999995,
+        "signMs": 305.4469939999999,
+        "sendToPromptMs": 462.02296300000035,
+        "loadingReadCount": 41,
+        "signingReadCount": 3,
+        "sendingReadCount": 5
+      },
+      {
+        "trial": 1,
+        "name": "Rabby",
+        "loadMs": 1293.3760579999998,
+        "signMs": 274.32132999999976,
+        "sendToPromptMs": 462.5675680000004,
+        "loadingReadCount": 41,
+        "signingReadCount": 3,
+        "sendingReadCount": 5
+      },
+      {
+        "trial": 1,
+        "name": "MetaMask",
+        "loadMs": 1310.7039729999997,
+        "signMs": 275.8323450000007,
+        "sendToPromptMs": 462.3649580000001,
+        "loadingReadCount": 41,
+        "signingReadCount": 3,
+        "sendingReadCount": 5
+      },
+      {
+        "trial": 2,
+        "name": "Rabby",
+        "loadMs": 1310.7094429999997,
+        "signMs": 277.36568199999965,
+        "sendToPromptMs": 461.6287390000016,
+        "loadingReadCount": 41,
+        "signingReadCount": 3,
+        "sendingReadCount": 5
+      },
+      {
+        "trial": 2,
+        "name": "MetaMask",
+        "loadMs": 1331.7936629999986,
+        "signMs": 274.00669799999923,
+        "sendToPromptMs": 462.3574350000017,
+        "loadingReadCount": 41,
+        "signingReadCount": 3,
+        "sendingReadCount": 5
+      }
+    ],
+    "requestCounts": {
+      "before": {
+        "loadingCalls": {
+          "eth_chainId": 4,
+          "composerInfo": 1,
+          "eth_getBlockByNumber": 3,
+          "eth_blockNumber": 2,
+          "eth_getCode": 6,
+          "verifier": 2,
+          "eezL2": 2,
+          "l1ChainId": 2,
+          "ROLLUP_ID": 1,
+          "USE_GAS_LEFT": 1,
+          "controllers": 1,
+          "publicKeyHash": 1,
+          "nonce": 2,
+          "singleton": 1,
+          "fallbackHandler": 1,
+          "computeCrossChainProxyAddress": 1,
+          "safes": 1,
+          "masterCopy": 1,
+          "VERSION": 1,
+          "getOwners": 1,
+          "getThreshold": 1,
+          "eth_getBalance": 1,
+          "getModulesPaginated": 1,
+          "eth_getStorageAt": 2,
+          "authorizedProxies": 1
+        },
+        "signingCalls": {
+          "eth_blockNumber": 4,
+          "eth_chainId": 2,
+          "eth_getBlockByNumber": 6,
+          "eth_getCode": 12,
+          "singleton": 2,
+          "fallbackHandler": 2,
+          "computeCrossChainProxyAddress": 2,
+          "safes": 2,
+          "masterCopy": 2,
+          "VERSION": 2,
+          "getOwners": 2,
+          "getThreshold": 2,
+          "nonce": 4,
+          "eth_getBalance": 3,
+          "getModulesPaginated": 2,
+          "eth_getStorageAt": 4,
+          "authorizedProxies": 2,
+          "getTransactionHash": 2,
+          "composerInfo": 2,
+          "verifier": 4,
+          "eezL2": 4,
+          "l1ChainId": 4,
+          "ROLLUP_ID": 2,
+          "USE_GAS_LEFT": 2,
+          "controllers": 2,
+          "publicKeyHash": 2,
+          "actionDigest": 1,
+          "checkAuthorization": 1,
+          "eez_quoteFee": 1
+        },
+        "sendingCalls": {
+          "eth_blockNumber": 2,
+          "eth_chainId": 1,
+          "eth_getBlockByNumber": 3,
+          "eth_getCode": 6,
+          "singleton": 1,
+          "fallbackHandler": 1,
+          "computeCrossChainProxyAddress": 1,
+          "safes": 1,
+          "masterCopy": 1,
+          "VERSION": 1,
+          "getOwners": 1,
+          "getThreshold": 1,
+          "nonce": 2,
+          "eth_getBalance": 2,
+          "getModulesPaginated": 1,
+          "eth_getStorageAt": 2,
+          "authorizedProxies": 1,
+          "getTransactionHash": 1,
+          "composerInfo": 1,
+          "verifier": 2,
+          "eezL2": 2,
+          "l1ChainId": 2,
+          "ROLLUP_ID": 1,
+          "USE_GAS_LEFT": 1,
+          "controllers": 1,
+          "publicKeyHash": 1,
+          "checkAuthorization": 1,
+          "eez_quoteFee": 1,
+          "eth_getTransactionCount": 1
+        }
+      },
+      "after": {
+        "loadingCalls": {
+          "eth_chainId": 4,
+          "eth_getBlockByNumber": 3,
+          "eth_blockNumber": 2,
+          "composerInfo": 1,
+          "verifier": 2,
+          "eezL2": 2,
+          "l1ChainId": 2,
+          "ROLLUP_ID": 1,
+          "USE_GAS_LEFT": 1,
+          "eth_getCode": 6,
+          "controllers": 1,
+          "publicKeyHash": 1,
+          "nonce": 2,
+          "singleton": 1,
+          "fallbackHandler": 1,
+          "computeCrossChainProxyAddress": 1,
+          "safes": 1,
+          "masterCopy": 1,
+          "VERSION": 1,
+          "getOwners": 1,
+          "getThreshold": 1,
+          "eth_getBalance": 1,
+          "getModulesPaginated": 1,
+          "eth_getStorageAt": 2,
+          "authorizedProxies": 1
+        },
+        "signingCalls": {
+          "nonce": 2,
+          "eth_getBlockByNumber": 1
+        },
+        "sendingCalls": {
+          "composerInfo": 1,
+          "nonce": 1,
+          "eez_quoteFee": 1,
+          "eth_getBalance": 1,
+          "eth_getTransactionCount": 1
+        }
+      }
+    }
+  },
+  "builtArtifacts": {
+    "baseline": {
+      "sha256OfSortedPathAndSha256Manifest": "305982d2b7f3a5c6ab0959731c809579d67a51e3b3cd9bec0ac195211a60504f",
+      "files": 61
+    },
+    "candidate": {
+      "sha256OfSortedPathAndSha256Manifest": "e91a1f847cace8fc141ac3f79bd31a3a261ef6080e38a7def930cb80ea89f6f3",
+      "files": 72
+    }
+  }
+}

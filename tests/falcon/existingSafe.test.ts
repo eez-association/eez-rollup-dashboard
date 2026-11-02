@@ -56,7 +56,7 @@ test('attached Treasury Safe supports controller calls while retaining additiona
  const attachment={target,walletOwner:account};
  const remote=await loadRemoteSafe(client,d,controller,signal,undefined,attachment);
  assert.equal(remote.target,target);assert.equal(remote.owner,owner);assert.equal(remote.attachment,attachment);
- const operation=await prepareSafeTransfer(client,d,controller,other,1n,signal,'0x',attachment);
+ const operation=await prepareSafeTransfer(client,d,remote,other,1n,signal,'0x');
  assert.equal(operation.kind,'transfer');if(operation.kind!=='transfer')throw Error();
  assert.equal(operation.target,target);assert.equal(operation.attachment,attachment);
  // Standard Safe (not SafeL2) reports success without SafeMultiSigTransaction.

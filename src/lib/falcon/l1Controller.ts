@@ -21,32 +21,43 @@ export class FalconTransactionReverted extends Error {
 }
 
 export async function checkChain(client: EezClient, chain: ChainBinding) {
-  if (await client.getChainId() !== chain.chainId) throw new Error(`Select ${chain.chainName} in your wallet.`);
-  if ((await client.getBlock({ blockNumber: chain.anchor.blockNumber })).hash !== chain.anchor.blockHash) throw new Error(`${chain.chainName} identity checkpoint does not match this deployment.`);
+  const [chainId, anchor] = await Promise.all([
+    client.getChainId(), client.getBlock({ blockNumber: chain.anchor.blockNumber }),
+  ]);
+  if (chainId !== chain.chainId) throw new Error(`Select ${chain.chainName} in your wallet.`);
+  if (anchor.hash !== chain.anchor.blockHash) throw new Error(`${chain.chainName} identity checkpoint does not match this deployment.`);
 }
 export async function checkCode(client: EezClient, binding: CodeBinding, label: string, blockNumber: bigint) {
   const code = await client.getCode({ address: binding.address, blockNumber });
   if (!code || keccak256(code) !== binding.runtimeCodeHash) throw new Error(`${label} bytecode does not match this deployment.`);
 }
 
-/** Discovery and subsequent requests use the same provider, pinned to this deployment. */
-export async function controllerClient(provider: Pick<EthereumProvider, 'request'>, deployment: CrossChainDeployment, signal: AbortSignal) {
-  const { l1, l2 } = deployment;
+/** The broadcast provider must route through the Composer for this deployment. */
+export async function checkComposer(provider: Pick<EthereumProvider, 'request'>, { l1, l2 }: CrossChainDeployment, signal: AbortSignal) {
   const discovery = await probeComposer(provider, {
     l1ChainId: toHex(l1.chainId), l2ChainId: toHex(l2.chainId), registryAddress: l1.registry, l2Address: l2.manager,
   });
   if (discovery.status !== 'detected') throw new Error(`Select your configured EEZ Composer network in the wallet. ${discovery.detail}`);
+  signal.throwIfAborted();
+}
+
+/** Inspect deployment bindings during setup and discovery, not on every signature. */
+export async function controllerClient(provider: Pick<EthereumProvider, 'request'>, deployment: CrossChainDeployment, signal: AbortSignal) {
+  const { l1, l2 } = deployment;
   const client = eezClient(provider);
-  await checkChain(client, l2);
-  const blockNumber = await client.getBlockNumber();
-  await checkCode(client, l2.verifier, 'Falcon verifier', blockNumber);
-  await checkCode(client, l2.factory, 'L1 controller factory', blockNumber);
+  const [, , blockNumber] = await Promise.all([
+    checkComposer(provider, deployment, signal),
+    checkChain(client, l2), client.getBlockNumber(),
+  ]);
   const read = { address: l2.factory.address, abi: l1ControllerFactoryAbi, blockNumber } as const;
+  // Code and routing reads share a block. Both must pass before this client is usable.
   const [verifier, manager, chain, rollupId, useGasLeft] = await Promise.all([
     client.readContract({ ...read, functionName: 'verifier' }), client.readContract({ ...read, functionName: 'eezL2' }),
     client.readContract({ ...read, functionName: 'l1ChainId' }),
     client.readContract({ address: l2.manager, abi: managerAbi, functionName: 'ROLLUP_ID', blockNumber }),
     client.readContract({ address: l2.manager, abi: managerAbi, functionName: 'USE_GAS_LEFT', blockNumber }),
+    checkCode(client, l2.verifier, 'Falcon verifier', blockNumber),
+    checkCode(client, l2.factory, 'L1 controller factory', blockNumber),
   ]);
   if (!sameAddress(verifier, l2.verifier.address) || !sameAddress(manager, l2.manager) || chain !== BigInt(l1.chainId)
     || rollupId !== l2.rollupId || useGasLeft) throw new Error('Controller routing does not match the supported EEZ deployment.');
@@ -73,16 +84,6 @@ export async function loadL1Controller(client: EezClient, d: CrossChainDeploymen
 export const createL1ControllerData = (publicKey: Hex) => encodeFunctionData({ abi: l1ControllerFactoryAbi, functionName: 'createController', args: [keccak256(publicKey)] });
 export const l1CallArgs = (s: SignedL1Action) => [s.action.target, s.action.data, s.action.nonce, s.action.deadline, s.signature, s.publicKey] as const;
 export const executeL1Data = (s: SignedL1Action) => encodeFunctionData({ abi: l1ControllerAbi, functionName: 'execute', args: l1CallArgs(s) });
-
-export async function checkL1Authorization(client: EezClient, d: CrossChainDeployment, signed: SignedL1Action, signal: AbortSignal) {
-  const a = signed.action;
-  const state = await loadL1Controller(client, d, signed.publicKey, signal);
-  if (!state || !sameAddress(state.controller, a.controller) || a.sourceChainId !== BigInt(d.l2.chainId)
-    || a.destinationChainId !== BigInt(d.l1.chainId) || !sameAddress(a.eezL2, d.l2.manager)) throw new Error('Signed action belongs to a different controller or deployment.');
-  const digest = await client.readContract({ address: a.controller, abi: l1ControllerAbi, functionName: 'checkAuthorization', args: l1CallArgs(signed) });
-  if (digest !== l1ActionDigest(a)) throw new Error('Browser and controller authorization digests disagree.');
-  return state;
-}
 
 export function l1CallResult(receipt: TransactionReceipt, signed: SignedL1Action, account: Address): Hex | null {
   if (receipt.status !== 'success' || !receipt.to || !sameAddress(receipt.to, signed.action.controller)) return null;

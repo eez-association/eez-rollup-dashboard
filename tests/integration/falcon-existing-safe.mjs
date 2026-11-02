@@ -9,7 +9,7 @@ import { createPublicClient, http, encodeFunctionData, pad, toHex, zeroAddress, 
 import { privateKeyToAccount } from 'viem/accounts';
 import { crossChainDeployment } from '../../src/lib/falcon/crossChainDeployment.ts';
 import { ownerTransaction, prepareOwnerAddition, verifyOwnerAddition } from '../../src/lib/falcon/existingSafe.ts';
-import { safeCallData, prepareSafeTransfer, hasSafeExecution } from '../../src/lib/falcon/safe.ts';
+import { safeCallData, loadRemoteSafe, prepareSafeTransfer, hasSafeExecution } from '../../src/lib/falcon/safe.ts';
 import { buildSafeTransaction, encodeSafeExecution, packEOAApprovals } from '../../src/lib/treasury/safeTransactions.ts';
 
 const read = path => JSON.parse(readFileSync(path, 'utf8'));
@@ -89,7 +89,9 @@ try {
     await rpc('anvil_setBalance', [safe, '0x1']);
     // Impersonation supplies the cross-chain caller only; it does not prove its routing.
     await rpc('anvil_setCode', [owner, '0x00']);
-    const operation = await prepareSafeTransfer(routed, d, controller, recipient, 1n, signal, '0x', attachment);
+    const remote = await loadRemoteSafe(routed, d, controller, signal, undefined, attachment);
+    const operation = await prepareSafeTransfer(routed, d, remote, recipient, 1n, signal, '0x');
+    assert.equal(operation.safeTxHash, await readSafe('getTransactionHash', [recipient, 1n, '0x', 0, 0n, 0n, 0n, zeroAddress, zeroAddress, operation.safeNonce]), 'local hash matches the actual Safe implementation');
     const call = safeCallData(owner, recipient, 1n);
     await assert.rejects(client.call({ account: B.address, to: safe, data: call }), /GS025/);
     const balance = await client.getBalance({ address: recipient });
