@@ -49,8 +49,10 @@ export function ownerTransaction(d: CrossChainDeployment, safe: Address, owner: 
     data: encodeFunctionData({ abi: adminAbi, functionName: 'addOwnerWithThreshold', args: [owner, 1n] }) });
 }
 export async function prepareOwnerAddition(client: EezClient, d: CrossChainDeployment, controller: Address, target: Address, account: Address, signal: AbortSignal) {
-  await checkChain(client, d.l1);
-  const safe = await inspectExistingSafe(client, target, signal);
+  signal.throwIfAborted();
+  const [, safe] = await Promise.all([
+    checkChain(client, d.l1), inspectExistingSafe(client, target, signal),
+  ]);
   if (safe.threshold !== 1) throw new Error('Adding Falcon requires a Safe with threshold 1. This flow cannot collect multiple owner approvals.');
   if (!safe.signableOwners.some(owner => sameAddress(owner, account))) throw new Error('Connect a signing wallet that is already an owner of this Safe.');
   // Inspection is bounded to 50 owners, including the owner about to be added.

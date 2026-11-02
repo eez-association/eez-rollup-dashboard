@@ -16,7 +16,7 @@ import { treasuryFixture } from './falcon/treasuryFixture.mjs';
 import { deploymentCode } from './falcon/deploymentCode.ts';
 
 const browser=await chromium.launch({headless:true,chromiumSandbox:process.env.TREASURY_BROWSER_SANDBOX!=='0'});
-async function checkExistingSafe(d) {
+async function checkExistingSafe(d,name) {
 const a=n=>toHex(n,{size:20}), eq=(a,b)=>a.toLowerCase()===b.toLowerCase();
 const wallet=privateKeyToAccount(toHex(12345,{size:32})),account=wallet.address,controller=a(300),owner=a(301),singleton=a(302),module=a(303);
 const treasury=treasuryFixture(d,origin),safe=treasury.config.safeL1,l2Safe=treasury.config.safeL2;
@@ -30,11 +30,12 @@ const blockNumber=d.l1.anchor.blockNumber+100n,blockHash=keccak256(toHex('owner-
 const signed=[],sends=[],reads=[];
 const other=a(999),replacement=a(998);
 let keyHash,publicKey,owners=[account,other],threshold=1n,nonce=7n,confirmed=false,changeNonce=false,changeOwners=false,walletMismatch=false;
+let inspectionPause=null;
 let proxy=snapshots.mainnet.proxy.runtime,implementation=safe150.contracts.Safe.runtime,version='1.5.0';
 const ownerTx=()=>ownerTransaction(d,safe,owner,7n);
 async function rpc({method,params=[],chain,walletRead=false}) {
  if(!method)return null;
- reads.push({method,params,chain});
+ reads.push({method,params,chain,walletRead});
  if(method==='eth_chainId')return chain;
  if(method==='eth_blockNumber')return toHex(blockNumber);
  if(method==='eth_getBalance')return toHex(10n**18n);
@@ -63,6 +64,11 @@ async function rpc({method,params=[],chain,walletRead=false}) {
   const abi=eq(to,controller)?l1ControllerAbi:eq(to,d.l2.factory.address)?l1ControllerFactoryAbi:eq(to,d.l1.safe.factory.address)?safeFactoryAbi:eq(to,safe)?safeAbi:managerAbi;
   const {functionName,args}=decodeFunctionData({abi,data});
   if(functionName==='controllers')keyHash=args[0];
+  if(inspectionPause&&eq(to,safe)){
+   if(functionName==='VERSION'&&walletRead===inspectionPause.walletRead){inspectionPause.started?.();await inspectionPause.gate;}
+   if(functionName==='getThreshold'&&walletRead!==inspectionPause.walletRead)await inspectionPause.waitForHeld;
+   if(functionName==='getTransactionHash'&&walletRead!==inspectionPause.walletRead)inspectionPause.completed();
+  }
   const values={verifier:d.l2.verifier.address,eezL2:d.l2.manager,l1ChainId:BigInt(d.l1.chainId),ROLLUP_ID:d.l2.rollupId,USE_GAS_LEFT:false,controllers:controller,publicKeyHash:keyHash,nonce:eq(to,safe)?nonce:0n,
    singleton:d.l1.safe.singleton.address,fallbackHandler:d.l1.safe.fallbackHandler.address,computeCrossChainProxyAddress:owner,safes:zeroAddress,VERSION:version,getOwners:walletRead&&walletMismatch?[account,replacement]:owners,getThreshold:threshold,getModulesPaginated:[[module],a(1)],authorizedProxies:[false,zeroAddress,0n]};
   const result=functionName==='getTransactionHash'?safeTransactionHash(ownerTransaction(d,safe,owner,args[9])):values[functionName];
@@ -71,6 +77,7 @@ async function rpc({method,params=[],chain,walletRead=false}) {
  throw Error('Unexpected RPC '+method);
 }
  const f=await fixture(browser,{rpc,deployment:d}),{page}=f;
+ await page.clock.install();
  await page.exposeFunction('existingSafeWalletRpc',async request=>{
   if(request.method==='eth_signTypedData_v4'){
    assert.equal(request.chain,toHex(d.l1.chainId));assert(eq(request.params[0],account));
@@ -88,21 +95,27 @@ async function rpc({method,params=[],chain,walletRead=false}) {
   }
   return rpc({...request,walletRead:true});
  });
- await page.addInitScript(({account,chain,entries})=>{
-  const listeners=new Map();const state=window.existingSafeWallet={chain,loseReply:true};
-  const provider={isMetaMask:true,on:(event,fn)=>listeners.set(event,[...(listeners.get(event)??[]),fn]),removeListener:(event,fn)=>listeners.set(event,(listeners.get(event)??[]).filter(f=>f!==fn)),request:async({method,params})=>{
+ await page.addInitScript(({account,chain,entries,name})=>{
+  const listeners=new Map();const state=window.existingSafeWallet={chain,loseReply:true,inFlight:0};
+  state.changeChain=chain=>{state.chain=chain;for(const fn of listeners.get('chainChanged')??[])fn(chain);};
+  const provider={isMetaMask:true,isRabby:name==='Rabby',on:(event,fn)=>listeners.set(event,[...(listeners.get(event)??[]),fn]),removeListener:(event,fn)=>listeners.set(event,(listeners.get(event)??[]).filter(f=>f!==fn)),request:async({method,params})=>{
+   const requestChain=state.chain;
+   if(state.holdMethod===method){state.holdMethod=null;await new Promise(resolve=>{state.release=()=>{state.release=null;resolve();};});}
    if(method==='eth_chainId')return state.chain;
    if(method==='eth_accounts'||method==='eth_requestAccounts')return [account];
    if(method==='wallet_switchEthereumChain'){state.chain=params[0].chainId;for(const fn of listeners.get('chainChanged')??[])fn(state.chain);return null;}
    if(method==='wallet_addEthereumChain')return null;
-   const result=await window.existingSafeWalletRpc({method,params,chain:state.chain});
-   if(method==='eth_sendTransaction'&&state.loseReply){state.loseReply=false;throw Error('Lost wallet response');}
-   return result;
+   state.inFlight++;
+   try{
+    const result=await window.existingSafeWalletRpc({method,params,chain:requestChain});
+    if(method==='eth_sendTransaction'&&state.loseReply){state.loseReply=false;throw Error('Lost wallet response');}
+    return result;
+   }finally{state.inFlight--;}
   }};
-  window.addEventListener('eip6963:requestProvider',()=>window.dispatchEvent(new CustomEvent('eip6963:announceProvider',{detail:{info:{uuid:'existing-safe-wallet',name:'MetaMask',rdns:'io.metamask'},provider}})));
+  window.addEventListener('eip6963:requestProvider',()=>window.dispatchEvent(new CustomEvent('eip6963:announceProvider',{detail:{info:{uuid:'existing-safe-wallet',name,rdns:name==='Rabby'?'io.rabby':'io.metamask'},provider}})));
   for(const [key,value]of entries)localStorage.setItem(key,value);
- },{account,chain:toHex(d.l2.chainId),entries:treasury.entries});
- await f.open();await page.getByRole('button',{name:'Connect Wallet',exact:true}).click();await page.getByRole('button',{name:'MetaMask',exact:true}).click();
+ },{account,chain:toHex(d.l2.chainId),entries:treasury.entries,name});
+ await f.open();await page.getByRole('button',{name:'Connect Wallet',exact:true}).click();await page.getByRole('button',{name,exact:true}).click();
  await page.locator('#generate').click();await page.waitForFunction(()=>document.querySelector('#key-status')?.textContent.includes('Key generated'));
  publicKey='0x'+await page.getByTestId('public-key').inputValue();
  try { await page.getByRole('button',{name:'Add to existing Safe',exact:true}).waitFor();
@@ -114,19 +127,62 @@ async function rpc({method,params=[],chain,walletRead=false}) {
  await page.locator('[aria-labelledby="safe-heading"]').screenshot({path:'/tmp/falcon-add-controller.png'});
  assert.equal(await page.getByText(/Gas wallet ·/).count(),0);
  const status=text=>page.getByRole('status').filter({hasText:text}).waitFor();
+ const hold=async method=>{
+  await page.evaluate(method=>{window.existingSafeWallet.holdMethod=method;},method);
+  await add.click();await page.waitForFunction(()=>!!window.existingSafeWallet.release);
+ };
+ const release=()=>page.evaluate(()=>window.existingSafeWallet.release?.());
  owners=[other];await add.click();await status('Connect a signing wallet');assert.equal(signed.length,0);
  owners=[account,other];threshold=2n;await add.click();await status('requires a Safe with threshold 1');assert.equal(signed.length,0);
  threshold=1n;proxy=snapshots.chiado.proxy.runtime;implementation=code.singleton.code;version='1.4.1';owners=[snapshots.chiado.owners[0].address];
  await add.click();await status('controlled by contract '+snapshots.chiado.owners[0].address);assert.equal(signed.length,0);
  owners=[account,other];proxy='0x6000';await add.click();await status('not a supported Safe proxy');assert.equal(signed.length,0);
  proxy=snapshots.mainnet.proxy.runtime;implementation=safe150.contracts.Safe.runtime;version='1.5.0';
- walletMismatch=true;await add.click();await status('Wallet and dashboard disagree');assert.equal(signed.length,0);walletMismatch=false;
+ for(const walletRead of [false,true]){
+  let release,completed,timer;
+  const gate=new Promise(resolve=>{release=resolve;}),otherCompleted=new Promise(resolve=>{completed=resolve;});
+  inspectionPause={walletRead,gate,completed};walletMismatch=true;
+  try{
+   await add.click();
+   const overlapped=await Promise.race([otherCompleted.then(()=>true),new Promise(resolve=>{timer=setTimeout(()=>resolve(false),3000);})]);
+   assert(overlapped,'both provider inspections must run concurrently');
+   assert.equal(signed.length,0,'the signature prompt must wait for both provider inspections');
+  }finally{clearTimeout(timer);release();inspectionPause=null;}
+  await status('Wallet and dashboard disagree');assert.equal(signed.length,0);walletMismatch=false;
+ }
+ // The dashboard fails while a wallet read is held. Its late response must not
+ // restart the rejected inspection or issue the remaining owner/code reads.
+ {
+  let release,started;
+  const gate=new Promise(resolve=>{release=resolve;}),waitForHeld=new Promise(resolve=>{started=resolve;});
+  inspectionPause={walletRead:true,gate,started,waitForHeld,completed:()=>{}};threshold=2n;
+  let beforeRelease;
+  try{
+   await add.click();await status('requires a Safe with threshold 1');
+   assert.equal(signed.length,0);
+   beforeRelease=reads.filter(r=>r.walletRead).length;
+  }finally{release();inspectionPause=null;}
+  await page.waitForFunction(()=>window.existingSafeWallet.inFlight===0);
+  assert.equal(reads.filter(r=>r.walletRead).length,beforeRelease,'failed review cancels its other inspection');
+  threshold=1n;
+ }
+ await hold('eth_chainId');await page.clock.fastForward(21_000);
+ await status('Wallet RPC timed out');await release();
+ assert.equal(signed.length,0,'RPC read timeouts still stop the flow before signing');
+ assert.equal(sends.length,0);
+ await hold('eth_signTypedData_v4');
+ await page.evaluate(chain=>window.existingSafeWallet.changeChain(chain),toHex(d.l2.chainId));
+ await release();await status('Wallet network or account changed');
+ assert.equal(sends.length,0,'a signature approved after a network change cannot submit');
  changeNonce=true;await add.click();await status('Safe owners or nonce changed');assert.equal(sends.length,0);nonce=7n;
  changeOwners=true;await add.click();await status('Safe owners or nonce changed');assert.equal(sends.length,0);owners=[account,other];
  await page.locator('#backup-options input[name="password"]').fill('existing-safe-test-password');
  await page.locator('#backup-options input[name="confirmation"]').fill('existing-safe-test-password');await page.locator('#remember').click();
  await page.waitForFunction(()=>document.querySelector('#key-status')?.textContent.includes('saved'));
- await add.click();await status('wallet');
+ await hold('eth_signTypedData_v4');await page.clock.fastForward(60_000);
+ assert.equal(await page.getByText('Wallet RPC timed out. Check your configured network connection.',{exact:true}).count(),0,'human signature approval has no RPC deadline');
+ assert.equal(sends.length,0,'waiting on a signature cannot submit a transaction');
+ await release();await status('wallet');
  const journalKey=scopedRecoveryKey(recoveryKey(d,'owner'),{account,publicKey});
  await page.waitForFunction(key=>!!localStorage.getItem(key),journalKey);
  assert.equal(sends.length,1);await page.waitForFunction(()=>document.querySelector('#falcon-existing-safe')?.disabled);
@@ -154,8 +210,8 @@ async function rpc({method,params=[],chain,walletRead=false}) {
   assert(!reads.some(r=>r.method==='eth_call'&&eq(r.params[0].to,d.l1.safe.factory.address)),'existing Safe never calls the absent creation factory');
   assert(!reads.some(r=>r.chain===toHex(d.l1.chainId)&&r.method==='eth_getCode'&&missing.slice(1).some(a=>eq(a,r.params[0]))),'existing Safe does not need the creation singleton or handler');
  }
- await f.close();console.log(`PASS (${d.l2.chainId}): Safe 1.5.0 1-of-2 with EIP-7702, Chiado contract-owner diagnosis, strict proxy checks, wallet/owner/nonce changes, typed signature, 1-of-3 recovery and reload, retained modules/menu${d.walletSetup?', no L1 creation infrastructure':''}`);
+ await f.close();console.log(`PASS (${d.l2.chainId}, ${name}): signature approval after 60 seconds, retained read timeouts and stale-network rejection, concurrent provider checks, Safe 1.5.0 1-of-2 with EIP-7702, Chiado contract-owner diagnosis, strict proxy checks, wallet/owner/nonce changes, typed signature, 1-of-3 recovery and reload, retained modules/menu${d.walletSetup?', no L1 creation infrastructure':''}`);
 }
 try {
- for(const d of [crossChainDeployment,mainnetDeployment])await checkExistingSafe(d);
+ for(const d of [crossChainDeployment,mainnetDeployment])for(const name of ['Rabby','MetaMask'])await checkExistingSafe(d,name);
 }finally{await browser.close();}

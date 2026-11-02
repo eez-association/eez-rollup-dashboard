@@ -51,6 +51,36 @@ test('reject wrong owner, multi-signature quorum, unknown implementation and mis
   await assert.rejects(prepareOwnerAddition(client,d,controller,target,account,signal));
  }
 });
+
+for (const chainId of [d.l1.chainId, 1]) test(`owner inspection overlaps chain validation without bypassing it (chain ${chainId})`, async () => {
+ const {client}=fixture();
+ let release!: () => void, inspected!: () => void;
+ const gate=new Promise<void>(resolve=>{release=resolve;});
+ const reached=new Promise<void>(resolve=>{inspected=resolve;});
+ const read=client.readContract;
+ Object.assign(client,{
+  getChainId:async()=>{await gate;return chainId;},
+  readContract:async(args:Parameters<typeof read>[0])=>{inspected();return read(args);},
+ });
+ let completed=false;
+ const pending=prepareOwnerAddition(client,d,controller,target,account,signal).finally(()=>{completed=true;});
+ const checked=chainId===d.l1.chainId?pending:assert.rejects(pending,/Select/);
+ let timer:ReturnType<typeof setTimeout>;
+ try {
+  const overlapped=await Promise.race([reached.then(()=>true),new Promise<boolean>(resolve=>{timer=setTimeout(()=>resolve(false),2000);})]);
+  assert(overlapped,'Safe inspection must start while chain validation is pending');
+  assert.equal(completed,false,'a completed inspection must still wait for chain validation');
+ } finally { clearTimeout(timer!);release();await checked; }
+});
+
+test('a cancelled owner inspection starts no RPC reads', async () => {
+ const {client}=fixture(),abort=new AbortController();
+ let reads=0;
+ Object.assign(client,{getChainId:async()=>{reads++;return d.l1.chainId;}});
+ abort.abort(new Error('owner review cancelled'));
+ await assert.rejects(prepareOwnerAddition(client,d,controller,target,account,abort.signal),/owner review cancelled/);
+ assert.equal(reads,0);
+});
 test('attached Treasury Safe supports controller calls while retaining additional owners and modules',async()=>{
  const {state,client}=fixture();state.owners=[owner,account,other];
  const attachment={target,walletOwner:account};
