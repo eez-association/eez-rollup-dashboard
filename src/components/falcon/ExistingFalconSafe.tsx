@@ -88,7 +88,11 @@ export function ExistingFalconSafe({ wallet, deployment, controller, publicKey, 
     const abort = new AbortController(); abortRef.current = abort;
     try { await action(abort.signal); }
     catch (error) { if (!abort.signal.aborted) setMessage(error instanceof Error ? error.message.split('\n')[0]! : 'Owner addition failed.'); }
-    finally { active.current = false; if (!abort.signal.aborted) setBusy(false); }
+    finally {
+      active.current = false; if (!abort.signal.aborted) setBusy(false);
+      // A failed parallel inspection must not leave its other reads running.
+      abort.abort();
+    }
   }
   function addOwner() {
     return run(async signal => {
@@ -99,15 +103,18 @@ export function ExistingFalconSafe({ wallet, deployment, controller, publicKey, 
       const session = await wallet.getSession(signal, deployment.l1);
       const client = clientFor(signal), walletClient = eezClient(session.provider);
       setMessage('Checking L1 Safe ownership…');
-      const review = await prepareOwnerAddition(client, deployment, controller.controller, target, session.account, signal);
-      // Validate the wallet's own chain and Safe view before its signature prompt.
-      const walletReview = await prepareOwnerAddition(walletClient, deployment, controller.controller, target, session.account, signal);
+      // Both independent providers must agree before opening the signature prompt.
+      const [review, walletReview] = await Promise.all([
+        prepareOwnerAddition(client, deployment, controller.controller, target, session.account, signal),
+        prepareOwnerAddition(walletClient, deployment, controller.controller, target, session.account, signal),
+      ]);
       if (safeTransactionHash(walletReview.transaction) !== safeTransactionHash(review.transaction)
         || walletReview.ownerFingerprint !== review.ownerFingerprint) throw new Error('Wallet and dashboard disagree about this Safe.');
       if (!current()) throw new Error('Wallet, key or Safe changed. Review again.');
       setMessage('Sign the Safe transaction to add your Falcon controller. The threshold stays at 1.');
       const signature = await session.provider.request({ method: 'eth_signTypedData_v4', params: [session.account, safeTypedDataJSON(review.transaction)] }) as Hex;
       const signatures = await packEOAApprovals(review.transaction, [session.account], 1, [{ owner: session.account, signature }]);
+      setMessage('Rechecking Safe before sending…');
       const fresh = await prepareOwnerAddition(client, deployment, controller.controller, target, session.account, signal);
       if (safeTransactionHash(fresh.transaction) !== safeTransactionHash(review.transaction)
         || fresh.ownerFingerprint !== review.ownerFingerprint) throw new Error('Safe owners or nonce changed. Review and sign again.');

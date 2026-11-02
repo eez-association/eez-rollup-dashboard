@@ -68,6 +68,31 @@ for (const name of ['Safe', 'SafeL2']) {
   });
 }
 
+test('Safe 1.5 state reads overlap its module Guard check but still reject that Guard', async () => {
+  const d = inspection(safe150.contracts.Safe, '1.5.0', safe150.contracts.SafeProxy.runtime);
+  let release, stateRead;
+  const gate = new Promise(resolve => { release = resolve; });
+  const reached = new Promise(resolve => { stateRead = resolve; });
+  const rpc = d.rpc, read = d.read;
+  d.rpc = async (chain, method, params) => {
+    if (method === 'eth_getStorageAt' && params[1] === '0xb104e0b93118902c651344349b610029d694cfdec91c589c91ebafbcd0289947') {
+      await gate;
+      return toHex(BigInt(owner), { size: 32 });
+    }
+    return rpc(chain, method, params);
+  };
+  d.read = (...args) => { stateRead(); return read(...args); };
+  let completed = false;
+  const pending = inspectSafe(d, 'l1', safe).finally(() => { completed = true; });
+  const rejected = assert.rejects(pending, /module Guard/);
+  let timer;
+  try {
+    const overlapped = await Promise.race([reached.then(() => true), new Promise(resolve => { timer = setTimeout(() => resolve(false), 2000); })]);
+    assert(overlapped, 'Safe state reads must start while its module Guard check is pending');
+    assert.equal(completed, false);
+  } finally { clearTimeout(timer); release(); await rejected; }
+});
+
 for (const [version, abi] of [['1.3.0+L2', fixtures.contracts.Safe130L2.abi], ['1.4.1', artifacts.contracts.Safe.abi], ['1.5.0', safe150.contracts.Safe.abi], ['1.5.0+L2', safe150.contracts.SafeL2.abi]]) {
   for (const eventName of ['ExecutionSuccess', 'ExecutionFailure']) {
     test(`${version} ${eventName} requires its complete event layout`, () => {

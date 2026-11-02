@@ -73,18 +73,16 @@ export async function inspectSafe(d: Pick<DeploymentIO, "artifacts" | "rpc" | "r
     ?? (["Safe", "SafeL2"].some(name => matchingSafeCode(code, d.artifacts.contracts[name]!.runtime)) ? "1.4.1" : undefined);
   check(implementationVersion, "Unsupported Safe implementation. Reuse supports verified Safe / SafeL2 1.3.0, 1.4.1 and 1.5.0");
   check(supportedSafeVersion(implementationVersion, chain), "EEZ-X mirrors require Safe 1.3.0 or 1.4.1 with the current owner adapter");
-  if (implementationVersion === "1.5.0") {
-    const moduleGuard = await d.rpc<Hex>(chain, "eth_getStorageAt", [address, SAFE_MODULE_GUARD_SLOT, block.number]);
-    check(BigInt(moduleGuard) === 0n, "This Safe has a module Guard. Setup will not remove it; use an unguarded Safe");
-  }
-  check(BigInt(guard) === 0n, "This Safe has a transaction Guard. Setup will not remove it; use an unguarded Safe");
-  const [version, owners, threshold, nonce, modules] = await Promise.all([
+  const [version, owners, threshold, nonce, modules, moduleGuard] = await Promise.all([
     d.read<string>(chain, address, "Safe", "VERSION", [], block.number),
     d.read<Address[]>(chain, address, "Safe", "getOwners", [], block.number),
     d.read<bigint>(chain, address, "Safe", "getThreshold", [], block.number),
     d.read<bigint>(chain, address, "Safe", "nonce", [], block.number),
     d.read<[Address[], Address]>(chain, address, "Safe", "getModulesPaginated", [sentinel, 50n], block.number),
+    implementationVersion === "1.5.0" ? d.rpc<Hex>(chain, "eth_getStorageAt", [address, SAFE_MODULE_GUARD_SLOT, block.number]) : "0x0",
   ]);
+  check(BigInt(moduleGuard) === 0n, "This Safe has a module Guard. Setup will not remove it; use an unguarded Safe");
+  check(BigInt(guard) === 0n, "This Safe has a transaction Guard. Setup will not remove it; use an unguarded Safe");
   check(version === implementationVersion, "Safe version does not match its verified implementation");
   check(owners.length > 0 && owners.length <= 50 && threshold > 0n && threshold <= BigInt(owners.length), "Unsupported Safe owners or threshold");
   const ownerCode = await Promise.all(owners.map(owner => d.rpc<Hex>(chain, "eth_getCode", [owner, block.number])));

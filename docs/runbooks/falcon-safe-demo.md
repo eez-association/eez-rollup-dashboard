@@ -123,7 +123,9 @@ against the new factory; UI bytecode checks do not claim explorer verification.
    approvals. A Safe controlled solely by a contract reports that owner's address
    and must be administered through it. Nonce or ownership changes invalidate the
    review, including module-driven owner changes without a nonce increment. The wallet
-   RPC and dashboard RPC must agree before signing. The attached Safe address is remembered in this browser,
+   RPC and dashboard RPC are inspected concurrently and must agree before signing.
+   Independent chain-identity, Guard and Safe-state reads overlap; the complete
+   inspection still runs again after signing before submission. The attached Safe address is remembered in this browser,
    scoped to the deployment and Falcon key, and its authority is checked on
    loading, attachment and confirmation. The registry can provision the owner proxy on the
    first cross-chain call.
