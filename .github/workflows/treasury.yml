@@ -110,6 +110,7 @@ jobs:
           node tests/bridge-test-token-browser.mjs
           node tests/bridge-gas-fees.cjs
           node tests/bridge-transfer-lifecycle.cjs
+          node tests/bridge-approvals.cjs
           node tests/cow-demo.cjs
           node tests/cow-api.cjs
           node tests/wallet-network-setup.cjs
