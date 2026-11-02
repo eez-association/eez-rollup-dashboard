@@ -177,7 +177,7 @@ export function FalconPanel({ wallet, crossChain, fees }: { wallet: FalconWallet
     {setupNetwork && <WalletNetworkSetup address={wallet.address} chainId={wallet.chainId}
       network={setupNetwork} setup={wallet.networkSetup} knownNetwork={wallet.hasNetwork(setupNetwork.chainId)} onConnect={() => void wallet.connectNetwork(setupNetwork)} />}
     {crossChain && fees ? crossChain.walletSetup ? <FalconInfrastructure key={`${crossChain.l2.chainId}:${crossChain.l2.anchor.blockHash}`} wallet={wallet} deployment={crossChain}>
-      <FalconSafe signer={falcon} wallet={wallet} deployment={crossChain} fees={fees} />
+      {requestSafeFactory => <FalconSafe signer={falcon} wallet={wallet} deployment={crossChain} fees={fees} onNeedSafeFactory={requestSafeFactory} />}
     </FalconInfrastructure> : <FalconSafe signer={falcon} wallet={wallet} deployment={crossChain} fees={fees} /> : <section className={styles.card}>
       <h2>Your Falcon Safe</h2>
       <p className={styles.hint}>On-chain actions are unavailable for this dashboard configuration. You can still create a key and verify signatures in the browser.</p>

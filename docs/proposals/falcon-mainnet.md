@@ -9,6 +9,11 @@ and RollupX 696991 (rollup 2), with observed chain checkpoints and manager/regis
 addresses. Reuse the canonical SafeL2 1.4.1 implementation and handler on Ethereum.
 The browser offers three explicit setup transactions for missing shared contracts:
 FalconVerifier and FalconL1ControllerFactory on L2, OwnedSafeFactory on L1.
+Only the two L2 contracts gate Safe selection. Attaching or reopening an existing
+Safe does not require OwnedSafeFactory or its creation dependencies. Selecting
+**Create a Safe** checks for the factory and opens L1 setup when it is absent;
+users can return to the Safe choices without deploying it. Finishing L1 setup
+does not automatically sign or submit a Safe creation.
 Use the existing deterministic deployment proxy, reproduced compiler inputs, and
 fixed salts. Anyone can pay; these contracts give the deployer no administration
 or Safe ownership. Verify exact runtime code and constructor bindings before use.
@@ -36,7 +41,13 @@ partial, complete and incompatible deployments, wallet rejection/changes,
 uncertain submissions and reload recovery. Run the existing Falcon flows on both
 testnets and the mainnet profile. These checks do not establish live native
 cross-chain settlement; a wallet-authorized mainnet rehearsal remains separate.
+Also attach and reload an existing mainnet-profile Safe with no L1 creation
+infrastructure, while retaining rejection of incompatible occupied addresses.
+Reconcile saved L1 setup requests even when the default setup gate only needs L2.
 
 Upgrade: ship sources/artifacts and UI together; no server migration or .env
 changes for the already configured mainnet dashboard. Reverting the UI hides the
 new route but does not remove contracts, keys, recovery records or Safe ownership.
+The optional-factory flow preserves the existing infrastructure journal keys and
+record format. Older tabs still require all three shared contracts; rolling back
+to that UI restores the unnecessary factory prerequisite for existing Safes.
