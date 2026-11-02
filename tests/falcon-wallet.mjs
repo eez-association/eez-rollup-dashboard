@@ -279,7 +279,6 @@ try {
           const w = window.falconWalletTest; w.loseNextSendReply = false;
           w.account = '0x'+'99'.repeat(20); w.emit('accountsChanged', [w.account]);
         });
-        await status('Create your Falcon controller');
         await page.waitForFunction(() => !document.querySelector('#controller-create')?.disabled);
         assert.equal(await page.locator('#controller-recovery-hash').count(), 0, 'wallet B does not inherit wallet A recovery');
       }
@@ -379,14 +378,17 @@ try {
     assert(calls.filter(c => c.method === 'wallet_switchEthereumChain').every(c => c.params[0].chainId === toHex(d.l2.chainId)), 'Safe reads and confirmation must not switch the wallet to L1');
     if (name === 'MetaMask' && d.l2.chainId === 699169) {
       const sendsBeforeSwitch = sends.length;
+      const mappingsBeforeSwitch = observationCalls.filter(c => c.method === 'eth_call' && same(c.params[0].to, d.l2.factory.address)).length;
       for (const gasWallet of ['0x'+'99'.repeat(20), account]) {
         await page.evaluate(account => { const w = window.falconWalletTest; w.account = account; w.emit('accountsChanged', [account]); }, gasWallet);
-        await status('Safe loaded');
+        await page.waitForFunction(expected => !!document.querySelector('#safe-trace') === expected, gasWallet === account);
         assert.equal(await page.locator('#safe-address').getAttribute('href'), `${d.l1.explorer}/address/${safe}`);
         assert.equal(await page.locator('#safe-cost-comparison').count(), 0, 'no cost comparison after setup or account discovery');
         assert.equal(await page.locator('#safe-trace').count(), gasWallet === account ? 1 : 0, 'trace follows the same transaction context');
       }
-      assert.equal(sends.length, sendsBeforeSwitch, 'changing the gas wallet only discovers the same Safe');
+      assert.equal(sends.length, sendsBeforeSwitch, 'changing the gas wallet never sends a transaction');
+      assert.equal(observationCalls.filter(c => c.method === 'eth_call' && same(c.params[0].to, d.l2.factory.address)).length,
+        mappingsBeforeSwitch, 'changing the gas wallet retains the key-scoped Safe without repeating discovery');
       assert.equal(await page.locator('#safe-balance').textContent(), '0');
       await page.locator('#safe-recipient').fill('0x'+'99'.repeat(20));
       await page.locator('#safe-sign').click(); await status('Falcon signature ready');
@@ -537,7 +539,7 @@ try {
       assert.equal(sends.length, attemptsBeforeSuccess + 2, 'one creation and one Falcon-authorized transfer');
       for (const gasWallet of ['0x'+'99'.repeat(20), account]) {
         await page.evaluate(account => { const w = window.falconWalletTest; w.account = account; w.emit('accountsChanged', [account]); }, gasWallet);
-        await status('Safe loaded');
+        await page.waitForFunction(expected => !!document.querySelector('#safe-cost-comparison') === expected, gasWallet === account);
         assert.equal(await page.locator('#safe-cost-comparison').count(), gasWallet === account ? 1 : 0, 'transfer costs follow their wallet and key');
       }
       assert.match(await page.getByTestId('cost-actual').textContent(), /¢/);

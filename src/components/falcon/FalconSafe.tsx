@@ -16,6 +16,7 @@ import { type SafeCostEvidence } from '../../lib/falcon/safeCosts.ts';
 import { SafeCostComparison } from './SafeCostComparison.tsx';
 import { ExistingFalconSafe } from './ExistingFalconSafe';
 import { attachmentKey, readAttachment } from '../../lib/falcon/existingSafe';
+import { loadSafeAccount } from '../../lib/falcon/safeDiscovery';
 import { SafeFeeQuote } from './SafeFeeQuote.tsx';
 import { fetchFeeQuote, feeErrorMessage, recoverFeeTransaction, StaleFeeQuote, submitFeeQuote, UnknownFeeSubmission, type FeeConfig, type FeeIntent, type FeeTransaction, type QuotedFee } from '../../lib/falcon/l2Fees.ts';
 import styles from './FalconPanel.module.css';
@@ -98,9 +99,9 @@ export function FalconSafe({ signer, wallet, deployment, fees }: { signer: Signe
       try {
         while (!abort.signal.aborted) {
           try {
-            const client = await controllerClient(falconReadProvider(config.l2ProxyRpc, abort.signal, deployment.l2.chainName), deployment, abort.signal);
-            const state = await loadL1Controller(client, deployment, publicKey, abort.signal);
-            const target = state ? await readRemote(state.controller, abort.signal) : null;
+            const client = eezClient(falconReadProvider(config.l2ProxyRpc, abort.signal, deployment.l2.chainName));
+            const attachment = readAttachment(localStorage, attachmentKey(deployment, publicKey));
+            const { controller: state, remote: target } = await loadSafeAccount(client, l1ReadClient(abort.signal), deployment, publicKey, abort.signal, attachment);
             abort.signal.throwIfAborted();
             if (!sameKey(publicKey) || currentDeployment.current !== deployment) return;
             setController(state); setRemote(target); setLookedUp(true); setLoadingSafe(false);
@@ -118,7 +119,7 @@ export function FalconSafe({ signer, wallet, deployment, fees }: { signer: Signe
       } catch { /* Key changes and unmount cancel read-only discovery. */ }
     })();
     return () => abort.abort();
-  }, [signer.publicKeyHex, deployment, wallet.address, attachmentRevision]);
+  }, [signer.publicKeyHex, deployment, attachmentRevision]);
   useEffect(() => {
     request.current?.abort(); request.current = null;
     running.current = false; setBusy(false); setButtonActivity(null);

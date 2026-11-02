@@ -41,16 +41,20 @@ export async function checkComposer(provider: Pick<EthereumProvider, 'request'>,
   signal.throwIfAborted();
 }
 
-/** Inspect deployment bindings during setup and discovery, not on every signature. */
+/** Validate the Composer route and deployment before setup or reconciliation. */
 export async function controllerClient(provider: Pick<EthereumProvider, 'request'>, deployment: CrossChainDeployment, signal: AbortSignal) {
-  const { l1, l2 } = deployment;
   const client = eezClient(provider);
   const [, , blockNumber] = await Promise.all([
     checkComposer(provider, deployment, signal),
-    checkChain(client, l2), client.getBlockNumber(),
+    checkChain(client, deployment.l2), client.getBlockNumber(),
   ]);
+  await checkControllerDeployment(client, deployment, signal, blockNumber);
+  return client;
+}
+
+/** Check code and routing at the same source block used for discovery. */
+export async function checkControllerDeployment(client: EezClient, { l1, l2 }: CrossChainDeployment, signal: AbortSignal, blockNumber: bigint) {
   const read = { address: l2.factory.address, abi: l1ControllerFactoryAbi, blockNumber } as const;
-  // Code and routing reads share a block. Both must pass before this client is usable.
   const [verifier, manager, chain, rollupId, useGasLeft] = await Promise.all([
     client.readContract({ ...read, functionName: 'verifier' }), client.readContract({ ...read, functionName: 'eezL2' }),
     client.readContract({ ...read, functionName: 'l1ChainId' }),
@@ -62,14 +66,23 @@ export async function controllerClient(provider: Pick<EthereumProvider, 'request
   if (!sameAddress(verifier, l2.verifier.address) || !sameAddress(manager, l2.manager) || chain !== BigInt(l1.chainId)
     || rollupId !== l2.rollupId || useGasLeft) throw new Error('Controller routing does not match the supported EEZ deployment.');
   signal.throwIfAborted();
-  return client;
 }
 
 export async function loadL1Controller(client: EezClient, d: CrossChainDeployment, publicKey: Hex, signal: AbortSignal): Promise<ControllerState | null> {
   const block = await client.getBlock();
+  const controller = await findL1Controller(client, d, publicKey, block.number);
+  return controller ? inspectL1Controller(client, d, publicKey, controller, block, signal) : null;
+}
+
+/** A mapping result is a lookup hint; inspect its authority before exposing it. */
+export async function findL1Controller(client: EezClient, d: CrossChainDeployment, publicKey: Hex, blockNumber: bigint): Promise<Address | null> {
+  const controller = await client.readContract({ address: d.l2.factory.address, abi: l1ControllerFactoryAbi, functionName: 'controllers', args: [keccak256(publicKey)], blockNumber });
+  return sameAddress(controller, zeroAddress) ? null : controller;
+}
+
+export async function inspectL1Controller(client: EezClient, d: CrossChainDeployment, publicKey: Hex, controller: Address,
+  block: { number: bigint; timestamp: bigint }, signal: AbortSignal): Promise<ControllerState> {
   const keyHash = keccak256(publicKey);
-  const controller = await client.readContract({ address: d.l2.factory.address, abi: l1ControllerFactoryAbi, functionName: 'controllers', args: [keyHash], blockNumber: block.number });
-  if (sameAddress(controller, zeroAddress)) return null;
   const read = { address: controller, abi: l1ControllerAbi, blockNumber: block.number } as const;
   const [authority, verifier, manager, chain, nonce] = await Promise.all([
     client.readContract({ ...read, functionName: 'publicKeyHash' }), client.readContract({ ...read, functionName: 'verifier' }),
