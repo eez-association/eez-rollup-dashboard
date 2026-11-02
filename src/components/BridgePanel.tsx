@@ -231,7 +231,7 @@ export function BridgePanel({
       {/* Approval button (ERC20 step 1) */}
       {needsApproval && !busy && (
         <>
-          <div className={styles.approveNote}>Step 1 of 2 — Approve token spending</div>
+          <div className={styles.approveNote}>Step 1 of 2 — Approve only the bridge amount</div>
           <button
             className="btn btn-solid btn-accent btn-block"
             onClick={onApprove}
