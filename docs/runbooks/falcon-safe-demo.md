@@ -114,8 +114,11 @@ against the new factory; UI bytecode checks do not claim explorer verification.
    connected wallet is an existing EOA owner (including EIP-7702 delegated EOAs).
    Safe / SafeL2 1.3.0, 1.4.1 and 1.5.0 are accepted on L1, including the proxy
    used by the Falcon factory. Proxy and singleton bytecode are checked separately;
-   a reported version alone is insufficient. The wallet signs an EIP-712 Safe transaction,
-   then submits it on L1 to add the controller's deterministic L1 proxy. All existing
+   a reported version alone is insufficient. First approve the EIP-712 Safe signature
+   in the wallet, then confirm a separate L1 transaction and its network fee to add
+   the controller's deterministic L1 proxy. Signature approval has no RPC deadline;
+   wallet reads retain their 20-second timeout. Changing the wallet, key or network
+   invalidates a stale approval before submission. All existing
    owners remain; the threshold stays at 1 (for example, 1 of 2 becomes 1 of 3).
    Each owner can execute independently. Existing modules and handler are retained;
    the L2 mirror is not modified. Higher thresholds, Guards, and additions exceeding

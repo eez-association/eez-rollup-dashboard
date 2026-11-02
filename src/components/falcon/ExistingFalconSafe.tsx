@@ -111,7 +111,7 @@ export function ExistingFalconSafe({ wallet, deployment, controller, publicKey, 
       if (safeTransactionHash(walletReview.transaction) !== safeTransactionHash(review.transaction)
         || walletReview.ownerFingerprint !== review.ownerFingerprint) throw new Error('Wallet and dashboard disagree about this Safe.');
       if (!current()) throw new Error('Wallet, key or Safe changed. Review again.');
-      setMessage('Sign the Safe transaction to add your Falcon controller. The threshold stays at 1.');
+      setMessage(`Sign the Safe approval in your wallet. Next, confirm the ${deployment.l1.chainName} transaction.`);
       const signature = await session.provider.request({ method: 'eth_signTypedData_v4', params: [session.account, safeTypedDataJSON(review.transaction)] }) as Hex;
       const signatures = await packEOAApprovals(review.transaction, [session.account], 1, [{ owner: session.account, signature }]);
       setMessage('Rechecking Safe before sending…');
@@ -128,7 +128,7 @@ export function ExistingFalconSafe({ wallet, deployment, controller, publicKey, 
         account: session.account, to: target, nonce: String(nonce), value: '0', data, publicKey, controller: controller.controller, safeNonce: String(review.transaction.message.nonce), startBlock: String(startBlock) };
       await journal.begin(attempt);
       try {
-        setMessage('Confirm the owner addition transaction on L1.');
+        setMessage(`Confirm the ${deployment.l1.chainName} transaction and network fee in your wallet.`);
         const hash = await session.sendTransaction({ to: target, data, gas: toHex(gas * 120n / 100n), nonce: toHex(nonce) }, current);
         await journal.recordHash(attempt, hash);
       } catch (error) { if (!(error instanceof UnknownFeeSubmission)) await journal.reject(attempt); throw error; }

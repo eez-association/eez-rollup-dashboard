@@ -6,15 +6,19 @@ import { useWalletNetworkSetup, networkErrorCode, type WalletNetwork as Network 
 
 export type FalconWallet = ReturnType<typeof useFalconWallet>;
 export class WalletConnectionError extends Error {}
-/** Stop waiting on stale extension reads; EIP-1193 cannot cancel the underlying wallet request. */
-function readWallet(provider: EthereumProvider, args: Parameters<EthereumProvider['request']>[0], signal: AbortSignal) {
+/** Stop waiting on stale requests; EIP-1193 cannot cancel the underlying wallet prompt. */
+function requestWallet(provider: EthereumProvider, args: Parameters<EthereumProvider['request']>[0], signal: AbortSignal) {
   signal.throwIfAborted();
-  let timer: ReturnType<typeof setTimeout>;
+  let timer: ReturnType<typeof setTimeout> | undefined;
   let abort: () => void;
   return new Promise<unknown>((resolve, reject) => {
     abort = () => reject(signal.reason);
     signal.addEventListener('abort', abort, { once: true });
-    timer = setTimeout(() => reject(new WalletConnectionError('Wallet RPC timed out. Check your configured network connection.')), 20_000);
+    // Safe's EIP-712 approval waits for a person, so it has no RPC deadline.
+    // Abort and the session's identity checks still discard stale approvals.
+    if (args.method !== 'eth_signTypedData_v4') {
+      timer = setTimeout(() => reject(new WalletConnectionError('Wallet RPC timed out. Check your configured network connection.')), 20_000);
+    }
     Promise.resolve().then(() => provider.request(args)).then(resolve, reject);
   }).finally(() => { clearTimeout(timer); signal.removeEventListener('abort', abort); });
 }
@@ -66,7 +70,7 @@ export function useFalconWallet(wallet: ReturnType<typeof useWallet>) {
     };
     assertAccount();
     const provider = session!.provider;
-    const chain = await readWallet(provider, { method: 'eth_chainId' }, signal);
+    const chain = await requestWallet(provider, { method: 'eth_chainId' }, signal);
     assertAccount();
     if (walletQuantity(chain) !== BigInt(network.chainId)) {
       try { await provider.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: wantedChain }] }); }
@@ -89,8 +93,8 @@ export function useFalconWallet(wallet: ReturnType<typeof useWallet>) {
     let stable = false;
     for (let attempt = 0; attempt < 3; attempt++) {
       const before = revision.current;
-      const actualChain = await readWallet(provider, { method: 'eth_chainId' }, signal);
-      const accounts = await readWallet(provider, { method: 'eth_accounts' }, signal);
+      const actualChain = await requestWallet(provider, { method: 'eth_chainId' }, signal);
+      const accounts = await requestWallet(provider, { method: 'eth_accounts' }, signal);
       assertAccount();
       if (revision.current !== before) continue;
       validateIdentity(actualChain, accounts);
@@ -106,7 +110,7 @@ export function useFalconWallet(wallet: ReturnType<typeof useWallet>) {
     };
     const request = async (args: Parameters<EthereumProvider['request']>[0]) => {
       assertCurrent();
-      const result = await readWallet(provider, args, signal);
+      const result = await requestWallet(provider, args, signal);
       assertCurrent();
       return result;
     };
