@@ -1,4 +1,5 @@
 import type { Address, Hex } from 'viem';
+import { sharedSetupPlan } from './sharedSetupPlan.ts';
 
 export type ChainBinding = { chainId: number; chainName: string; anchor: { blockNumber: bigint; blockHash: Hex }; explorer: string };
 export type CodeBinding = { address: Address; runtimeCodeHash: Hex };
@@ -8,6 +9,8 @@ export type SafeDeployment = {
 };
 /** Public deployment data. No RPC URL or per-user controller or Safe belongs here. */
 export type CrossChainDeployment = {
+  /** Shared addresses are deterministic targets; the UI must verify or deploy them before discovery. */
+  walletSetup?: true;
   l2: ChainBinding & { verifier: CodeBinding; manager: Address; rollupId: bigint; factory: CodeBinding };
   l1: ChainBinding & { registry: Address; safe?: SafeDeployment };
 };
@@ -83,4 +86,32 @@ export const testnetDeployment: CrossChainDeployment = {
   },
 };
 
-export const crossChainDeployments = [crossChainDeployment, testnetDeployment] as const;
+const mainnetManager = '0x4B2760F84B83d6b3829E30A7573B0172B6d6402C';
+const mainnetSingleton = '0x29fcB43b46531BcA003ddC8FCB67FFE91900C762';
+const mainnetHandler = '0xfd0732Dc9E303f09fCEf3a7388Ad10A83459Ec99';
+const [mainnetVerifier, mainnetFactory, mainnetSafeFactory] = sharedSetupPlan(mainnetManager, 1, mainnetSingleton, mainnetHandler);
+const binding = ({ address, runtimeCodeHash }: CodeBinding): CodeBinding => ({ address, runtimeCodeHash });
+
+/** Network/dependencies observed on mainnet. Shared Falcon contracts are planned
+ * CREATE2 targets, not a claim of deployment; wallet setup verifies them on chain.
+ */
+export const mainnetDeployment: CrossChainDeployment = {
+  walletSetup: true,
+  l1: {
+    chainId: 1, chainName: 'Ethereum', explorer: 'https://etherscan.io', registry: mainnetManager,
+    anchor: { blockNumber: 26329121n, blockHash: '0xd57ec0fbcda87ba920051701982e14e5a9ffd5012a63a8b06a9b3e3a63b31138' },
+    safe: {
+      factory: binding(mainnetSafeFactory!),
+      singleton: { ...crossChainDeployment.l1.safe!.singleton, address: mainnetSingleton },
+      fallbackHandler: { ...crossChainDeployment.l1.safe!.fallbackHandler, address: mainnetHandler },
+      proxyRuntimeCodeHash: crossChainDeployment.l1.safe!.proxyRuntimeCodeHash, version: '1.4.1', nativeSymbol: 'ETH',
+    },
+  },
+  l2: {
+    chainId: 696991, chainName: 'RollupX', explorer: 'https://rollupx.eez.dev/explorer',
+    anchor: { blockNumber: 0n, blockHash: '0xb6bd210b7e824a1aabc4c1ae5b64f5643715441b332c7152e641a36ba01835b2' },
+    manager: mainnetManager, rollupId: 2n, verifier: binding(mainnetVerifier!), factory: binding(mainnetFactory!),
+  },
+};
+
+export const crossChainDeployments = [crossChainDeployment, testnetDeployment, mainnetDeployment] as const;

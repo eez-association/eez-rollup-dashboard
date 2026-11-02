@@ -1,0 +1,31 @@
+{
+  "scope": "Isolated CREATE2/EVM; stubbed EEZ routing; no live broadcast or native settlement",
+  "deployments": [
+    {
+      "name": "verifier",
+      "chain": 696991,
+      "address": "0x9008864A079AE0eB3239729d10b9721759d261bf",
+      "gas": "1853993",
+      "runtimeCodeHash": "0x28402fe675b2e0b8fdcb281c7b5bef4c441ba32adae6b68c30f9471d87af0e66"
+    },
+    {
+      "name": "controllerFactory",
+      "chain": 696991,
+      "address": "0x38a2767eAA74c2B0978F0fD6B86d1500bF7038BB",
+      "gas": "761716",
+      "runtimeCodeHash": "0x9cab06abcf633f88403ac85875ded0d4fe2ddc12cb41fc9335063e123a007de0"
+    },
+    {
+      "name": "safeFactory",
+      "chain": 1,
+      "address": "0x531dfEe95daAE616a747550b1db9D21bfba27e86",
+      "gas": "346343",
+      "runtimeCodeHash": "0x44b00a0c5c8fabd29f6b6704d7093a3d3f4df43ab0a585d9f42c3e466ee29435"
+    }
+  ],
+  "checks": [
+    "absent, partial and complete infrastructure; duplicate CREATE2 rejected",
+    "frozen browser signature accepted; mutated message rejected; fresh Falcon authorization bound to Ethereum chain 1 and nonce",
+    "Safe initialized atomically for caller, threshold 1, expected proxy runtime"
+  ]
+}

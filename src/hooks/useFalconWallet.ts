@@ -14,7 +14,7 @@ function readWallet(provider: EthereumProvider, args: Parameters<EthereumProvide
   return new Promise<unknown>((resolve, reject) => {
     abort = () => reject(signal.reason);
     signal.addEventListener('abort', abort, { once: true });
-    timer = setTimeout(() => reject(new WalletConnectionError('Wallet RPC timed out. Check your configured devnet connection.')), 20_000);
+    timer = setTimeout(() => reject(new WalletConnectionError('Wallet RPC timed out. Check your configured network connection.')), 20_000);
     Promise.resolve().then(() => provider.request(args)).then(resolve, reject);
   }).finally(() => { clearTimeout(timer); signal.removeEventListener('abort', abort); });
 }

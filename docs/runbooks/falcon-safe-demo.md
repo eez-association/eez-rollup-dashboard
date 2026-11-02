@@ -8,10 +8,13 @@ Hiding is a navigation preference, not an authorization boundary.
 
 ## Network and wallet
 
-The demo supports two verified deployments, both paired with **Chiado 10200**:
+The demo supports these network pairs:
 
 - **EEZ-X Testnet 699169, rollup 2** at `https://eez.dev`.
 - **EEZ-X Devnet 916969, rollup 4** at `https://eez.asuscomm.com`, from `falcom-devcon-poc`.
+- **RollupX 696991, rollup 2** at `https://rollupx.eez.dev`, paired with **Ethereum 1**.
+  The two test rollups are paired with **Chiado 10200** and have predeployed shared
+  contracts. Mainnet uses the wallet setup below.
 
 Public addresses, code hashes and
 chain checkpoints are in
@@ -19,7 +22,7 @@ chain checkpoints are in
 The dashboard's discovered chain IDs, registry, L2 manager and rollup ID must
 match before contract actions appear. Chain discovery failure does not fall
 back to default IDs. Another network can still use browser signing and backups.
-Adding a deployment requires its verified public bindings; changing only a
+Adding a network requires checked public bindings and reproducible contract artifacts; changing only a
 chain ID does not migrate controllers or Safe ownership.
 
 Use the dashboard header to connect Rabby or MetaMask. Signing and transaction
@@ -47,6 +50,38 @@ send. Each send obtains a fresh quote and forwards only its validated wallet
 fields. Estimated execution fee and maximum reservation are separate; the
 transfer value is not a fee. Ordinary L2 verifier/controller-creation calls
 retain their separate gas estimation path.
+
+### Mainnet shared setup
+
+If shared contracts are missing, **Set up Falcon on this network** replaces Safe
+discovery. The connected wallet deploys the Falcon verifier and controller factory
+on RollupX, then the Safe factory on Ethereum. Each button requests one ordinary
+wallet transaction, with live gas estimation and wallet fee review. No separate
+operator address, private key, Falcon signature or new `.env` setting is needed.
+The dashboard must already discover the matching mainnet route and enable L2 fees.
+
+This setup is needed once for the network. Any wallet can pay; it gains no
+administration or Safe ownership. The UI reuses matching contracts deployed by
+another user, checking exact code and constructor bindings. Ethereum's existing
+SafeL2 1.4.1 singleton and fallback handler are reused. CREATE2 addresses derive
+from the retained [sources and build](../../contracts/falcon/README.md); the
+mainnet profile contains expected targets, not an assertion that they are live.
+An incompatible occupied address, deployer or dependency stops setup.
+
+Setup saves public transaction details before the wallet prompt. Reloads resume
+receipt checks; missing wallet replies require **Recover deployment** with the
+activity hash. A mined cancellation/replacement can resolve the request. Clearing
+an unsent request requires the same checks and explicit cancelled-prompt
+acknowledgement as controller recovery; clearing storage does not cancel a signed
+transaction. Records are scoped to the network and gas wallet, independent of the
+Falcon key. A late wallet reply stays with the original account.
+
+Once ready, the normal per-key controller and Safe choices appear. No user Safe
+is created by infrastructure setup. The application still requires a fresh
+Composer fee quote for the Falcon-authorized L2-to-L1 call and canonical L1
+confirmation. Browser and local Anvil tests do not constitute a live mainnet
+settlement rehearsal. Source verification for this network must be configured
+against the new factory; UI bytecode checks do not claim explorer verification.
 
 ## Rehearsal
 
@@ -89,8 +124,8 @@ retain their separate gas estimation path.
    trace decoder** to inspect the submitted transaction; manual receipt and
    replay-diagnostic buttons are omitted.
 6. The gas wallet stays in the dashboard header. **Fund Safe** sends a
-   native-token transfer from that wallet to the Safe on Chiado, with an editable
-   amount defaulting to **0.01 xDAI**. The wallet requests the necessary network
+   native-token transfer from that wallet to the Safe on its L1, with an editable
+   amount defaulting to **0.01 xDAI** on Chiado or **0.01 ETH** on Ethereum. The wallet requests the necessary network
    switch and transaction approval. Funding confirmation and balance refresh are
    automatic. This does not sign a Falcon action or transfer from the Safe.
    If the wallet's submission response is unclear, further funding is blocked
@@ -234,9 +269,11 @@ The isolated Anvil regression uses the observed Safe proxy builds and published
 caller-authenticated Safe calls, checking the retained owners, modules and handler.
 Its registry and cross-chain caller are test fixtures, not native EEZ settlement.
 The [compatibility audit](../audits/2026-11-01-falcon-safe-compatibility/README.md)
-records the requested Ethereum mainnet Safe's read-only checks. Safe compatibility
-does not configure a mainnet Falcon deployment: the verified routes above still
-target Chiado.
+records the requested Ethereum mainnet Safe's read-only checks. That historical
+audit covers Safe recognition; mainnet infrastructure setup is validated separately
+by `tests/integration/falcon-shared-setup.mjs`, which executes CREATE2, real Falcon
+verification, chain-bound controller authorization and Safe initialization on
+isolated Anvil nodes. Its EEZ routing is stubbed; native settlement remains untested.
 The original devnet deployment and protocol pins remain unchanged. The eez.dev
 addition deploys the same verifier/controller source to the second network;
 it does not include follower replay or a live Safe transfer rehearsal.

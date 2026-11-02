@@ -23,7 +23,7 @@ export function falconDashboardConfig(host: DashboardBinding) {
     if (!deployment) throw new Error('deployment mismatch');
   } catch {
     return { deployment: null, fees: null,
-      message: 'On-chain demo requires the verified EEZ-X Testnet (699169, rollup 2) or EEZ-X Devnet (916969, rollup 4), paired with Chiado (10200). Browser signing remains available.' };
+      message: 'On-chain demo requires RollupX (696991, rollup 2) with Ethereum (1), or EEZ-X Testnet (699169, rollup 2) / Devnet (916969, rollup 4) with Chiado (10200). Browser signing remains available.' };
   }
   if (!host.feesEnabled) return { deployment, fees: null,
     message: 'Enable L2 fee quotes in the dashboard configuration to use the Falcon Safe.' };

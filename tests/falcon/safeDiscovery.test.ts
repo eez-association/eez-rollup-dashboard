@@ -5,8 +5,8 @@ import { keccak256, pad, zeroAddress, zeroHash, type Address, type Hex } from 'v
 import { crossChainDeployments, type CrossChainDeployment } from '../../src/lib/falcon/crossChainDeployment.ts';
 import type { EezClient } from '../../src/lib/falcon/eez.ts';
 import { loadSafeAccount } from '../../src/lib/falcon/safeDiscovery.ts';
+import { deploymentCode } from './deploymentCode.ts';
 
-const deployed = JSON.parse(readFileSync(new URL('./fixtures/deployed-code.json', import.meta.url), 'utf8'));
 const testnet = JSON.parse(readFileSync(new URL('./fixtures/testnet-deployed-code.json', import.meta.url), 'utf8'));
 const publicKey: Hex = '0x1234';
 const controller: Address = '0x1111111111111111111111111111111111111111';
@@ -20,7 +20,7 @@ function deferred() {
   return { promise, resolve };
 }
 function fixture(d = crossChainDeployments[0]) {
-  const records = d.l2.chainId === 699169 ? { ...deployed, ...testnet } : deployed;
+  const records = deploymentCode(d);
   const codes: Record<string, Hex> = Object.fromEntries(Object.values(records).map(item => {
     const { address, code } = item as { address: Address; code: Hex };
     return [address.toLowerCase(), code];

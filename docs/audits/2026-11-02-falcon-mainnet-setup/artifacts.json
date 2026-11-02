@@ -1,0 +1,20 @@
+[
+  {
+    "name": "FalconVerifier",
+    "compiler": "0.8.34+commit.80d5c536",
+    "creationBytecodeReproduced": true,
+    "creationBytes": 8343
+  },
+  {
+    "name": "FalconL1ControllerFactory",
+    "compiler": "0.8.34+commit.80d5c536",
+    "creationBytecodeReproduced": true,
+    "creationBytes": 3508
+  },
+  {
+    "name": "OwnedSafeFactory",
+    "compiler": "0.8.34+commit.80d5c536",
+    "creationBytecodeReproduced": true,
+    "creationBytes": 1782
+  }
+]
