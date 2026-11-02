@@ -138,7 +138,7 @@ async function fixture(browser, options = {}) {
       return reply('0x' + (options.wrapped ? '6b175474e89094c44da98b954eedeac495271d0f' : '').padStart(64, '0') + '0'.repeat(64));
     }
     if (method === 'eth_call' && params[0]?.to?.toLowerCase() === token) {
-      if (params[0].data === '0x313ce567') return reply('0x' + '0'.repeat(62) + '12');
+      if (params[0].data === '0x313ce567') return reply('0x' + BigInt(options.decimals ?? 18).toString(16).padStart(64, '0'));
       if (params[0].data === '0x95d89b41' && options.symbol) return reply(encodeString(options.symbol));
       if (params[0].data.startsWith('0x70a08231')) return reply('0x' + BigInt(options.balance ?? '0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff').toString(16).padStart(64, '0'));
       if (params[0].data.startsWith('0xdd62ed3e')) return reply('0x' + BigInt(options.allowance ?? '0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff').toString(16).padStart(64, '0'));
