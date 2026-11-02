@@ -103,8 +103,6 @@ const ERC20_ABI = {
   decimals: "0x313ce567",
 };
 
-const MAX_UINT256 = "0x" + "f".repeat(64);
-
 function pad32(hex: string): string {
   return hex.replace("0x", "").padStart(64, "0");
 }
@@ -491,8 +489,16 @@ export function useBridge(
       return;
     }
 
-    if (asset === "erc20" && (!tokenAddress || !/^0x[0-9a-fA-F]{40}$/.test(tokenAddress))) {
+    if (asset === "erc20" && (!tokenMeta || !tokenAddress || !/^0x[0-9a-fA-F]{40}$/.test(tokenAddress))) {
       setState((s) => ({ ...s, gas: defaultGas }));
+      return;
+    }
+
+    // Original tokens use transferFrom. Wait for their allowance before
+    // simulating a transfer that cannot succeed; wrapped tokens burn directly.
+    if (asset === "erc20" && (state.tokenNeedsApproval === null ||
+        state.tokenNeedsApproval && (state.allowance === null || state.allowance < rawAmount))) {
+      setState(s => ({ ...s, gas: defaultGas }));
       return;
     }
 
@@ -541,7 +547,7 @@ export function useBridge(
     }, 400);
 
     return () => { cancelled = true; clearTimeout(timer); controller.abort(); };
-  }, [state.direction, state.asset, state.amount, state.tokenAddress, state.tokenMeta?.decimals, state.destinationAddress, state.allowance, walletAddress, configLoaded, config.l1Bridge, config.l2Bridge, config.rollupId, config.l1ProxyRpc, config.l2ProxyRpc]);
+  }, [state.direction, state.asset, state.amount, state.tokenAddress, state.tokenMeta?.decimals, state.destinationAddress, state.allowance, state.tokenNeedsApproval, walletAddress, configLoaded, config.l1Bridge, config.l2Bridge, config.rollupId, config.l1ProxyRpc, config.l2ProxyRpc]);
 
   const feeSource = state.direction === "l1-to-l2" ? "l1" : "l2";
   const feeRpc = feeSource === "l1" ? config.l1ProxyRpc : config.l2ProxyRpc;
@@ -703,15 +709,18 @@ export function useBridge(
 
   /** Approve ERC20 spending for the bridge */
   const approve = useCallback(async () => {
-    const { direction, tokenAddress } = stateRef.current;
+    const { direction, tokenAddress, tokenMeta, amount, asset, phase } = stateRef.current;
     const bridgeAddr = direction === "l1-to-l2" ? config.l1Bridge : config.l2Bridge;
-    if (!bridgeAddr || !tokenAddress || stateRef.current.tokenNeedsApproval !== true) return;
+    if (!bridgeAddr || !tokenAddress || !tokenMeta || asset !== "erc20" ||
+        !["idle", "failed"].includes(phase) || stateRef.current.tokenNeedsApproval !== true) return;
+    const approvalAmount = parseAmount(amount, tokenMeta.decimals);
+    if (approvalAmount === null || approvalAmount <= 0n || approvalAmount >= (1n << 256n)) return;
 
     setState((s) => ({ ...s, phase: "approving", error: null, txHash: null }));
     log(`Approving token spending for bridge...`, "info");
 
     try {
-      const data = ERC20_ABI.approve + pad32(bridgeAddr) + MAX_UINT256.replace("0x", "");
+      const data = ERC20_ABI.approve + pad32(bridgeAddr) + encodeUint256(approvalAmount);
       const send = direction === "l1-to-l2" ? sendL1Tx : sendTx;
       const rpcUrl = direction === "l1-to-l2" ? config.l1Rpc : config.l2Rpc;
 
@@ -743,7 +752,7 @@ export function useBridge(
           const receipt = (await rpcCall(rpcUrl, "eth_getTransactionReceipt", [txHash])) as TxReceipt | null;
           if (receipt) {
             if (receipt.status === "0x1") {
-              setState((s) => ({ ...s, phase: "idle", txHash: null, allowance: BigInt(MAX_UINT256) }));
+              setState((s) => ({ ...s, phase: "idle", txHash: null, allowance: approvalAmount }));
               log("Token approval confirmed", "ok");
             } else {
               const reason = await fetchRevertReason(rpcUrl, txHash);

@@ -178,10 +178,10 @@ export function BridgePanel({
 
       {/* Gas settings are already collapsed; keep estimation errors visible. */}
       {gas.status === "unsupported" && gas.errorMessage && <div className={styles.validationHint} role="status">{gas.errorMessage}</div>}
-      {gas.status === "error" && gas.errorMessage && (
+      {!needsApproval && gas.status === "error" && gas.errorMessage && (
         <div className={styles.errorBar} role="alert">Gas estimation failed: {gas.errorMessage}</div>
       )}
-      {feesEnabled && amount && rawAmount > 0n && sourceBridgeReady && (
+      {feesEnabled && !needsApproval && amount && rawAmount > 0n && sourceBridgeReady && (
         <BridgeFeeQuote fees={state.fees} sentToWallet={phase === "sending" || phase === "tx-pending"}
           disabled={busy || gas.status !== "estimated" && !state.gasOverrideHex || needsApproval}
           onRefresh={onRefreshFees} />
@@ -210,7 +210,7 @@ export function BridgePanel({
       {/* Approval button (ERC20 step 1) */}
       {needsApproval && !busy && (
         <>
-          <div className={styles.approveNote}>Step 1 of 2 — Approve token spending</div>
+          <div className={styles.approveNote}>Step 1 of 2 — Approve only the bridge amount</div>
           <button
             className="btn btn-solid btn-accent btn-block"
             onClick={onApprove}

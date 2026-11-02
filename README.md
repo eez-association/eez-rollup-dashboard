@@ -804,6 +804,11 @@ errors block submission. Older Composers that report a missing estimation method
 or `ExecutionNotInCurrentBlock()` require an explicit manual limit before
 submission is enabled. Wrapped bridge tokens burn directly without approval;
 native ERC20 tokens still require allowance for the source bridge.
+While that allowance is unknown or insufficient, the UI waits for approval
+before estimating the transfer or showing its fee quote. Approval authorizes
+only the entered bridge amount, using the token's decimals. Increasing the
+amount beyond that allowance requires another approval. Once approval confirms,
+transfer preparation resumes; actual execution errors remain visible.
 
 Updated Composers attach structured retry hints for settlement reconciliation
 and a context change during estimation. The dashboard retries that same
@@ -823,6 +828,7 @@ node tests/bridge-gas-estimation.test.mjs
 node tests/gas-estimation-unfunded.test.mjs
 # Against a running UI, with Playwright installed:
 node tests/bridge-gas-fees.cjs
+node tests/bridge-approvals.cjs
 node tests/bridge-readiness.cjs
 node tests/wallet-startup.cjs
 ```
