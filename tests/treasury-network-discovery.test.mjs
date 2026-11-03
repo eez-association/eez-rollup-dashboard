@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { decodeAbiParameters, toHex, zeroAddress } from 'viem';
 import { discoverInfrastructure, discoverToken, validateDiscoveredNetwork, dashboardNetworkKey, matchingDeployerChecks, assertSameInfrastructure, validateDiscoveredToken } from '../src/lib/treasury/networkDiscovery.ts';
 import { MainnetSetup, setupIdentity, readMainnetSetup } from '../src/lib/treasury/mainnetSetup.ts';
-import { TreasuryClient } from '../src/lib/treasury/client.ts';
-import { treasuryExplorerUrl } from '../src/lib/treasury/mainnet.ts';
+import { TreasuryClient, parseTreasuryConfig } from '../src/lib/treasury/client.ts';
+import { ETHEREUM_USDC, treasuryExplorerUrl } from '../src/lib/treasury/mainnet.ts';
 import { TestnetAsset } from '../src/lib/treasury/testnetAsset.ts';
 import { fixture, dashboard, token, target, owner, address, release } from './fixtures/treasury-discovery.mjs';
 import { keccak256 } from 'viem';
@@ -62,6 +62,24 @@ test('token discovery distinguishes missing bridge registration, unsupported dec
   await assert.rejects(discoverToken(io,network,token),/6 decimal/);
   state.decimals=6;state.wrongOrigin=true;
   await assert.rejects(discoverToken(io,network,token),/origin/);
+});
+test('Ethereum treasury discovery and saved selections require canonical USDC', async () => {
+  const mainnet = { ...dashboard, l1ChainId: '0x1' };
+  const { io, state } = fixture({ dashboard: mainnet, token: ETHEREUM_USDC, symbol: 'USDC' });
+  const { network } = await discoverInfrastructure(io, mainnet);
+  const selected = await discoverToken(io, network, ETHEREUM_USDC);
+  await validateDiscoveredToken(io, selected);
+  assert.equal(selected.contracts.usdcProxy.address, ETHEREUM_USDC);
+  const rpc = io.rpc;
+  io.rpc = async () => assert.fail('Reject another mainnet token before requesting its metadata');
+  await assert.rejects(discoverToken(io, network, token), /Mainnet treasury requires.*USDC/);
+  await assert.rejects(validateDiscoveredToken(io, { ...selected, contracts: { ...selected.contracts,
+    usdcProxy: { ...selected.contracts.usdcProxy, address: token } } }), /Mainnet treasury requires.*USDC/);
+  io.rpc = rpc;
+  state.wrapped = false;
+  await assert.rejects(discoverToken(io, network, ETHEREUM_USDC), /USDC has not been bridged/);
+  state.wrapped = true; state.wrongOrigin = true;
+  await assert.rejects(discoverToken(io, network, ETHEREUM_USDC), /origin/);
 });
 test('saved token upgrades and network changes block use instead of silently accepting new hashes', async()=>{
   const {io,state}=fixture();const {network}=await discoverInfrastructure(io,dashboard);
@@ -138,6 +156,9 @@ test('manifest completion accepts absent and HTTP explorers for discovered dashb
   engine.unchanged=async()=>{};engine.io.read=async()=>address(400);engine.io.rpc=async()=> '0x6000';
   const manifest=await engine.manifest({version:3,build:release.build,salt:toHex(99,{size:32}),deployer:owner,addresses,code,completed:Array(6).fill({})});
   assert.equal(manifest.l1.explorer,explorer||undefined);assert.equal(manifest.l2.explorer,explorer||undefined);
+  const mainnetManifest=structuredClone(manifest);
+  mainnetManifest.l1.chainId=1;mainnetManifest.network.chains.l1.chainId=1;
+  assert.throws(()=>parseTreasuryConfig(mainnetManifest),/Mainnet treasury requires.*USDC/,'Configured manifests cannot override the mainnet asset');
  }
 });
 

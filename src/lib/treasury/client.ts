@@ -4,7 +4,7 @@ import { validatePairedPayments } from "./pairedPolicy.ts";
 import { readPaymentDeployment, paymentVersion, recordedPaymentTransaction, verifiesL1Initiation, verifiesReverseFunding } from "./savedPayments.ts";
 import type { RecordedPayment } from "./savedPayments.ts";
 import { verifyTransferHelper, transferRollup } from "./transfers.ts";
-import { parseMainnetBindings, validateMainnet, treasuryExplorerUrl } from "./mainnet.ts";
+import { ETHEREUM_USDC, parseMainnetBindings, validateMainnet, treasuryExplorerUrl } from "./mainnet.ts";
 import type { MainnetBindings } from "./mainnet.ts";
 import type { SetupNetwork } from './mainnetSetup.ts';
 import { validateDiscoveredNetwork } from './networkDiscovery.ts';
@@ -149,6 +149,7 @@ export function parseTreasuryConfig(value: unknown): TreasuryConfig {
       && n.chains.l1.chainId === c.l1.chainId && n.chains.l2.chainId === c.l2.chainId
       && same(n.contracts.usdcProxy.address, p.tokenL1) && same(n.contracts.wrappedUSDC.address, p.tokenL2)
       && same(n.contracts.bridgeL1.address, p.bridgeL1) && same(n.contracts.bridgeL2.address, p.bridgeL2), 'Invalid discovered treasury network');
+    requireThat(c.l1.chainId !== 1 || same(p.tokenL1, ETHEREUM_USDC), 'Mainnet treasury requires Circle’s Ethereum USDC. The saved treasury was preserved.');
   } else requireThat(c.network === undefined, 'Unexpected discovered network configuration');
   return c;
 }

@@ -4,12 +4,14 @@ import react from '@vitejs/plugin-react';
 import { chromium } from 'playwright';
 import { decodeAbiParameters, toHex } from 'viem';
 import { fixture, dashboard, owner, token, release } from './fixtures/treasury-discovery.mjs';
+import { ETHEREUM_USDC } from '../src/lib/treasury/mainnet.ts';
 const server = await createServer({ configFile:false,envFile:false,plugins:[react()],server:{host:'127.0.0.1',port:0,watch:null},base:'/' });
 await server.listen();let browser;
 try {
   browser=await chromium.launch({headless:true,chromiumSandbox:process.env.TREASURY_BROWSER_SANDBOX !== '0'});
   const page=await browser.newPage(),origin=`http://127.0.0.1:${server.httpServer.address().port}`,errors=[],sends=[];
-  const {io,state}=fixture();let reject=true, failTokenOnce=false, failNext=false, failedRequest=null, failedHash=null, failureCanonical=true, returnHashes=false;
+  let {io,state}=fixture();let selectedDashboard=dashboard, selectedToken=token;
+  let reject=true, failTokenOnce=false, failNext=false, failedRequest=null, failedHash=null, failureCanonical=true, returnHashes=false;
   page.on('pageerror',e=>errors.push(e.message));
   await page.exposeFunction('walletSend',request=>{sends.push(request);if(reject){const e=new Error('User rejected transaction');e.code=4001;throw e;}if(failNext){failNext=false;failedRequest=request;failedHash=toHex(sends.length,{size:32});returnHashes=true;}return returnHashes?toHex(sends.length,{size:32}):null;});
   await page.route('**/*',async route=>{
@@ -18,7 +20,7 @@ try {
     if(['/l1','/l2'].includes(url.pathname)){
       const payload=route.request().postDataJSON();
       const respond=async request=>{ try {
-        if(failTokenOnce && request.method==='eth_call' && request.params[0].to.toLowerCase()===token.toLowerCase()){failTokenOnce=false;throw new Error('Temporary token RPC failure');}
+        if(failTokenOnce && request.method==='eth_call' && request.params[0].to.toLowerCase()===selectedToken.toLowerCase()){failTokenOnce=false;throw new Error('Temporary token RPC failure');}
         let result;
         if(failedRequest && request.method==='eth_getTransactionReceipt' && request.params[0]===failedHash)
           result={status:'0x0',blockNumber:'0xa',blockHash:toHex(failureCanonical?1:99,{size:32}),logs:[]};
@@ -33,7 +35,7 @@ try {
     }
     return route.continue();
   });
-  const mount=async(configuredToken='')=>{await page.goto(`${origin}/demo`);await page.evaluate(async({dashboard,owner,configuredToken})=>(await import('/tests/fixtures/treasury-network-setup.tsx')).mount(dashboard,owner,configuredToken),{dashboard,owner,configuredToken});};
+  const mount=async(configuredToken='')=>{await page.goto(`${origin}/demo`);await page.evaluate(async({dashboard,owner,configuredToken})=>(await import('/tests/fixtures/treasury-network-setup.tsx')).mount(dashboard,owner,configuredToken),{dashboard:selectedDashboard,owner,configuredToken});};
   await mount();await page.getByLabel('L1 token address',{exact:true}).waitFor();
   assert.equal(await page.getByRole('region',{name:'Treasury network readiness',exact:true}).count(),0);
   assert.equal(await page.getByRole('button',{name:'Check again',exact:true}).count(),0);
@@ -138,6 +140,56 @@ try {
   await page.getByRole('button',{name:'Deploy a new demo token',exact:true}).waitFor();
   await page.waitForFunction(()=>![...document.querySelectorAll('button')].find(b=>b.textContent==='Deploy a new demo token')?.disabled);
   assert.equal(sends.length,3);
+  // Mainnet bypasses configured token selection, including empty or invalid overrides.
+  selectedDashboard={...dashboard,l1ChainId:'0x1'};selectedToken=ETHEREUM_USDC;
+  ({io,state}=fixture({dashboard:selectedDashboard,token:selectedToken,symbol:'USDC'}));
+  const noTokenControls=async()=>{
+    assert.equal(await page.getByRole('region',{name:'Treasury token',exact:true}).count(),0);
+    assert.equal(await page.getByLabel('L1 token address',{exact:true}).count(),0);
+    assert.equal(await page.getByRole('button',{name:/Use this token|Choose another token|Deploy.*demo token|Initialize on L2/}).count(),0);
+  };
+  for(const configured of ['',token,'invalid-token']){
+    await page.evaluate(()=>localStorage.clear());await mount(configured);
+    await page.getByRole('heading',{name:'Choose your Safes',exact:true}).waitFor();await noTokenControls();
+    const saved=await page.evaluate(()=>localStorage.getItem(Object.keys(localStorage).find(k=>k.endsWith(':network'))));
+    assert.equal(JSON.parse(saved).contracts.usdcProxy.address,ETHEREUM_USDC);
+    await mount(configured);await page.getByRole('heading',{name:'Choose your Safes',exact:true}).waitFor();await noTokenControls();
+    assert.equal(await page.evaluate(()=>localStorage.getItem(Object.keys(localStorage).find(k=>k.endsWith(':network')))),saved,'USDC selection keeps its saved identity');
+  }
+  await page.evaluate(token=>{
+    const key=Object.keys(localStorage).find(k=>k.endsWith(':network'));
+    localStorage.removeItem(key);localStorage.setItem(key.replace(/:network$/,':asset'),JSON.stringify({token}));
+  },ETHEREUM_USDC);
+  await mount();await page.getByRole('heading',{name:'Choose your Safes',exact:true}).waitFor();await noTokenControls();
+  // Token failures stay visible even though mainnet has no token card.
+  await page.evaluate(()=>localStorage.clear());state.wrapped=false;await mount();
+  await page.getByRole('alert').filter({hasText:'USDC has not been bridged'}).waitFor();await noTokenControls();
+  assert.equal(await page.getByRole('heading',{name:'Choose your Safes',exact:true}).count(),0);
+  state.wrapped=true;await page.getByRole('button',{name:'Check again',exact:true}).click();
+  await page.getByRole('heading',{name:'Choose your Safes',exact:true}).waitFor();
+  await page.evaluate(()=>localStorage.clear());failTokenOnce=true;await mount();
+  await page.getByRole('alert').filter({hasText:'Temporary token RPC failure'}).waitFor();await noTokenControls();
+  await page.getByRole('button',{name:'Check again',exact:true}).click();
+  await page.getByRole('heading',{name:'Choose your Safes',exact:true}).waitFor();
+  // Older selections cannot replace USDC or silently change an existing setup.
+  const previousSelection=await page.evaluate(token=>{
+    const key=Object.keys(localStorage).find(k=>k.endsWith(':network')),network=JSON.parse(localStorage.getItem(key));
+    network.contracts.usdcProxy.address=token;const value=JSON.stringify(network);localStorage.setItem(key,value);return {key,value};
+  },token);
+  await mount();await page.getByRole('alert').filter({hasText:/Mainnet treasury requires.*USDC/}).waitFor();await noTokenControls();
+  assert.equal(await page.evaluate(key=>localStorage.getItem(key),previousSelection.key),previousSelection.value);
+  assert.equal(await page.getByRole('heading',{name:'Choose your Safes',exact:true}).count(),0);
+  await page.getByRole('button',{name:'Refresh unused network setup',exact:true}).click();
+  await page.getByRole('heading',{name:'Choose your Safes',exact:true}).waitFor();
+  const journalKey=previousSelection.key.replace(/:network$/,':asset');
+  for(const journal of [{token},{pending:savedFailure.failed.request},{failed:savedFailure.failed}]){
+    const value=JSON.stringify(journal);await page.evaluate(({key,value})=>localStorage.setItem(key,value),{key:journalKey,value});
+    await mount();await page.getByRole('alert').filter({hasText:'A previous demo-token setup is saved'}).waitFor();await noTokenControls();
+    assert.equal(await page.evaluate(key=>localStorage.getItem(key),journalKey),value);
+    assert.equal(await page.getByRole('button',{name:/Refresh unused network setup|Retry demo token/}).count(),0);
+    assert.equal(await page.getByRole('heading',{name:'Choose your Safes',exact:true}).count(),0);
+  }
+  assert.equal(sends.length,3,'Mainnet selection, reload and recovery never send token transactions');
   assert.deepEqual(errors,[]);
-  console.log('PASS: network readiness, token validation/selection/reload, explicit deployment, reorg recovery, failed-transaction retry and no automatic resend');
+  console.log('PASS: mainnet USDC-only setup, hidden token controls, preserved journals, testnet token selection/deployment, network readiness and no automatic resend');
 }finally{await browser?.close();await server.close();}

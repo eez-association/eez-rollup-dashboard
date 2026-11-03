@@ -2,7 +2,7 @@ import { decodeFunctionResult, encodeFunctionData, getAddress, isAddress, keccak
 import type { Abi, Address, Hex } from 'viem';
 import type { SetupNetwork } from './mainnetSetup.ts';
 import type { DeploymentIO } from './deploymentIO.ts';
-import { EIP1967_IMPLEMENTATION_SLOT, USDC_IMPLEMENTATION_SLOT } from './mainnet.ts';
+import { EIP1967_IMPLEMENTATION_SLOT, ETHEREUM_USDC, USDC_IMPLEMENTATION_SLOT } from './mainnet.ts';
 import { readBridgeManager } from '../bridgeManager.ts';
 import { probeComposer } from '../composerDiscovery.ts';
 import { matchingDeployer, matchingDeployerHash } from './matchingSafes.ts';
@@ -159,6 +159,8 @@ export async function validateInfrastructure(io: IO, network: SetupNetwork) {
 }
 
 export async function discoverToken(io: IO, network: SetupNetwork, token: Address, requireWrapped = true, selectedAsset?: DiscoveredAsset): Promise<SetupNetwork> {
+  const mainnet = BigInt(network.chains.l1.chainId) === 1n;
+  check(!mainnet || same(token, ETHEREUM_USDC), 'Mainnet treasury requires Circle’s Ethereum USDC. The saved selection was preserved.');
   const [asset, decimals, symbol, eip, usdc, wrapped] = await Promise.all([
     code(io, 'l1', token, 'latest', 'L1 token'), read<number>(io, 'l1', token, 'decimals'), selectedAsset?.symbol ?? read<string>(io, 'l1', token, 'symbol'),
     implementation(io, 'l1', token, 'latest'), implementation(io, 'l1', token, 'latest', USDC_IMPLEMENTATION_SLOT),
@@ -173,7 +175,9 @@ export async function discoverToken(io: IO, network: SetupNetwork, token: Addres
   if (demo) check(same(await read<Address>(io, 'l1', token, 'bridgeL1'), network.contracts.bridgeL1.address)
     && await read<bigint>(io, 'l1', token, 'destinationRollup') === BigInt(network.rollupId), 'Demo token belongs to a different bridge or rollup.');
   let wrappedBinding = { chain: 'l2', address: wrapped, hash: keccak256('0x') };
-  if (same(wrapped, zeroAddress)) check(!requireWrapped, 'This token has not been bridged to L2 yet. Bridge it once, then check again.');
+  if (same(wrapped, zeroAddress)) check(!requireWrapped, mainnet
+    ? 'USDC has not been bridged to L2 yet. Bridge USDC once, then check again.'
+    : 'This token has not been bridged to L2 yet. Bridge it once, then check again.');
   else {
     const [binding, origin, authority, wrappedDecimals] = await Promise.all([code(io, 'l2', wrapped, 'latest', 'L2 token'), read<[Address, bigint]>(io, 'l2', network.contracts.bridgeL2.address, 'wrappedTokenInfo', [wrapped]),
       read<Address>(io, 'l2', wrapped, 'BRIDGE'), read<number>(io, 'l2', wrapped, 'decimals')]);

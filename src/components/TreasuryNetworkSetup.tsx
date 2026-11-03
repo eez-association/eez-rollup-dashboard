@@ -11,6 +11,7 @@ import { TestnetAsset, readAssetJournal } from '../lib/treasury/testnetAsset';
 import type { AssetJournal } from '../lib/treasury/testnetAsset';
 import { guardWalletRequests } from '../lib/treasury/walletRequestScope';
 import { requireDashboardTreasury } from '../lib/treasury/client';
+import { ETHEREUM_USDC } from '../lib/treasury/mainnet';
 import { TreasuryMainnetSetup } from './TreasuryMainnetSetup';
 import { TreasuryConnected } from './TreasuryConnected';
 import type { TreasuryWallet } from './TreasuryConnected';
@@ -22,9 +23,11 @@ type Props = { dashboard: DashboardNetwork; target: MainnetTarget; wallet: Treas
  * a lock; discovery itself never asks the wallet to sign or deploy anything. */
 export function TreasuryNetworkSetup(props: Props) {
   const key = dashboardNetworkKey(props.dashboard);
-  return <NetworkSetup key={key} {...props} storageKey={key} />;
+  const token = BigInt(props.dashboard.l1ChainId) === 1n ? ETHEREUM_USDC : props.token;
+  return <NetworkSetup key={key} {...props} token={token} storageKey={key} />;
 }
 function NetworkSetup({ dashboard, target, wallet, token, feesEnabled, onBridgeGas, storageKey }: Props & { storageKey: string }) {
+  const mainnet = BigInt(dashboard.l1ChainId) === 1n;
   const [checks, setChecks] = useState<NetworkCheck[]>([]), [checking, setChecking] = useState(true);
   const [base, setBase] = useState<SetupNetwork | null>(null), [network, setNetwork] = useState<SetupNetwork | null>(null);
   const [candidate, setCandidate] = useState(token), [assetInfo, setAssetInfo] = useState<SetupNetwork | null>(null);
@@ -46,6 +49,8 @@ function NetworkSetup({ dashboard, target, wallet, token, feesEnabled, onBridgeG
     setChecking(true); setError(''); setNetwork(null); setEngine(null);
     void (async () => {
       const savedJournal = readAssetJournal(localStorage.getItem(journalKey));
+      if (mainnet && (savedJournal.pending || savedJournal.failed || savedJournal.token && savedJournal.token.toLowerCase() !== ETHEREUM_USDC.toLowerCase()))
+        throw new Error('A previous demo-token setup is saved. Mainnet now uses USDC only; preserve that setup for recovery.');
       const recorded = savedJournal.pending ?? savedJournal.failed?.request;
       const artifacts = await loadTreasuryArtifacts(recorded ? { build: recorded.build } : undefined);
       const io = new DeploymentIO(target, artifacts);
@@ -75,9 +80,9 @@ function NetworkSetup({ dashboard, target, wallet, token, feesEnabled, onBridgeG
         try {
           const chosen = savedJournal.token ?? token;
           if (!isAddress(chosen)) throw new Error('The configured treasury token is not a valid L1 address.');
-          inspected = await discoverToken(io, n, getAddress(chosen), false);
+          inspected = await discoverToken(io, n, getAddress(chosen), mainnet);
           assetSymbols.current.set(chosen.toLowerCase(), inspected.discovered!);
-          if (token && !savedJournal.token && inspected.contracts.wrappedUSDC.address !== zeroAddress) {
+          if (token && (mainnet || !savedJournal.token) && inspected.contracts.wrappedUSDC.address !== zeroAddress) {
             await navigator.locks.request(storageKey, async () => {
               if (!current) return;
               if (localStorage.getItem(networkKey) || readAssetJournal(localStorage.getItem(journalKey)).pending) throw new Error('Token selection changed in another tab. Check again.');
@@ -92,7 +97,7 @@ function NetworkSetup({ dashboard, target, wallet, token, feesEnabled, onBridgeG
     return () => { current = false; };
   }, [storageKey, target, token, attempt]);
   useEffect(() => {
-    if (!base || !engine || network || journal.pending || !isAddress(candidate)) {
+    if (mainnet || !base || !engine || network || journal.pending || !isAddress(candidate)) {
       setTokenChecking(false); setTokenError('');
       return;
     }
@@ -169,6 +174,7 @@ function NetworkSetup({ dashboard, target, wallet, token, feesEnabled, onBridgeG
     localStorage.setItem(networkKey, JSON.stringify(n)); setNetwork(n);
   });
   const send = (kind: 'deploy' | 'l2', retry = false) => void run(async () => {
+    if (mainnet) throw new Error('Mainnet treasury uses USDC. Demo-token deployment is unavailable.');
     if (!engine || !base || !feesEnabled) throw new Error('Finish network checks before deploying a demo token.');
     const current = selected.current;
     const scope = generation.current;
@@ -237,7 +243,7 @@ function NetworkSetup({ dashboard, target, wallet, token, feesEnabled, onBridgeG
   const canSetup = !!network && feesEnabled && !checking && !error && !savedError;
   const failedChecks = checks.filter(check => check.error);
   const showReadiness = checking || failedChecks.length > 0 || !feesEnabled || !!error || !!savedError;
-  const showToken = base && !network && !checking || journal.failed || journal.pending || network;
+  const showToken = !mainnet && (base && !network && !checking || journal.failed || journal.pending || network);
   const selectedAsset = assetInfo?.contracts.usdcProxy.address.toLowerCase() === candidate.toLowerCase() ? assetInfo : null;
   const tokenReady = !!selectedAsset && selectedAsset.contracts.wrappedUSDC.address !== zeroAddress;
   const needsInitialization = selectedAsset?.discovered?.kind === 'demo' && !tokenReady;
