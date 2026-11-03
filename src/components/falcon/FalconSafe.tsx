@@ -743,13 +743,17 @@ export function FalconSafe({ signer, wallet, deployment, fees, onNeedSafeFactory
           else throw new Error(`Safe creation is confirmed on L1, but its selection could not be saved. Restore browser storage access; the transaction hash is retained and no new creation will be submitted. ${error instanceof Error ? error.message : ''}`);
         }
       });
-      if (sameKey(tx.publicKey)) { setChoosingSafe(false); setExistingSafe(false); setAttachmentRevision(value => value + 1); }
+      if (sameKey(tx.publicKey)) {
+        setChoosingSafe(false); setExistingSafe(false);
+        // Canonical confirmation already verified this Safe; only a different selection needs discovery.
+        if (keptOtherSelection) setAttachmentRevision(value => value + 1);
+      }
     }
     if (!mounted.current) return;
     setL1Hash(settlement.l1TransactionHash);
     if (sameKey(tx.publicKey)) {
       // With another selection kept, discovery reloads that Safe instead of showing the new one.
-      if (!keptOtherSelection) setRemote(target);
+      if (!keptOtherSelection) { setRemote(target); setSafeLoadError(null); }
       setObservation('Canonical L1 execution');
     }
     if (!signal.aborted && currentDeployment.current === deployment) setCosts(before => before?.sourceHash === tx.hash && before.receiptFee ? {
