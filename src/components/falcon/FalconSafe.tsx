@@ -15,7 +15,7 @@ import { canonicalReceipt, checkChain, checkComposer, controllerClient, createL1
 import { type SafeCostEvidence } from '../../lib/falcon/safeCosts.ts';
 import { SafeCostComparison } from './SafeCostComparison.tsx';
 import { ExistingFalconSafe } from './ExistingFalconSafe';
-import { attachmentKey, readAttachment, saveAttachment } from '../../lib/falcon/existingSafe';
+import { attachmentKey, readAttachment, selectFactorySafe } from '../../lib/falcon/existingSafe';
 import { loadSafeAccount } from '../../lib/falcon/safeDiscovery';
 import { SafeFeeQuote } from './SafeFeeQuote.tsx';
 import { fetchFeeQuote, feeErrorMessage, recoverFeeTransaction, StaleFeeQuote, submitFeeQuote, UnknownFeeSubmission, type FeeConfig, type FeeIntent, type FeeTransaction, type QuotedFee } from '../../lib/falcon/l2Fees.ts';
@@ -525,10 +525,9 @@ export function FalconSafe({ signer, wallet, deployment, fees, onNeedSafeFactory
       key.assertCurrent();
       if (currentDeployment.current !== deployment) throw new Error('Network changed. Load your Safe again.');
       if (current.target) {
-        const attachment = { target: current.target };
         await navigator.locks.request(attachmentStorageKey, () => {
           key.assertCurrent(); signal.throwIfAborted();
-          saveAttachment(localStorage, attachmentStorageKey, attachment, previousSelection);
+          selectFactorySafe(localStorage, attachmentStorageKey, previousSelection);
         });
         selectSafe();
         setNotice({ kind: 'valid', text: 'Factory Safe selected. Your Falcon controller is unchanged.' }); return;
@@ -714,7 +713,7 @@ export function FalconSafe({ signer, wallet, deployment, fees, onNeedSafeFactory
       const key = attachmentKey(deployment, tx.publicKey);
       await navigator.locks.request(key, () => {
         signal.throwIfAborted();
-        saveAttachment(localStorage, key, { target: target.target! }, tx.prepared.operation.kind === 'create' ? tx.prepared.operation.attachmentBefore : undefined);
+        selectFactorySafe(localStorage, key, tx.prepared.operation.kind === 'create' ? tx.prepared.operation.attachmentBefore : undefined);
       });
       if (sameKey(tx.publicKey)) { setChoosingSafe(false); setExistingSafe(false); setAttachmentRevision(value => value + 1); }
     }

@@ -30,6 +30,13 @@ export function saveAttachment(storage: Pick<Storage, 'getItem' | 'setItem'>, ke
   }
   storage.setItem(key, JSON.stringify(next));
 }
+/** Under the same selection lock, return to on-chain factory discovery. */
+export function selectFactorySafe(storage: Pick<Storage, 'getItem' | 'removeItem'>, key: string, expectedRaw?: string | null) {
+  const current = storage.getItem(key);
+  if (current === null) return;
+  if (current !== expectedRaw) throw new Error('Another Safe was selected. Review the current selection before switching.');
+  storage.removeItem(key);
+}
 /** No wallet-owner signature is needed when the selected controller already has authority. */
 export async function inspectSafeSelection(client: EezClient, d: CrossChainDeployment, controller: Address, target: Address, signal: AbortSignal) {
   await checkChain(client, d.l1);
