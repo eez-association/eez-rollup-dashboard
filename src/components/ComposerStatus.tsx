@@ -89,7 +89,7 @@ export function ComposerStatus({ connection, checking, onRecheck, walletName, on
   return <section className={`${styles.panel} ${variant === "notice" ? styles.notice : ""} ${warning ? styles.warning : ""} ${failed ? styles.failed : ""}`}
     ref={panel} tabIndex={-1} aria-label="Wallet Composer connection">
     <div className={styles.heading} role="status">
-      <span className={!warning ? styles.detected : ""}>{requiredMismatch ? "Select the bridge source network" : labels[connection.status]}</span>
+      <span className={!warning ? styles.detected : ""}>{checking ? "Checking Composer…" : requiredMismatch ? "Select the bridge source network" : labels[connection.status]}</span>
       {network && <span className={`${styles.network} ${l1 ? styles.l1 : styles.l2}`}>{network}</span>}
     </div>
     {variant === "notice" && warning && <p className={styles.required}>
@@ -102,7 +102,7 @@ export function ComposerStatus({ connection, checking, onRecheck, walletName, on
     <div className={styles.actions}>
       {warning && rpcUrl && onConnectNetwork && <button type="button" className="btn btn-primary btn-sm"
         onClick={() => { void onConnectNetwork(); }} disabled={connectingNetwork || checking}>
-        {connectingNetwork ? "Check your wallet…" : "Connect network"}
+        {connectingNetwork ? "Check your wallet…" : requiredMismatch ? "Switch to source network" : "Connect network"}
       </button>}
       <button type="button" className="btn btn-outline btn-sm" onClick={onRecheck} disabled={checking || connectingNetwork}
         aria-label="Recheck wallet Composer connection">{checking ? "Checking…" : "Recheck"}</button>

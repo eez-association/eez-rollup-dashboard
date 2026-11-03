@@ -810,11 +810,13 @@ export function FalconSafe({ signer, wallet, deployment, fees, onNeedSafeFactory
           <button id="safe-create" className={`btn btn-solid ${styles.action}`} disabled={unavailable || ownerPending} aria-busy={setupRunning} onClick={() => void createSafe()}>
             {setupRunning ? 'Preparing Safe…' : choosingSafe ? 'Create or find factory Safe' : 'Create a Safe'}
           </button>
-          <button className={`btn btn-solid ${styles.action}`} disabled={unavailable || ownerPending} onClick={() => setExistingSafe(true)}>Use an existing Safe</button>
+          <button className={`btn btn-solid ${styles.action}`} disabled={unavailable || ownerPending} onClick={() => setExistingSafe(true)}>Add to existing Safe</button>
         </div>}
         {choosingSafe && <>
           <p className={styles.hint}>Reuse the same Falcon controller with another Safe. This replaces the demo’s selection; the previous Safe and its owners stay unchanged. The factory option finds its recorded Safe, or creates one if none exists.</p>
-          {!existingSafe && <button className="btn btn-outline" disabled={unavailable || ownerPending} onClick={() => setChoosingSafe(false)}>Keep current Safe</button>}
+          {!existingSafe && <button className="btn btn-outline" disabled={unavailable || ownerPending} onClick={() => {
+            setChoosingSafe(false); setRemote(null); setLoadingSafe(true); setAttachmentRevision(value => value + 1);
+          }}>Keep current Safe</button>}
         </>}
         {!existingSafe && <SafeFeeQuote fee={fee} config={fees} />}
       </>}
@@ -917,7 +919,7 @@ export function FalconSafe({ signer, wallet, deployment, fees, onNeedSafeFactory
       </section> : null}
       <details className={styles.details}><summary>Contracts &amp; authority</summary>
         <p className={styles.hint}>{observation} · Controller nonce {controller.nonce.toString()}.</p>
-        <p className={styles.hint}>{remote.attachment ? 'At last check, Falcon was an additional owner with threshold 1; each owner can execute independently. Existing modules and settings are preserved.' : 'At last check, the controller’s L1 proxy was the sole owner, with no modules or guard.'} Keep your encrypted Falcon backup.</p>
+        <p className={styles.hint}>{remote.attachment ? 'At last check, the Falcon controller proxy was an owner with threshold 1. Each owner can execute independently. Existing modules and settings are preserved.' : 'At last check, the controller’s L1 proxy was the sole owner, with no modules or guard.'} Keep your encrypted Falcon backup.</p>
         <p className={styles.contractDetails}><a id="safe-controller" href={`${deployment.l2.explorer}/address/${controller.controller}`} target="_blank" rel="noreferrer">L2 controller · {controller.controller}</a></p>
         <p className={styles.contractDetails}><a href={`${deployment.l1.explorer}/address/${remote.owner}`} target="_blank" rel="noreferrer">L1 owner proxy · {remote.owner}</a></p>
       </details>

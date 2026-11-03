@@ -42,9 +42,10 @@ export async function inspectSafeSelection(client: EezClient, d: CrossChainDeplo
   await checkChain(client, d.l1);
   const block = await client.getBlockNumber();
   const owner = await controllerOwner(client, d, controller, block);
-  const safe = await inspectExistingSafe(client, target, signal, block, owner);
-  if (safe.threshold !== 1) throw new Error('Falcon signing requires a Safe with threshold 1.');
-  if (!safe.owners.some(existing => sameAddress(existing, owner))) return null;
+  // This first read is only a route hint. Existing authority is accepted only
+  // after loadRemoteSafe validates implementation, threshold and proxy binding.
+  const owners = await client.readContract({ address: target, abi: safeAbi, functionName: 'getOwners', blockNumber: block });
+  if (!owners.some(existing => sameAddress(existing, owner))) return null;
   const attachment = { target };
   return loadRemoteSafe(client, d, controller, signal, block, attachment);
 }

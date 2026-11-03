@@ -428,7 +428,13 @@ export function App() {
       {wallet.isConnected && <ComposerStatus connection={wallet.composerConnection}
         requiredChainId={bridgeActive ? bridgeSourceChain.chainId : undefined} attentionRequest={composerAttention}
         checking={wallet.checkingComposer} onRecheck={wallet.recheckComposer} walletName={wallet.walletName} variant="notice"
-        onConnectNetwork={wallet.connectComposer} connectingNetwork={wallet.connectingComposer} setupMessage={wallet.composerSetupMessage} />}
+        onConnectNetwork={async () => {
+          if (bridgeActive && (!wallet.chainId || BigInt(wallet.chainId) !== BigInt(bridgeSourceChain.chainId))) {
+            await switchBridgeNetwork(bridgeFromL1 ? "l1" : "l2");
+            return;
+          }
+          await wallet.connectComposer();
+        }} connectingNetwork={wallet.connectingComposer} setupMessage={wallet.composerSetupMessage} />}
 
       {view === "monitor" ? (
         <NetworkMonitorView />

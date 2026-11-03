@@ -2,6 +2,7 @@
 // Requires Playwright + Chromium. All RPC/config responses are mocked; no transactions are sent.
 const assert = require('node:assert/strict');
 const { chromium } = require('playwright');
+const { composerResponse } = require('./composer-fixture.cjs');
 
 const origin = process.env.EEZ_UI_URL || 'http://127.0.0.1:8080';
 const bridge = { l1: '0x' + '11'.repeat(20), l2: '0x' + '22'.repeat(20) };
@@ -29,15 +30,17 @@ async function until(predicate, message) {
 async function fixture(browser, options = {}) {
   const context = await browser.newContext();
   const page = await context.newPage();
+  await page.exposeFunction('bridgeComposerDiscovery', data => composerResponse(data, '0x27d8'));
   await page.clock.install();
   const errors = [], writes = [], calls = [];
   const modes = { l1: 'ready', l2: 'ready', ...options.modes };
   let configRequested = false;
   page.on('pageerror', error => errors.push(error.message));
   await page.addInitScript(() => {
-    window.ethereum = { isRabby: true, on() {}, removeListener() {}, async request({ method }) {
+    window.ethereum = { isRabby: true, on() {}, removeListener() {}, async request({ method, params }) {
       if (method === 'eth_requestAccounts' || method === 'eth_accounts') return ['0x' + '77'.repeat(20)];
       if (method === 'eth_chainId') return '0x27d8';
+      if (method === 'eth_call') return window.bridgeComposerDiscovery(params[0].data);
       if (method === 'wallet_addEthereumChain' || method === 'wallet_switchEthereumChain') return null;
       throw new Error('Unexpected wallet operation: ' + method);
     } };

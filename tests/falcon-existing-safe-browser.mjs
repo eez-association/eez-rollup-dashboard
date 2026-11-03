@@ -122,7 +122,7 @@ async function rpc({method,params=[],chain,walletRead=false}) {
   assert.equal(await page.locator('#falcon-infrastructure').count(),0,'L2 infrastructure is enough to choose an existing Safe');
   await page.locator('[aria-labelledby="safe-heading"]').screenshot({path:'/tmp/falcon-safe-choices.png'});
   await page.getByRole('button',{name:'Add to existing Safe',exact:true}).click(); } catch(error) { console.error(await page.locator('body').innerText()); throw error; }
- const input=page.getByLabel('L1 Safe address',{exact:true}),add=page.getByRole('button',{name:'Add Falcon controller',exact:true});
+ const input=page.getByLabel('L1 Safe address',{exact:true}),add=page.getByRole('button',{name:'Use this Safe',exact:true});
  assert.equal((await input.inputValue()).toLowerCase(),safe.toLowerCase(),'Treasury L1 address is prefilled, not its mirror');
  await page.locator('[aria-labelledby="safe-heading"]').screenshot({path:'/tmp/falcon-add-controller.png'});
  assert.equal(await page.getByText(/Gas wallet ·/).count(),0);
@@ -185,6 +185,9 @@ async function rpc({method,params=[],chain,walletRead=false}) {
  await release();await status('wallet');
  const journalKey=scopedRecoveryKey(recoveryKey(d,'owner'),{account,publicKey});
  await page.waitForFunction(key=>!!localStorage.getItem(key),journalKey);
+ // The recovery journal is deliberately persisted before opening the wallet.
+ // Wait for the actual submission, not merely that earlier storage write.
+ await page.waitForFunction(()=>window.existingSafeWallet.loseReply===false);
  assert.equal(sends.length,1);await page.waitForFunction(()=>document.querySelector('#falcon-existing-safe')?.disabled);
  const savedRequest=await page.evaluate(key=>localStorage.getItem(key),journalKey);
  await page.evaluate(({key,other})=>{const record=JSON.parse(localStorage.getItem(key));record.account=other;localStorage.setItem(key,JSON.stringify(record));},{key:journalKey,other:a(999)});
