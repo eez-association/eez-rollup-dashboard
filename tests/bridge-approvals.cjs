@@ -46,15 +46,21 @@ const success = { status: '0x1', blockNumber: '0x10', blockHash: '0x' + '55'.rep
       await f.page.getByRole('button', { name: 'Done', exact: true }).click();
       await until(() => f.button.isEnabled(), 'Confirmed approval must resume transfer preparation');
       assert.equal(await f.page.getByLabel('Bridge amount', { exact: true }).inputValue(), amount);
-      assert.ok(estimates(f).length > 0);
-      if (feesEnabled) await until(() => quotes(f).length > 0, 'Confirmed approval must start the fee quote');
-      else assert.equal(quotes(f).length, 0);
+      if (feesEnabled) {
+        await until(() => quotes(f).length > 0, 'Confirmed approval must start the fee quote');
+        assert.equal(estimates(f).length, 0, 'Compact quotes resolve gas without a separate estimate');
+      } else {
+        assert.ok(estimates(f).length > 0);
+        assert.equal(quotes(f).length, 0);
+      }
 
       const prepared = estimates(f).length;
+      const preparedQuotes = quotes(f).length;
       await f.page.getByLabel('Bridge amount', { exact: true }).fill('2');
       await f.page.getByRole('button', { name: 'Approve TOKEN', exact: true }).waitFor();
       await new Promise(resolve => setTimeout(resolve, 1000));
       assert.equal(estimates(f).length, prepared, 'A larger amount needs a new approval first');
+      assert.equal(quotes(f).length, preparedQuotes, 'Do not quote a larger transfer before its approval');
       assert.equal(await gasErrors(f).count(), 0);
       assert.equal(await f.page.evaluate(() => window.walletRequests.length), 1, 'Amount edits do not submit an approval');
       assert.deepEqual(f.errors, []);
