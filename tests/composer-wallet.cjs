@@ -263,7 +263,7 @@ async function fixture(browser, options = {}) {
         const matches = getComputedStyle(el).color === getComputedStyle(expected).color;
         expected.remove();
         return matches;
-      }, mode === 'error' ? '--red' : '--yellow'), true, 'RPC failures use red; setup warnings use amber');
+      }, '--red'), true, 'RPC failures and Composer setup warnings must both be prominent red');
       await failed.menu.getByRole('button', { name: 'Copy RPC URL' }).click();
       assert.equal((await failed.page.evaluate(() => window.copiedURLs)).at(-1), new URL('/composer/l1', origin).href);
       await failed.close(); passed++;
