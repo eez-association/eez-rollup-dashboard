@@ -11,7 +11,12 @@
 .l2 { color: var(--chain-l2); }
 .detected { color: var(--green); }
 .warning .heading > span:first-child { color: var(--red); font-weight: 700; }
-.required { color: var(--red); font-weight: 600; margin: var(--sp-2) 0 0; }
+.required { color: var(--red); font-weight: 600; margin: var(--sp-2) 0 0; max-width: 75ch; }
+.required p { margin: 0; }
+.requiredSteps { margin: var(--sp-2) 0 0; padding-left: var(--sp-5); }
+.requiredSteps li + li { margin-top: var(--sp-1); }
+.requiredSteps strong { font-weight: 700; }
+.rpcLabel { flex-basis: 100%; font: 500 12px/1.5 var(--mono); color: var(--text-dim); }
 .failed .heading > span:first-child { color: var(--red); }
 .detail { margin: var(--sp-2) 0 0; color: var(--text-dim); overflow-wrap: anywhere; max-width: 75ch; }
 .instructions { margin: var(--sp-3) 0 0; padding-left: var(--sp-5); color: var(--text-dim); overflow-wrap: anywhere; max-width: 75ch; }

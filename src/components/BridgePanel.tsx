@@ -245,7 +245,9 @@ export function BridgePanel({
         </>
       )}
 
-      {disabledReason && <div className={!walletAddress ? styles.sectionHint : styles.validationHint} role="status">{disabledReason}</div>}
+      {walletAddress && composerBlocked && !busy && !verifyingComposer ? <div className={styles.validationHint} role="status">
+        Your wallet is not sending through the EEZ Composer RPC for this network yet. Click {actionLabel} to see the setup steps.
+      </div> : disabledReason && <div className={!walletAddress ? styles.sectionHint : styles.validationHint} role="status">{disabledReason}</div>}
 
       {choosingWallet && <div className={styles.walletPicker} role="group" aria-label="Choose a wallet"
         onKeyDown={event => { if (event.key === "Escape") { event.preventDefault(); setChoosingWallet(false); connectButton.current?.focus(); } }}>

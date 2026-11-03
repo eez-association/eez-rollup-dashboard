@@ -114,18 +114,23 @@ export function App() {
   const bridgeVerificationPending = useRef(false);
   const currentWallet = useRef(wallet);
   currentWallet.current = wallet;
-  const bridgeComposerReady = !wallet.checkingComposer && !wallet.connectingComposer
+  const bridgeSourceSelected = wallet.chainId !== null && BigInt(wallet.chainId) === BigInt(bridgeSourceChain.chainId);
+  // Background rechecks keep the last result, so they do not toggle readiness.
+  // Every bridge click still verifies Composer again before submitting.
+  const bridgeComposerReady = !wallet.connectingComposer && bridgeSourceSelected
     && wallet.composerConnection.status === "detected"
     && wallet.composerConnection.chainId !== null
-    && BigInt(wallet.composerConnection.chainId) === BigInt(bridgeSourceChain.chainId)
-    && wallet.chainId !== null && BigInt(wallet.chainId) === BigInt(bridgeSourceChain.chainId);
+    && BigInt(wallet.composerConnection.chainId) === BigInt(bridgeSourceChain.chainId);
+  // No result yet: let the click run the first verification instead of blocking.
+  const bridgeComposerUnknown = !wallet.connectingComposer && bridgeSourceSelected && wallet.composerConnection.status === "idle";
+  const bridgeComposerBlocked = !bridgeComposerReady && !bridgeComposerUnknown;
 
   const txHistory = useTxHistory();
   const latestBridgeState = useRef(bridgeHook.state);
   latestBridgeState.current = bridgeHook.state;
   const bridgeWithComposer = async () => {
     if (bridgeVerificationPending.current) return;
-    if (!bridgeComposerReady) {
+    if (bridgeComposerBlocked) {
       setComposerAttention(value => value + 1);
       return;
     }
@@ -509,7 +514,7 @@ export function App() {
                     onSetMax={bridgeHook.setMax}
                     onApprove={bridgeHook.approve}
                     onBridge={() => { void bridgeWithComposer(); }}
-                    composerBlocked={!bridgeComposerReady}
+                    composerBlocked={bridgeComposerBlocked}
                     verifyingComposer={verifyingBridgeComposer}
                     onDismiss={bridgeHook.dismiss}
                     onGasOverride={bridgeHook.setGasOverride}

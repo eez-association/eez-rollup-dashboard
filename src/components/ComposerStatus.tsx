@@ -32,7 +32,9 @@ export function ComposerStatus({ connection, checking, onRecheck, walletName, on
     try { return connection.chainId !== null && BigInt(id) === BigInt(connection.chainId); }
     catch { return false; }
   };
-  const requiredMismatch = !!requiredChainId && !isChain(requiredChainId);
+  // "idle" means no result yet: not a failure, so it must not raise the red notice.
+  const known = connection.status !== "idle";
+  const requiredMismatch = !!requiredChainId && known && !isChain(requiredChainId);
   const l1 = requiredChainId ? BigInt(requiredChainId) === BigInt(L1_CHAIN.chainId) : isChain(L1_CHAIN.chainId);
   const supported = !!requiredChainId || l1 || isChain(L2_CHAIN.chainId);
   const rpcUrl = supported ? (l1 ? config.l1ProxyRpc : config.l2ProxyRpc) : "";
@@ -41,7 +43,8 @@ export function ComposerStatus({ connection, checking, onRecheck, walletName, on
   const ethereumMainnet = l1 && chainId === "1";
   const rabby = /rabby/i.test(walletName ?? "");
   const metamask = /metamask/i.test(walletName ?? "");
-  const warning = requiredMismatch || checking || connectingNetwork || connection.status !== "detected";
+  // Background rechecks keep the last result on screen; only a known problem warns.
+  const warning = requiredMismatch || connectingNetwork || (known && connection.status !== "detected");
   const failed = connection.status === "unavailable";
 
   useEffect(() => { setCopy(""); }, [rpcUrl]);
@@ -54,7 +57,7 @@ export function ComposerStatus({ connection, checking, onRecheck, walletName, on
   }, [attentionRequest]);
 
   if (variant === "notice" && !warning) return null;
-  const instructions = <>
+  const steps = <>
     {warning && <p className={styles.detail}>{connection.detail}</p>}
     {connection.status === "unsupported-network" && <p className={styles.detail}>
       Switch to {config.l1NetworkName} or {config.rollupName} to check the wallet RPC.
@@ -78,29 +81,41 @@ export function ComposerStatus({ connection, checking, onRecheck, walletName, on
     </ol> : <p className={styles.detail}>
       Set this URL for {network} in your wallet’s network/RPC settings, save, then recheck.
     </p>)}
-    {warning && rpcUrl && <div className={styles.rpc}>
-      <code>{rpcUrl}</code>
-      <button type="button" className="btn btn-outline btn-sm" onClick={() => {
-        if (!navigator.clipboard) { setCopy("Select the URL to copy"); return; }
-        void navigator.clipboard.writeText(rpcUrl).then(() => setCopy("Copied"), () => setCopy("Select the URL to copy"));
-      }}>{copy || "Copy RPC URL"}</button>
-    </div>}
   </>;
+  // Rabby cannot be configured by the dashboard, so copying the URL is its main action.
+  const copyFirst = rabby && !requiredMismatch;
+  const rpcBlock = warning && rpcUrl && <div className={styles.rpc}>
+    <span className={styles.rpcLabel}>Composer RPC URL for {network}</span>
+    <code>{rpcUrl}</code>
+    <button type="button" className={`btn ${copyFirst ? "btn-primary" : "btn-outline"} btn-sm`} onClick={() => {
+      if (!navigator.clipboard) { setCopy("Select the URL to copy"); return; }
+      void navigator.clipboard.writeText(rpcUrl).then(() => setCopy("Copied"), () => setCopy("Select the URL to copy"));
+    }}>{copy || "Copy RPC URL"}</button>
+  </div>;
+  const lead = requiredChainId
+    ? "Bridging is blocked. Your wallet must send bridge transactions through the EEZ Composer RPC."
+    : "Your wallet is not using the EEZ Composer RPC.";
   return <section className={`${styles.panel} ${variant === "notice" ? styles.notice : ""} ${warning ? styles.warning : ""} ${failed ? styles.failed : ""}`}
     ref={panel} tabIndex={-1} aria-label="Wallet Composer connection">
     <div className={styles.heading} role="status">
-      <span className={!warning ? styles.detected : ""}>{checking ? "Checking Composer…" : requiredMismatch ? "Select the bridge source network" : labels[connection.status]}</span>
+      <span className={!warning ? styles.detected : ""}>{connectingNetwork ? "Waiting for your wallet…" : requiredMismatch ? "Select the bridge source network" : labels[connection.status]}</span>
       {network && <span className={`${styles.network} ${l1 ? styles.l1 : styles.l2}`}>{network}</span>}
     </div>
-    {variant === "notice" && warning && <p className={styles.required}>
-      Bridging is blocked until Composer is verified. {requiredMismatch && <>Switch your wallet to {network}. </>}
-      Set your wallet’s active RPC to the Composer URL below, then click Recheck.
-    </p>}
-    {variant === "notice" ? <details className={styles.settings}>
-      <summary>{rabby ? "Rabby RPC setup" : metamask ? "MetaMask RPC setup" : "Wallet RPC settings"}</summary>{instructions}
-    </details> : instructions}
+    {variant === "notice" && warning && <div className={styles.required}>
+      <p>{lead}{!requiredMismatch && rpcUrl && <> Set the RPC for {network} in your wallet to the URL below, then click Recheck.</>}</p>
+      {requiredMismatch && <ol className={styles.requiredSteps}>
+        <li>Switch your wallet to <strong>{network}</strong>.</li>
+        <li>Set that network’s RPC to the Composer URL below, then click <strong>Recheck</strong>.</li>
+      </ol>}
+    </div>}
+    {variant === "notice" ? <>
+      {rpcBlock}
+      <details className={styles.settings}>
+        <summary>{rabby ? "Rabby RPC setup" : metamask ? "MetaMask RPC setup" : "Wallet RPC settings"}</summary>{steps}
+      </details>
+    </> : <>{steps}{rpcBlock}</>}
     <div className={styles.actions}>
-      {warning && rpcUrl && onConnectNetwork && <button type="button" className="btn btn-primary btn-sm"
+      {warning && rpcUrl && onConnectNetwork && <button type="button" className={`btn ${copyFirst ? "btn-outline" : "btn-primary"} btn-sm`}
         onClick={() => { void onConnectNetwork(); }} disabled={connectingNetwork || checking}>
         {connectingNetwork ? "Check your wallet…" : requiredMismatch ? "Switch to source network" : "Connect network"}
       </button>}
