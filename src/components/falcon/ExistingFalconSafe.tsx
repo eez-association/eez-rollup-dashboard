@@ -7,7 +7,7 @@ import type { CrossChainDeployment } from '../../lib/falcon/crossChainDeployment
 import { eezClient } from '../../lib/falcon/eez';
 import { falconReadProvider, confirmationDelay } from '../../lib/falcon/readOnly';
 import { checkChain, FalconTransactionReverted, sameAddress, type ControllerState } from '../../lib/falcon/l1Controller';
-import { attachmentKey, findOwnerRecovery, inspectSafeSelection, prepareOwnerAddition, saveAttachment, treasurySafeSuggestion, verifyOwnerAddition } from '../../lib/falcon/existingSafe';
+import { attachmentKey, findOwnerRecovery, inspectSafeSelection, prepareOwnerAddition, saveAttachment, selectFactorySafe, SafeSelectionConflict, treasurySafeSuggestion, verifyOwnerAddition } from '../../lib/falcon/existingSafe';
 import { recoveryKey, type RecoveryAttempt } from '../../lib/falcon/recoveryJournal';
 import { encodeSafeExecution, packEOAApprovals, safeTransactionHash, safeTypedDataJSON } from '../../lib/treasury/safeTransactions';
 import { UnknownFeeSubmission } from '../../lib/falcon/l2Fees';
@@ -23,6 +23,9 @@ export function ExistingFalconSafe({ wallet, deployment, controller, publicKey, 
     try { return treasurySafeSuggestion(localStorage, deployment); } catch { return ''; }
   });
   const [busy, setBusy] = useState(false), [message, setMessage] = useState('');
+  const [selectionConflict, setSelectionConflict] = useState<{ attempt: RecoveryAttempt; attachment: SafeAttachment } | null>(null);
+  const conflict = selectionConflict?.attempt.id === journal.attempt?.id
+    && selectionConflict?.attempt.hash === journal.attempt?.hash ? selectionConflict : null;
   const active = useRef(false), currentAddress = useRef(address); currentAddress.current = address;
   const abortRef = useRef<AbortController | null>(null);
   const callbacks = useRef({ onAttached, isCurrent }); callbacks.current = { onAttached, isCurrent };
@@ -44,7 +47,7 @@ export function ExistingFalconSafe({ wallet, deployment, controller, publicKey, 
   }
   useEffect(() => {
     const attempt = journal.attempt;
-    if (!attempt || busy) return;
+    if (!attempt || busy || conflict) return;
     const abort = new AbortController();
     void (async () => {
       while (!abort.signal.aborted) {
@@ -70,11 +73,21 @@ export function ExistingFalconSafe({ wallet, deployment, controller, publicKey, 
             abort.signal.throwIfAborted();
             // Store before clearing recovery, so a storage failure never loses the confirmed Safe.
             const key = attachmentKey(deployment, publicKey);
-            await navigator.locks.request(key, () => {
-              abort.signal.throwIfAborted();
-              saveAttachment(localStorage, key, attachment, attempt.attachmentBefore);
-            });
+            try {
+              await navigator.locks.request(key, () => {
+                abort.signal.throwIfAborted();
+                saveAttachment(localStorage, key, attachment, attempt.attachmentBefore);
+              });
+            } catch (error) {
+              if (!(error instanceof SafeSelectionConflict)) throw error;
+              if (abort.signal.aborted) return;
+              setSelectionConflict({ attempt, attachment });
+              setMessage('The owner addition is confirmed, but another Safe was selected. Choose which selection to keep. No transaction will be sent.');
+              return;
+            }
             await journal.finish(attempt.id);
+            // This panel stays mounted while hidden; do not keep a finished status for the next visit.
+            setMessage('');
             if (!abort.signal.aborted && callbacks.current.isCurrent()) callbacks.current.onAttached(attachment);
             return;
           }
@@ -87,7 +100,7 @@ export function ExistingFalconSafe({ wallet, deployment, controller, publicKey, 
       }
     })().catch(() => {});
     return () => abort.abort();
-  }, [journal.attempt, deployment, controller.controller, busy, publicKey]);
+  }, [journal.attempt, deployment, controller.controller, busy, publicKey, conflict]);
 
   async function run(action: (signal: AbortSignal) => Promise<void>) {
     if (active.current) return;
@@ -101,6 +114,32 @@ export function ExistingFalconSafe({ wallet, deployment, controller, publicKey, 
       abort.abort();
     }
   }
+  function resolveSelection(useConfirmed: boolean) {
+    return run(async signal => {
+      if (!conflict) return;
+      const { attempt } = conflict;
+      assertAttempt(attempt);
+      const key = attachmentKey(deployment, publicKey);
+      const expected = localStorage.getItem(key);
+      const client = clientFor(signal);
+      const attachment = await verifyOwnerAddition(client, deployment, attempt, signal);
+      const selected = useConfirmed
+        ? await inspectSafeSelection(client, deployment, controller.controller, attachment.target, signal) : null;
+      if (useConfirmed && !selected?.target) throw new Error('The confirmed Safe no longer authorizes this Falcon controller.');
+      if (!callbacks.current.isCurrent()) throw new Error('Wallet or key changed. Review again.');
+      if (useConfirmed) await navigator.locks.request(key, () => {
+        signal.throwIfAborted();
+        if (!callbacks.current.isCurrent()) throw new Error('Wallet or key changed. Review again.');
+        if (selected!.attachment) saveAttachment(localStorage, key, selected!.attachment, expected);
+        else selectFactorySafe(localStorage, key, expected);
+      });
+      // Explicitly acknowledge the verified request, comparing its hash and ID.
+      await journal.resolve(attempt);
+      setSelectionConflict(null);
+      setMessage(useConfirmed ? '' : `Owner addition confirmed for ${attachment.target}. Your current Safe selection was kept.`);
+      if (useConfirmed && callbacks.current.isCurrent()) callbacks.current.onAttached(attachment);
+    });
+  }
   function addOwner() {
     return run(async signal => {
       if (disabled || journal.attempt || journal.error || !wallet.address) return;
@@ -112,14 +151,17 @@ export function ExistingFalconSafe({ wallet, deployment, controller, publicKey, 
       setMessage('Checking the Safe and Falcon controller…');
       const selected = await inspectSafeSelection(client, deployment, controller.controller, target, signal);
       if (!current()) throw new Error('Wallet, key or Safe changed. Review again.');
-      if (selected?.attachment) {
+      if (selected?.target) {
+        // No `attachment` means this is the factory Safe: clear the external selection.
         const attachment = selected.attachment;
         const key = attachmentKey(deployment, publicKey);
         await navigator.locks.request(key, () => {
           if (!current()) throw new Error('Wallet, key or Safe changed. Review again.');
-          saveAttachment(localStorage, key, attachment, attachmentBefore);
+          if (attachment) saveAttachment(localStorage, key, attachment, attachmentBefore);
+          else selectFactorySafe(localStorage, key, attachmentBefore);
         });
-        if (current()) callbacks.current.onAttached(attachment);
+        setMessage('');
+        if (current()) callbacks.current.onAttached(attachment ?? { target: selected.target });
         return;
       }
       const session = await wallet.getSession(signal, deployment.l1);
@@ -167,6 +209,10 @@ export function ExistingFalconSafe({ wallet, deployment, controller, publicKey, 
       <button className={`btn btn-solid ${styles.action}`} disabled={disabled || busy || !!journal.attempt || !!journal.error || !wallet.address} onClick={() => void addOwner()}>{busy ? 'Checking Safe…' : 'Use this Safe'}</button>
     </div>
     {(message || journal.error) && <p role="status" className={styles.status}>{journal.error || message}</p>}
+    {conflict && <div className={styles.safeChoices} role="group" aria-label="Resolve confirmed Safe selection">
+      <button className="btn btn-outline" disabled={busy || !!journal.error} onClick={() => void resolveSelection(false)}>Keep current selection</button>
+      <button className="btn btn-solid" disabled={busy || !!journal.error} onClick={() => void resolveSelection(true)}>Use confirmed Safe</button>
+    </div>}
     {journal.attempt?.hash && <a href={`${deployment.l1.explorer}/tx/${journal.attempt.hash}`} target="_blank" rel="noreferrer">L1 owner transaction</a>}
   </div>;
 }

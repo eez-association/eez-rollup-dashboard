@@ -1,8 +1,8 @@
-import { encodeFunctionData, getAddress, isAddress, parseAbi, type Address, type Hex } from 'viem';
+import { encodeFunctionData, getAddress, isAddress, keccak256, parseAbi, type Address, type Hex } from 'viem';
 import type { EezClient } from './eez.ts';
 import type { CrossChainDeployment } from './crossChainDeployment.ts';
 import { canonicalReceipt, checkChain, sameAddress } from './l1Controller.ts';
-import { controllerOwner, inspectExistingSafe, loadRemoteSafe, safeAbi, safeCallFields, type SafeAttachment } from './safe.ts';
+import { controllerOwner, inspectExistingSafe, loadRemoteSafe, safeAbi, safeFactoryAbi, safeCallFields, type SafeAttachment } from './safe.ts';
 import { buildSafeTransaction, safeTransactionHash } from '../treasury/safeTransactions.ts';
 import { ownerFingerprint } from '../treasury/safeSetup.ts';
 import { decodeSafeExecution } from '../treasury/safeEvents.ts';
@@ -11,6 +11,7 @@ import { checkRecoveryOutcome, findRecoveryByNonce } from './recoveryChecks.ts';
 import { matchesRecoveryTransaction, recoveryKey, type RecoveryAttempt } from './recoveryJournal.ts';
 
 const adminAbi = parseAbi(['function addOwnerWithThreshold(address owner,uint256 threshold)']);
+export class SafeSelectionConflict extends Error {}
 export const attachmentKey = (d: CrossChainDeployment, publicKey: Hex) => `${recoveryKey(d, 'owner')}:safe:${publicKey.toLowerCase()}`;
 export function readAttachment(storage: Pick<Storage, 'getItem'>, key: string): SafeAttachment | undefined {
   const raw = storage.getItem(key);
@@ -26,7 +27,7 @@ export function saveAttachment(storage: Pick<Storage, 'getItem' | 'setItem'>, ke
   const current = readAttachment(storage, key);
   const same = current && sameAddress(current.target, next.target) && (current.walletOwner ?? '').toLowerCase() === (next.walletOwner ?? '').toLowerCase();
   if (!same && (expectedRaw !== undefined ? storage.getItem(key) !== expectedRaw : !!current)) {
-    throw new Error('Another Safe was selected for this Falcon key. The confirmed owner transaction remains saved for review.');
+    throw new SafeSelectionConflict('Another Safe was selected for this Falcon key. The confirmed owner transaction remains saved for review.');
   }
   storage.setItem(key, JSON.stringify(next));
 }
@@ -34,20 +35,38 @@ export function saveAttachment(storage: Pick<Storage, 'getItem' | 'setItem'>, ke
 export function selectFactorySafe(storage: Pick<Storage, 'getItem' | 'removeItem'>, key: string, expectedRaw?: string | null) {
   const current = storage.getItem(key);
   if (current === null) return;
-  if (current !== expectedRaw) throw new Error('Another Safe was selected. Review the current selection before switching.');
+  if (current !== expectedRaw) throw new SafeSelectionConflict('Another Safe was selected. Review the current selection before switching.');
   storage.removeItem(key);
 }
-/** No wallet-owner signature is needed when the selected controller already has authority. */
+/** No wallet-owner signature is needed when the selected controller already has authority.
+ * Returns null when the owner-addition flow must review the address instead; a result
+ * without `attachment` is the factory Safe, which is selected by clearing the saved selection. */
 export async function inspectSafeSelection(client: EezClient, d: CrossChainDeployment, controller: Address, target: Address, signal: AbortSignal) {
-  await checkChain(client, d.l1);
-  const block = await client.getBlockNumber();
-  const owner = await controllerOwner(client, d, controller, block);
+  const [, block] = await Promise.all([checkChain(client, d.l1), client.getBlockNumber()]);
   // This first read is only a route hint. Existing authority is accepted only
   // after loadRemoteSafe validates implementation, threshold and proxy binding.
-  const owners = await client.readContract({ address: target, abi: safeAbi, functionName: 'getOwners', blockNumber: block });
-  if (!owners.some(existing => sameAddress(existing, owner))) return null;
-  const attachment = { target };
-  return loadRemoteSafe(client, d, controller, signal, block, attachment);
+  // A failed hint (EOA, non-Safe contract, RPC error) falls back to the owner-addition
+  // review, which reports a readable reason.
+  const [owner, owners] = await Promise.all([
+    controllerOwner(client, d, controller, block),
+    client.readContract({ address: target, abi: safeAbi, functionName: 'getOwners', blockNumber: block }).catch(() => null),
+  ]);
+  signal.throwIfAborted();
+  if (!owners?.some(existing => sameAddress(existing, owner))) return null;
+  // Identify the factory's recorded address before validating its Safe. Never
+  // reinterpret failed factory validation as permission to use external rules.
+  const cfg = d.l1.safe;
+  if (!cfg) throw new Error('Safe deployment has not been configured.');
+  const code = await client.getCode({ address: cfg.factory.address, blockNumber: block });
+  if ((!code || code === '0x') && d.walletSetup) {
+    return loadRemoteSafe(client, d, controller, signal, block, { target });
+  }
+  if (!code || keccak256(code) !== cfg.factory.runtimeCodeHash) throw new Error('Safe factory bytecode does not match this deployment.');
+  const factoryTarget = await client.readContract({ address: cfg.factory.address, abi: safeFactoryAbi,
+    functionName: 'safes', args: [owner], blockNumber: block });
+  signal.throwIfAborted();
+  if (sameAddress(factoryTarget, target)) return loadRemoteSafe(client, d, controller, signal, block);
+  return loadRemoteSafe(client, d, controller, signal, block, { target });
 }
 /** A completed, matching Treasury is an address suggestion, never an authorization. */
 export function treasurySafeSuggestion(storage: Pick<Storage, 'getItem' | 'key' | 'length'>, d: CrossChainDeployment): string {

@@ -431,7 +431,8 @@ export function App() {
       />
 
       {wallet.isConnected && <ComposerStatus connection={wallet.composerConnection}
-        requiredChainId={bridgeActive ? bridgeSourceChain.chainId : undefined} attentionRequest={composerAttention}
+        requiredChainId={bridgeActive ? bridgeSourceChain.chainId : undefined}
+        walletChainId={bridgeActive ? wallet.chainId : undefined} attentionRequest={composerAttention}
         checking={wallet.checkingComposer} onRecheck={wallet.recheckComposer} walletName={wallet.walletName} variant="notice"
         onConnectNetwork={async () => {
           if (bridgeActive && (!wallet.chainId || BigInt(wallet.chainId) !== BigInt(bridgeSourceChain.chainId))) {

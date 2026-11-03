@@ -13,6 +13,8 @@ interface Props {
   setupMessage?: string;
   variant?: "menu" | "notice";
   requiredChainId?: string;
+  /** The wallet's selected chain. The switch action uses it, so the label must too. */
+  walletChainId?: string | null;
   attentionRequest?: number;
 }
 
@@ -25,7 +27,7 @@ const labels: Record<ComposerDetection["status"], string> = {
   "unsupported-network": "Select a dashboard network",
 };
 
-export function ComposerStatus({ connection, checking, onRecheck, walletName, onConnectNetwork, connectingNetwork = false, setupMessage, variant = "menu", requiredChainId, attentionRequest = 0 }: Props) {
+export function ComposerStatus({ connection, checking, onRecheck, walletName, onConnectNetwork, connectingNetwork = false, setupMessage, variant = "menu", requiredChainId, walletChainId, attentionRequest = 0 }: Props) {
   const [copy, setCopy] = useState("");
   const panel = useRef<HTMLElement>(null);
   const isChain = (id: string) => {
@@ -35,6 +37,13 @@ export function ComposerStatus({ connection, checking, onRecheck, walletName, on
   // "idle" means no result yet: not a failure, so it must not raise the red notice.
   const known = connection.status !== "idle";
   const requiredMismatch = !!requiredChainId && known && !isChain(requiredChainId);
+  // The wallet itself is on another network (not just its RPC answering for one).
+  const walletOnRequired = () => {
+    try { return !!walletChainId && !!requiredChainId && BigInt(walletChainId) === BigInt(requiredChainId); }
+    catch { return false; }
+  };
+  // The wallet's chain is known before the first Composer result, so this need not wait.
+  const switchNeeded = walletChainId === undefined ? requiredMismatch : !!requiredChainId && !walletOnRequired();
   const l1 = requiredChainId ? BigInt(requiredChainId) === BigInt(L1_CHAIN.chainId) : isChain(L1_CHAIN.chainId);
   const supported = !!requiredChainId || l1 || isChain(L2_CHAIN.chainId);
   const rpcUrl = supported ? (l1 ? config.l1ProxyRpc : config.l2ProxyRpc) : "";
@@ -44,7 +53,7 @@ export function ComposerStatus({ connection, checking, onRecheck, walletName, on
   const rabby = /rabby/i.test(walletName ?? "");
   const metamask = /metamask/i.test(walletName ?? "");
   // Background rechecks keep the last result on screen; only a known problem warns.
-  const warning = requiredMismatch || connectingNetwork || (known && connection.status !== "detected");
+  const warning = requiredMismatch || switchNeeded || connectingNetwork || (known && connection.status !== "detected");
   const failed = connection.status === "unavailable";
 
   useEffect(() => { setCopy(""); }, [rpcUrl]);
@@ -83,7 +92,7 @@ export function ComposerStatus({ connection, checking, onRecheck, walletName, on
     </p>)}
   </>;
   // Rabby cannot be configured by the dashboard, so copying the URL is its main action.
-  const copyFirst = rabby && !requiredMismatch;
+  const copyFirst = rabby && !switchNeeded;
   const rpcBlock = warning && rpcUrl && <div className={styles.rpc}>
     <span className={styles.rpcLabel}>Composer RPC URL for {network}</span>
     <code>{rpcUrl}</code>
@@ -98,12 +107,12 @@ export function ComposerStatus({ connection, checking, onRecheck, walletName, on
   return <section className={`${styles.panel} ${variant === "notice" ? styles.notice : ""} ${warning ? styles.warning : ""} ${failed ? styles.failed : ""}`}
     ref={panel} tabIndex={-1} aria-label="Wallet Composer connection">
     <div className={styles.heading} role="status">
-      <span className={!warning ? styles.detected : ""}>{connectingNetwork ? "Waiting for your wallet…" : requiredMismatch ? "Select the bridge source network" : labels[connection.status]}</span>
+      <span className={!warning ? styles.detected : ""}>{connectingNetwork ? "Waiting for your wallet…" : switchNeeded ? "Select the bridge source network" : labels[connection.status]}</span>
       {network && <span className={`${styles.network} ${l1 ? styles.l1 : styles.l2}`}>{network}</span>}
     </div>
     {variant === "notice" && warning && <div className={styles.required}>
-      <p>{lead}{!requiredMismatch && rpcUrl && <> Set the RPC for {network} in your wallet to the URL below, then click Recheck.</>}</p>
-      {requiredMismatch && <ol className={styles.requiredSteps}>
+      <p>{lead}{!switchNeeded && rpcUrl && <> Set the RPC for {network} in your wallet to the URL below, then click Recheck.</>}</p>
+      {switchNeeded && <ol className={styles.requiredSteps}>
         <li>Switch your wallet to <strong>{network}</strong>.</li>
         <li>Set that network’s RPC to the Composer URL below, then click <strong>Recheck</strong>.</li>
       </ol>}
@@ -117,7 +126,7 @@ export function ComposerStatus({ connection, checking, onRecheck, walletName, on
     <div className={styles.actions}>
       {warning && rpcUrl && onConnectNetwork && <button type="button" className={`btn ${copyFirst ? "btn-outline" : "btn-primary"} btn-sm`}
         onClick={() => { void onConnectNetwork(); }} disabled={connectingNetwork || checking}>
-        {connectingNetwork ? "Check your wallet…" : requiredMismatch ? "Switch to source network" : "Connect network"}
+        {connectingNetwork ? "Check your wallet…" : switchNeeded ? "Switch to source network" : "Connect network"}
       </button>}
       <button type="button" className="btn btn-outline btn-sm" onClick={onRecheck} disabled={checking || connectingNetwork}
         aria-label="Recheck wallet Composer connection">{checking ? "Checking…" : "Recheck"}</button>

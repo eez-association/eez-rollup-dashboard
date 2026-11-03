@@ -198,7 +198,18 @@ async function rpc({method,params=[],chain,walletRead=false}) {
  await status('Checking automatically');assert.equal(sends.length,1,'reload never resubmits');
  assert.equal(await page.getByText('Owner transaction recovery',{exact:true}).count(),0);
  assert.equal(await page.getByLabel('Owner transaction hash',{exact:true}).count(),0);
+ // A different selection can be saved while the wallet's transaction is pending.
+ // Retain the receipt until the user explicitly resolves the selection conflict.
+ await page.evaluate(({key,target,walletOwner})=>{
+  localStorage.setItem(key,JSON.stringify({target,walletOwner}));
+  window.dispatchEvent(new StorageEvent('storage',{key,storageArea:localStorage}));
+ },{key:attachmentKey(d,publicKey),target:safe,walletOwner:other});
  owners=[owner,account,other];nonce=8n;confirmed=true;
+ await page.getByRole('group',{name:'Resolve confirmed Safe selection'}).waitFor();
+ assert.equal(sends.length,1,'a selection conflict must not resubmit the owner transaction');
+ assert(await page.evaluate(key=>!!localStorage.getItem(key),journalKey),'retain recovery until explicit acknowledgement');
+ const keepSelection=name==='MetaMask';
+ await page.getByRole('button',{name:keepSelection?'Keep current selection':'Use confirmed Safe',exact:true}).click();
  await page.getByRole('heading',{name:'Your Safe account',exact:true}).waitFor();
  assert.equal(await page.locator('#safe-address').getAttribute('title'),safe);
  await page.locator('#safe-sign').waitFor();await page.locator('#safe-send').waitFor();await page.locator('#safe-fund').waitFor();

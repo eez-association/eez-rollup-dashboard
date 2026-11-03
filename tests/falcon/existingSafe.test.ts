@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { readFileSync } from 'node:fs';
 import { encodeAbiParameters, encodeEventTopics, decodeFunctionData, keccak256, pad, toHex, zeroHash, type Address, type Hex } from 'viem';
-import { inspectSafeSelection, prepareOwnerAddition, ownerTransaction, readAttachment, saveAttachment, attachmentKey, verifyOwnerAddition } from '../../src/lib/falcon/existingSafe.ts';
+import { inspectSafeSelection, prepareOwnerAddition, ownerTransaction, readAttachment, saveAttachment, selectFactorySafe, SafeSelectionConflict, attachmentKey, verifyOwnerAddition } from '../../src/lib/falcon/existingSafe.ts';
 import { safeAbi, loadRemoteSafe, prepareSafeTransfer, hasSafeExecution, inspectExistingSafe } from '../../src/lib/falcon/safe.ts';
 import { safeTransactionHash, encodeSafeExecution } from '../../src/lib/treasury/safeTransactions.ts';
 import { loadTreasuryArtifacts } from '../../src/lib/treasury/release.ts';
@@ -19,12 +19,13 @@ const deployed = JSON.parse(readFileSync(new URL('./fixtures/deployed-code.json'
 function fixture(safeAddress = target, singletonAddress = singleton) {
  const state = { owners: [account] as Address[], threshold: 1n, nonce: 7n, chainId: d.l1.chainId, proxy: artifacts.contracts.SafeProxy!.runtime,
    implementation: artifacts.contracts.Safe!.runtime, version: '1.4.1', guard: zeroHash, moduleGuard: zeroHash, registered: false, hashMismatch: false,
+   factoryTarget: a(0), factoryCode: deployed.safeFactory.code as Hex,
    walletCode: '0x' as Hex, ownerCode: {} as Record<string, Hex>, modules: [module] as Address[] };
- const code = (address: string) => address.toLowerCase()===safeAddress.toLowerCase()?state.proxy:address.toLowerCase()===singletonAddress.toLowerCase()?state.implementation:state.ownerCode[address.toLowerCase()]??(address.toLowerCase()===account.toLowerCase()?state.walletCode:'0x');
+ const code = (address: string) => address.toLowerCase()===d.l1.safe!.factory.address.toLowerCase()?state.factoryCode:address.toLowerCase()===safeAddress.toLowerCase()?state.proxy:address.toLowerCase()===singletonAddress.toLowerCase()?state.implementation:state.ownerCode[address.toLowerCase()]??(address.toLowerCase()===account.toLowerCase()?state.walletCode:'0x');
  const block = { number:100n, hash:zeroHash, timestamp:100n };
  const reads = async ({functionName,args=[]}: {functionName:string;args?:unknown[]}) => {
   if(functionName==='getTransactionHash') return state.hashMismatch?zeroHash:safeTransactionHash(ownerTransaction({...d,l1:{...d.l1,chainId:state.chainId}},safeAddress,owner,BigInt(args[9] as bigint)));
-  return ({VERSION:state.version,getOwners:state.owners,getThreshold:state.threshold,nonce:state.nonce,getModulesPaginated:[state.modules,a(1)],computeCrossChainProxyAddress:owner,authorizedProxies:[state.registered,controller,d.l2.rollupId]} as Record<string,unknown>)[functionName];
+  return ({safes:state.factoryTarget,VERSION:state.version,getOwners:state.owners,getThreshold:state.threshold,nonce:state.nonce,getModulesPaginated:[state.modules,a(1)],computeCrossChainProxyAddress:owner,authorizedProxies:[state.registered,controller,d.l2.rollupId]} as Record<string,unknown>)[functionName];
  };
  const client = { getChainId:async()=>state.chainId, getBlock:async({blockNumber}: {blockNumber?:bigint}={})=>blockNumber===d.l1.anchor.blockNumber?{...block,hash:d.l1.anchor.blockHash}:block,
   getBlockNumber:async()=>100n, getBalance:async()=>100n, getCode:async({address}:{address:string})=>code(address), readContract:reads,
@@ -223,4 +224,42 @@ test('explicit replacement compares the reviewed selection and preserves concurr
  saved=null;
  assert.throws(()=>saveAttachment(storage,'safe',next,reviewed),/Another Safe was selected/);
  saveAttachment(storage,'safe',next,null);
+});
+
+test('selection conflicts are distinct from storage failures', () => {
+ const saved=JSON.stringify({target:other});
+ const storage={getItem:()=>saved,setItem:()=>{},removeItem:()=>{}};
+ assert.throws(()=>saveAttachment(storage,'safe',{target},null),SafeSelectionConflict);
+ assert.throws(()=>selectFactorySafe(storage,'safe',null),SafeSelectionConflict);
+ const unavailable=new Error('Storage access denied');
+ const blocked={...storage,getItem:()=>{throw unavailable;}};
+ assert.throws(()=>selectFactorySafe(blocked,'safe',saved),error=>error===unavailable);
+ assert.throws(()=>saveAttachment(blocked,'safe',{target},saved),error=>error===unavailable);
+ assert.throws(()=>selectFactorySafe({...storage,removeItem:()=>{throw unavailable;}},'safe',saved),error=>error===unavailable);
+});
+
+test('factory classification and validation errors never fall back to an external Safe', async () => {
+ const {state,client}=fixture();state.owners=[owner,account];
+ // External Safe inspection succeeds, demonstrating that fallback would mask the error.
+ assert((await inspectSafeSelection(client,d,controller,target,signal))?.attachment);
+ state.factoryCode='0x6000';
+ await assert.rejects(inspectSafeSelection(client,d,controller,target,signal),/factory bytecode/);
+ state.factoryCode=deployed.safeFactory.code;
+ const read=client.readContract;
+ const unavailable=new Error('Factory RPC unavailable');
+ Object.assign(client,{readContract:async(args:Parameters<EezClient['readContract']>[0])=>{
+   if(args.functionName==='safes')throw unavailable;
+   return read(args);
+ }});
+ await assert.rejects(inspectSafeSelection(client,d,controller,target,signal),error=>error===unavailable);
+ // Once the mapping identifies this Safe, a strict validation failure is propagated.
+ const invalid=new Error('Safe authority or configuration changed');
+ let strictValidation=false;
+ Object.assign(client,{readContract:async(args:Parameters<EezClient['readContract']>[0])=>{
+   if(args.functionName==='safes')return target;
+   if(args.functionName==='singleton'){strictValidation=true;throw invalid;}
+   return read(args);
+ }});
+ await assert.rejects(inspectSafeSelection(client,d,controller,target,signal));
+ assert(strictValidation,'factory-owned targets must enter strict factory validation');
 });
