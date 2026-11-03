@@ -7,6 +7,7 @@ import { useWallet } from "./hooks/useWallet";
 import { useCounter } from "./hooks/useCounter";
 import { useCrossChain, crossChainRoute, type CrossChainDirection } from "./hooks/useCrossChain";
 import { lookupAddressForChain } from "./lib/addressBook";
+import { sameChainId } from "./lib/composerDiscovery";
 import { useBridge } from "./hooks/useBridge";
 import { useTxHistory } from "./hooks/useTxHistory";
 import { useBlockscoutAbi } from "./hooks/useBlockscoutAbi";
@@ -114,13 +115,12 @@ export function App() {
   const bridgeVerificationPending = useRef(false);
   const currentWallet = useRef(wallet);
   currentWallet.current = wallet;
-  const bridgeSourceSelected = wallet.chainId !== null && BigInt(wallet.chainId) === BigInt(bridgeSourceChain.chainId);
+  const bridgeSourceSelected = sameChainId(wallet.chainId, bridgeSourceChain.chainId);
   // Background rechecks keep the last result, so they do not toggle readiness.
   // Every bridge click still verifies Composer again before submitting.
   const bridgeComposerReady = !wallet.connectingComposer && bridgeSourceSelected
     && wallet.composerConnection.status === "detected"
-    && wallet.composerConnection.chainId !== null
-    && BigInt(wallet.composerConnection.chainId) === BigInt(bridgeSourceChain.chainId);
+    && sameChainId(wallet.composerConnection.chainId, bridgeSourceChain.chainId);
   // No result yet: let the click run the first verification instead of blocking.
   const bridgeComposerUnknown = !wallet.connectingComposer && bridgeSourceSelected && wallet.composerConnection.status === "idle";
   const bridgeComposerBlocked = !bridgeComposerReady && !bridgeComposerUnknown;
@@ -144,8 +144,7 @@ export function App() {
           || currentWallet.current.chainId !== wallet.chainId || latest.direction !== selected.direction
           || latest.asset !== selected.asset || latest.amount !== selected.amount || latest.tokenAddress !== selected.tokenAddress
           || latest.destinationAddress !== selected.destinationAddress || latest.phase !== selected.phase) return;
-      if (connection.status !== "detected" || !connection.chainId
-          || BigInt(connection.chainId) !== BigInt(bridgeSourceChain.chainId)) {
+      if (connection.status !== "detected" || !sameChainId(connection.chainId, bridgeSourceChain.chainId)) {
         setComposerAttention(value => value + 1);
         return;
       }
@@ -435,7 +434,7 @@ export function App() {
         walletChainId={bridgeActive ? wallet.chainId : undefined} attentionRequest={composerAttention}
         checking={wallet.checkingComposer} onRecheck={wallet.recheckComposer} walletName={wallet.walletName} variant="notice"
         onConnectNetwork={async () => {
-          if (bridgeActive && (!wallet.chainId || BigInt(wallet.chainId) !== BigInt(bridgeSourceChain.chainId))) {
+          if (bridgeActive && !sameChainId(wallet.chainId, bridgeSourceChain.chainId)) {
             await switchBridgeNetwork(bridgeFromL1 ? "l1" : "l2");
             return;
           }

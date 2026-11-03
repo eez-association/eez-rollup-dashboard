@@ -43,6 +43,12 @@ function chainId(value: unknown): bigint {
   return BigInt(value);
 }
 
+/** Provider responses are untrusted; malformed IDs must not throw during render. */
+export function sameChainId(actual: unknown, expected: unknown): boolean {
+  try { return chainId(actual) === chainId(expected); }
+  catch { return false; }
+}
+
 function record(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }

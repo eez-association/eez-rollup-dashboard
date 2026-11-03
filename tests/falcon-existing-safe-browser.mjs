@@ -220,6 +220,20 @@ async function rpc({method,params=[],chain,walletRead=false}) {
  await page.screenshot({path:'/tmp/falcon-existing-safe.png',fullPage:true});
  await page.reload();await page.locator('#unlock-saved').waitFor();await page.getByLabel('Saved key password',{exact:true}).fill('existing-safe-test-password');await page.locator('#unlock-saved').click();
  await page.getByRole('heading',{name:'Your Safe account',exact:true}).waitFor();assert.equal(sends.length,1);
+ // A previously saved Safe can become invalid without invalidating the controller.
+ threshold=2n;
+ await page.reload();await page.locator('#unlock-saved').waitFor();
+ await page.getByLabel('Saved key password',{exact:true}).fill('existing-safe-test-password');await page.locator('#unlock-saved').click();
+ await page.getByRole('alert').filter({hasText:'The selected Safe could not be verified'}).waitFor();
+ assert.equal(await page.locator('#safe-sign').count(),0);
+ assert.equal(await page.locator('#safe-fund').count(),0);
+ assert.equal(await page.locator('#controller-create').count(),0,'reuse the verified controller');
+ await page.getByRole('button',{name:'Add to existing Safe',exact:true}).click();
+ threshold=1n;
+ await page.getByLabel('L1 Safe address',{exact:true}).fill(safe);
+ await page.getByRole('button',{name:'Use this Safe',exact:true}).click();
+ await page.locator('#safe-sign').waitFor();
+ assert.equal(sends.length,1,'reselecting an authorized Safe must not submit another transaction');
  assert(!reads.some(r=>r.method==='eth_call'&&eq(r.params[0].to,l2Safe)),'attachment never reads or changes the L2 mirror');
  if(d.walletSetup){
   assert(!reads.some(r=>r.method==='eth_call'&&eq(r.params[0].to,d.l1.safe.factory.address)),'existing Safe never calls the absent creation factory');

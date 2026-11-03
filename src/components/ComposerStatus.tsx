@@ -107,7 +107,7 @@ export function ComposerStatus({ connection, checking, onRecheck, walletName, on
   return <section className={`${styles.panel} ${variant === "notice" ? styles.notice : ""} ${warning ? styles.warning : ""} ${failed ? styles.failed : ""}`}
     ref={panel} tabIndex={-1} aria-label="Wallet Composer connection">
     <div className={styles.heading} role="status">
-      <span className={!warning ? styles.detected : ""}>{connectingNetwork ? "Waiting for your wallet…" : switchNeeded ? "Select the bridge source network" : labels[connection.status]}</span>
+      <span className={!warning ? styles.detected : ""}>{connectingNetwork ? "Waiting for your wallet…" : failed ? labels.unavailable : switchNeeded ? "Select the bridge source network" : labels[connection.status]}</span>
       {network && <span className={`${styles.network} ${l1 ? styles.l1 : styles.l2}`}>{network}</span>}
     </div>
     {variant === "notice" && warning && <div className={styles.required}>

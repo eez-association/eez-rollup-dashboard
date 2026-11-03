@@ -72,7 +72,7 @@ function fixture(d = crossChainDeployments[0]) {
     } as unknown as EezClient;
   };
   const l1 = client('l1'), l2 = client('l2');
-  const load = (signal = new AbortController().signal) => loadSafeAccount(l2, l1, d, publicKey, signal);
+  const load = (signal = new AbortController().signal, options: { allowUnavailableSafe?: boolean } = {}) => loadSafeAccount(l2, l1, d, publicKey, signal, undefined, options);
   return { state, calls, load, blockNumbers };
 }
 
@@ -163,6 +163,30 @@ test('a missing controller cannot bypass failed deployment checks', async () => 
 test('another lookup checks current authority instead of reusing a successful inspection', async () => {
   const f = fixture(); await f.load(); f.state.owners = [controller];
   await assert.rejects(f.load(), /authority or configuration/);
+});
+
+test('replacement discovery retains only the verified controller when Safe ownership changes', async () => {
+  const f = fixture();
+  f.state.owners = [controller];
+  const result = await f.load(undefined, { allowUnavailableSafe: true });
+  assert.equal(result.controller?.controller, controller);
+  assert.equal(result.remote, null, 'an invalid Safe must never be available for sending or funding');
+  assert.match(result.safeError!, /authority or configuration/);
+  f.state.owners = [owner];
+  const restored = await f.load(undefined, { allowUnavailableSafe: true });
+  assert.equal(restored.remote?.target, safe);
+  assert.equal(restored.safeError, undefined);
+});
+
+test('replacement discovery still rejects invalid controllers and cancelled requests', async () => {
+  const f = fixture();
+  f.state.owners = [controller];
+  f.state.values['l2.publicKeyHash'] = zeroHash;
+  await assert.rejects(f.load(undefined, { allowUnavailableSafe: true }), /authority/);
+  const g = fixture();g.state.values['l2.ROLLUP_ID'] = 99n;
+  await assert.rejects(g.load(undefined, { allowUnavailableSafe: true }), /routing/);
+  const abort = new AbortController();abort.abort(new Error('cancelled'));
+  await assert.rejects(fixture().load(abort.signal, { allowUnavailableSafe: true }), /cancelled/);
 });
 
 test('cancellation refuses a late discovery result and a pre-aborted lookup makes no reads', async () => {

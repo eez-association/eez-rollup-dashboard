@@ -44,6 +44,7 @@ export function FalconSafe({ signer, wallet, deployment, fees, onNeedSafeFactory
   const [attachmentRevision, setAttachmentRevision] = useState(0);
   const [lookedUp, setLookedUp] = useState(false);
   const [loadingSafe, setLoadingSafe] = useState(false);
+  const [safeLoadError, setSafeLoadError] = useState<string | null>(null);
   const [recipient, setRecipient] = useState('');
   const [amount, setAmount] = useState('0.000001');
   const [data, setData] = useState('');
@@ -89,6 +90,7 @@ export function FalconSafe({ signer, wallet, deployment, fees, onNeedSafeFactory
   useEffect(() => {
     setController(null); setRemote(null); setLookedUp(false); setPrepared(null); setObservation('L1 read');
     setCopyNotice(''); setExistingSafe(false); setChoosingSafe(false); setOwnerPending(false);
+    setSafeLoadError(null);
     selectionRevision.current++;
     // The Safe was just cleared, so locking and unlocking the same key must load it again.
     loadedFor.current = null;
@@ -125,11 +127,18 @@ export function FalconSafe({ signer, wallet, deployment, fees, onNeedSafeFactory
           try {
             const client = eezClient(falconReadProvider(config.l2ProxyRpc, abort.signal, deployment.l2.chainName));
             const attachment = readAttachment(localStorage, attachmentKey(deployment, publicKey));
-            const { controller: state, remote: target } = await loadSafeAccount(client, l1ReadClient(abort.signal), deployment, publicKey, abort.signal, attachment);
+            const { controller: state, remote: target, safeError } = await loadSafeAccount(client, l1ReadClient(abort.signal), deployment, publicKey, abort.signal, attachment, { allowUnavailableSafe: true });
             abort.signal.throwIfAborted();
             if (!sameKey(publicKey) || currentDeployment.current !== deployment) return;
             setController(state); setRemote(target); setLookedUp(true); setLoadingSafe(false);
+            setSafeLoadError(safeError ?? null);
             loadedFor.current = { publicKey: publicKey.slice(2), deployment, revision };
+            if (safeError) {
+              // Replacement is available, but no unverified Safe or authorization is retained.
+              selectionRevision.current++; setPrepared(null); setFee(null); setChoosingSafe(true);
+              setNotice({ kind: 'error', text: 'Your controller is verified, but the selected Safe is unavailable. Recheck it or choose another Safe.' });
+              return;
+            }
             if (!running.current) setNotice(before => before.kind === 'valid' || before.kind === 'invalid' || before.kind === 'error' ? before : { kind: target?.target ? 'valid' : 'neutral', text: target?.target
               ? 'Safe loaded. Ready to send a transaction.'
               : state ? `Controller ready. Create a Safe or add to an existing Safe on ${deployment.l1.chainName}.`
@@ -775,7 +784,9 @@ export function FalconSafe({ signer, wallet, deployment, fees, onNeedSafeFactory
     setRecipient(''); setAmount('0.000001'); setData(''); setCopyNotice('');
     setFundedHash(null); setFunding(null); setFundingNotice(null);
     setRemote(null); setLoadingSafe(true);
+    setSafeLoadError(null);
     setExistingSafe(false); setChoosingSafe(false); setOwnerPending(false);
+    setNotice({ kind: 'pending', text: 'Loading the selected Safe…' });
     setAttachmentRevision(value => value + 1);
   }
 
@@ -817,6 +828,14 @@ export function FalconSafe({ signer, wallet, deployment, fees, onNeedSafeFactory
         }}>Change Safe</button>}
       </> : <p>Create a Safe account on {deployment.l1.chainName} controlled by your Falcon key.</p>}
     </header>
+    {safeLoadError && <div role="alert" className={styles.status}>
+      <p>The selected Safe could not be verified: {safeLoadError} Sending and funding this Safe are disabled. You can select another Safe using the same controller.</p>
+      <button className="btn btn-outline" disabled={unavailable || ownerPending} onClick={() => {
+        setNotice({ kind: 'pending', text: 'Rechecking the selected Safe…' });
+        setChoosingSafe(false);
+        setLoadingSafe(true); setAttachmentRevision(value => value + 1);
+      }}>Recheck selected Safe</button>
+    </div>}
     {showSetup && <div className={styles.setupProgress}>
       <ol id="safe-setup-progress" className={styles.setupSteps} aria-label="Safe setup progress" aria-live="polite">
         <li data-state={preparationComplete ? 'complete' : 'active'} aria-current={!preparationComplete ? 'step' : undefined}>
