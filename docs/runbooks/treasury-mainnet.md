@@ -93,6 +93,17 @@ The canonical Ethereum token is
 its bridge representation, not a separately Circle-issued token. Changing a symbol
 or an address on the Chiado deployment is not a migration.
 
+On Ethereum (chain 1), the treasury always selects this USDC address, regardless
+of `treasuryTokenAddress`. The token banner, chooser and demo-token deployment
+controls are hidden. No `.env` change is needed. Setup still verifies USDC and
+its bridge representation; if USDC is unavailable on L2, bridge it normally and
+select **Check again**. Test networks retain their token selection controls.
+Saved USDC setups keep their existing identity. Older non-USDC selections and
+demo-token transaction records remain saved but cannot be resumed as a mainnet
+USDC treasury. **Refresh unused network setup** can replace an unused selection;
+it cannot discard a setup or transaction journal. This UI update does not migrate
+existing contracts, transfer funds or rewrite approvals.
+
 ## Standard bridge payment path
 
 Deploy `StandardBridgeDelegate` on Ethereum with the existing Safe, official
