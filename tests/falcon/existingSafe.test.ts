@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { readFileSync } from 'node:fs';
 import { encodeAbiParameters, encodeEventTopics, decodeFunctionData, keccak256, pad, toHex, zeroHash, type Address, type Hex } from 'viem';
-import { prepareOwnerAddition, ownerTransaction, readAttachment, saveAttachment, attachmentKey, verifyOwnerAddition } from '../../src/lib/falcon/existingSafe.ts';
+import { inspectSafeSelection, prepareOwnerAddition, ownerTransaction, readAttachment, saveAttachment, attachmentKey, verifyOwnerAddition } from '../../src/lib/falcon/existingSafe.ts';
 import { safeAbi, loadRemoteSafe, prepareSafeTransfer, hasSafeExecution, inspectExistingSafe } from '../../src/lib/falcon/safe.ts';
 import { safeTransactionHash, encodeSafeExecution } from '../../src/lib/treasury/safeTransactions.ts';
 import { loadTreasuryArtifacts } from '../../src/lib/treasury/release.ts';
@@ -190,4 +190,37 @@ test('another tab cannot silently replace a confirmed Safe attachment', () => {
  assert.throws(()=>saveAttachment(storage,'safe',{target:other,walletOwner:account}),/Another Safe was selected/);
  assert.throws(()=>saveAttachment(storage,'safe',{target,walletOwner:other}),/Another Safe was selected/);
  assert.deepEqual(JSON.parse(saved!),first);
+});
+
+test('a Safe already controlled by Falcon needs no wallet-owner authorization', async () => {
+ const {state,client}=fixture();
+ state.owners=[owner];state.ownerCode[owner.toLowerCase()]='0x6000';state.registered=true;
+ const selected=await inspectSafeSelection(client,d,controller,target,signal);
+ assert.equal(selected?.target,target);assert.equal(selected?.owner,owner);
+ assert.deepEqual(selected?.attachment,{target});
+ assert.deepEqual(readAttachment({getItem:()=>JSON.stringify(selected!.attachment)},'safe'),{target});
+ // The setup path still requires an actual signing owner when adding authority.
+ await assert.rejects(prepareOwnerAddition(client,d,controller,target,account,signal),/contract-owner signatures/);
+ state.registered=false;
+ await assert.rejects(inspectSafeSelection(client,d,controller,target,signal),/proxy binding/);
+ state.registered=true;state.owners=[owner,account];state.threshold=2n;
+ await assert.rejects(inspectSafeSelection(client,d,controller,target,signal));
+ state.owners=[account];state.threshold=1n;
+ assert.equal(await inspectSafeSelection(client,d,controller,target,signal),null);
+});
+
+test('explicit replacement compares the reviewed selection and preserves concurrent changes', () => {
+ let saved: string | null=null;
+ const storage={getItem:()=>saved,setItem:(_key:string,value:string)=>{saved=value;}};
+ const first={target,walletOwner:account},next={target:other};
+ saveAttachment(storage,'safe',first);
+ const reviewed=saved;
+ saveAttachment(storage,'safe',next,reviewed);
+ assert.deepEqual(readAttachment(storage,'safe'),next);
+ saveAttachment(storage,'safe',next,reviewed); // Idempotent confirmation from another tab.
+ assert.throws(()=>saveAttachment(storage,'safe',first,reviewed),/Another Safe was selected/);
+ assert.deepEqual(readAttachment(storage,'safe'),next);
+ saved=null;
+ assert.throws(()=>saveAttachment(storage,'safe',next,reviewed),/Another Safe was selected/);
+ saveAttachment(storage,'safe',next,null);
 });

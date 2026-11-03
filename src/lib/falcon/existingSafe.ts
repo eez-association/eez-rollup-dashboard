@@ -16,17 +16,30 @@ export function readAttachment(storage: Pick<Storage, 'getItem'>, key: string): 
   const raw = storage.getItem(key);
   if (!raw) return undefined;
   const value = JSON.parse(raw) as SafeAttachment;
-  if (!value || !isAddress(value.target) || !isAddress(value.walletOwner)) throw new Error('Saved Falcon Safe address is invalid.');
-  return { target: getAddress(value.target), walletOwner: getAddress(value.walletOwner) };
+  if (!value || !isAddress(value.target) || BigInt(value.target) <= 1n
+    || value.walletOwner !== undefined && !isAddress(value.walletOwner)) throw new Error('Saved Falcon Safe address is invalid.');
+  return { target: getAddress(value.target), ...(value.walletOwner ? { walletOwner: getAddress(value.walletOwner) } : {}) };
 }
 /** Caller holds the attachment Web Lock. A second tab must not silently replace
  * the Safe selected for this controller after a different owner change confirms. */
-export function saveAttachment(storage: Pick<Storage, 'getItem' | 'setItem'>, key: string, next: SafeAttachment) {
+export function saveAttachment(storage: Pick<Storage, 'getItem' | 'setItem'>, key: string, next: SafeAttachment, expectedRaw?: string | null) {
   const current = readAttachment(storage, key);
-  if (current && (!sameAddress(current.target, next.target) || !sameAddress(current.walletOwner, next.walletOwner))) {
+  const same = current && sameAddress(current.target, next.target) && (current.walletOwner ?? '').toLowerCase() === (next.walletOwner ?? '').toLowerCase();
+  if (!same && (expectedRaw !== undefined ? storage.getItem(key) !== expectedRaw : !!current)) {
     throw new Error('Another Safe was selected for this Falcon key. The confirmed owner transaction remains saved for review.');
   }
   storage.setItem(key, JSON.stringify(next));
+}
+/** No wallet-owner signature is needed when the selected controller already has authority. */
+export async function inspectSafeSelection(client: EezClient, d: CrossChainDeployment, controller: Address, target: Address, signal: AbortSignal) {
+  await checkChain(client, d.l1);
+  const block = await client.getBlockNumber();
+  const owner = await controllerOwner(client, d, controller, block);
+  const safe = await inspectExistingSafe(client, target, signal, block, owner);
+  if (safe.threshold !== 1) throw new Error('Falcon signing requires a Safe with threshold 1.');
+  if (!safe.owners.some(existing => sameAddress(existing, owner))) return null;
+  const attachment = { target };
+  return loadRemoteSafe(client, d, controller, signal, block, attachment);
 }
 /** A completed, matching Treasury is an address suggestion, never an authorization. */
 export function treasurySafeSuggestion(storage: Pick<Storage, 'getItem' | 'key' | 'length'>, d: CrossChainDeployment): string {

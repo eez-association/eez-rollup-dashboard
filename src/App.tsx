@@ -109,10 +109,48 @@ export function App() {
   const bridgeFeesEnabled = bridgeFromL1 ? config.l1FeesEnabled : config.l2FeesEnabled;
   const bridgeFeeCap = bridgeFromL1 ? config.l1FeeMaxTotalWei : config.l2FeeMaxTotalWei;
   const bridgeSourceChain = bridgeFromL1 ? L1_CHAIN : L2_CHAIN;
+  const [composerAttention, setComposerAttention] = useState(0);
+  const [verifyingBridgeComposer, setVerifyingBridgeComposer] = useState(false);
+  const bridgeVerificationPending = useRef(false);
+  const currentWallet = useRef(wallet);
+  currentWallet.current = wallet;
+  const bridgeComposerReady = !wallet.checkingComposer && !wallet.connectingComposer
+    && wallet.composerConnection.status === "detected"
+    && wallet.composerConnection.chainId !== null
+    && BigInt(wallet.composerConnection.chainId) === BigInt(bridgeSourceChain.chainId)
+    && wallet.chainId !== null && BigInt(wallet.chainId) === BigInt(bridgeSourceChain.chainId);
 
   const txHistory = useTxHistory();
   const latestBridgeState = useRef(bridgeHook.state);
   latestBridgeState.current = bridgeHook.state;
+  const bridgeWithComposer = async () => {
+    if (bridgeVerificationPending.current) return;
+    if (!bridgeComposerReady) {
+      setComposerAttention(value => value + 1);
+      return;
+    }
+    bridgeVerificationPending.current = true;
+    setVerifyingBridgeComposer(true);
+    const selected = latestBridgeState.current;
+    try {
+      const connection = await wallet.verifyComposer();
+      const latest = latestBridgeState.current;
+      if (currentWallet.current.provider !== wallet.provider || currentWallet.current.address !== wallet.address
+          || currentWallet.current.chainId !== wallet.chainId || latest.direction !== selected.direction
+          || latest.asset !== selected.asset || latest.amount !== selected.amount || latest.tokenAddress !== selected.tokenAddress
+          || latest.destinationAddress !== selected.destinationAddress || latest.phase !== selected.phase) return;
+      if (connection.status !== "detected" || !connection.chainId
+          || BigInt(connection.chainId) !== BigInt(bridgeSourceChain.chainId)) {
+        setComposerAttention(value => value + 1);
+        return;
+      }
+      setVerifyingBridgeComposer(false);
+      await bridgeHook.bridge();
+    } finally {
+      bridgeVerificationPending.current = false;
+      setVerifyingBridgeComposer(false);
+    }
+  };
   const switchBridgeNetwork = async (chain: "l1" | "l2") => {
     const switched = await (chain === "l1" ? wallet.switchToL1() : wallet.switchToL2());
     const direction = chain === "l1" ? "l1-to-l2" : "l2-to-l1";
@@ -388,6 +426,7 @@ export function App() {
       />
 
       {wallet.isConnected && <ComposerStatus connection={wallet.composerConnection}
+        requiredChainId={bridgeActive ? bridgeSourceChain.chainId : undefined} attentionRequest={composerAttention}
         checking={wallet.checkingComposer} onRecheck={wallet.recheckComposer} walletName={wallet.walletName} variant="notice"
         onConnectNetwork={wallet.connectComposer} connectingNetwork={wallet.connectingComposer} setupMessage={wallet.composerSetupMessage} />}
 
@@ -463,7 +502,9 @@ export function App() {
                     onSetTokenAddress={bridgeHook.setTokenAddress}
                     onSetMax={bridgeHook.setMax}
                     onApprove={bridgeHook.approve}
-                    onBridge={bridgeHook.bridge}
+                    onBridge={() => { void bridgeWithComposer(); }}
+                    composerBlocked={!bridgeComposerReady}
+                    verifyingComposer={verifyingBridgeComposer}
                     onDismiss={bridgeHook.dismiss}
                     onGasOverride={bridgeHook.setGasOverride}
                     onRefreshFees={bridgeHook.refreshFees}

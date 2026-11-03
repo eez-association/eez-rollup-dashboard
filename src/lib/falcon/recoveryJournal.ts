@@ -7,6 +7,7 @@ export type RecoveryAttempt = {
   account: Address; to: Address; nonce: string; value: string; data: Hex;
   /** Empty for shared infrastructure, which is independent of the Falcon key. */
   publicKey: Hex; controller?: Address; safeNonce?: string; startBlock?: string; hash?: Hex;
+  attachmentBefore?: string | null;
 };
 export function recoveryKey(deployment: CrossChainDeployment, kind: RecoveryAttempt['kind']) {
   const identity = [deployment.l1.chainId, deployment.l1.anchor.blockHash, deployment.l1.registry,
@@ -48,6 +49,8 @@ export function readRecovery(raw: string | null): RecoveryAttempt | null {
     || value.kind === 'funding' && (!isAddress(value.controller ?? '') || value.data !== '0x')
     || value.kind === 'owner' && (!isAddress(value.controller ?? '') || !/^(0|[1-9]\d*)$/.test(value.safeNonce ?? '') || value.value !== '0')
     || value.startBlock !== undefined && (typeof value.startBlock !== 'string' || !/^(0|[1-9]\d*)$/.test(value.startBlock))
+    || value.attachmentBefore !== undefined && value.attachmentBefore !== null
+      && (typeof value.attachmentBefore !== 'string' || value.attachmentBefore.length > 512)
     || value.hash !== undefined && !/^0x[\da-f]{64}$/i.test(value.hash)) {
     throw new Error('Saved Falcon recovery details are invalid. Preserve this record and check wallet activity before sending again.');
   }

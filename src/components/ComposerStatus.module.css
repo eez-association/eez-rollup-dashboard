@@ -10,7 +10,8 @@
 .l1 { color: var(--chain-l1); }
 .l2 { color: var(--chain-l2); }
 .detected { color: var(--green); }
-.warning .heading > span:first-child { color: var(--yellow); }
+.warning .heading > span:first-child { color: var(--red); font-weight: 700; }
+.required { color: var(--red); font-weight: 600; margin: var(--sp-2) 0 0; }
 .failed .heading > span:first-child { color: var(--red); }
 .detail { margin: var(--sp-2) 0 0; color: var(--text-dim); overflow-wrap: anywhere; max-width: 75ch; }
 .instructions { margin: var(--sp-3) 0 0; padding-left: var(--sp-5); color: var(--text-dim); overflow-wrap: anywhere; max-width: 75ch; }
@@ -26,9 +27,11 @@
   max-width: 1136px;
   margin: var(--sp-4) auto 0;
   padding: var(--sp-4);
-  border: 1px solid var(--yellow-border);
+  border: 2px solid var(--red-border);
   border-radius: var(--radius);
   background: var(--bg-card);
+  scroll-margin-top: 96px;
 }
+.notice:focus { outline: 3px solid var(--red); outline-offset: 4px; }
 .notice.failed { border-color: var(--red-border); }
 @media (max-width: 640px) { .notice { width: calc(100% - 36px); margin-top: 12px; } }

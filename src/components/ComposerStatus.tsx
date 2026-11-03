@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { config, L1_CHAIN, L2_CHAIN } from "../config";
 import type { ComposerDetection } from "../lib/composerDiscovery";
 import styles from "./ComposerStatus.module.css";
@@ -12,6 +12,8 @@ interface Props {
   connectingNetwork?: boolean;
   setupMessage?: string;
   variant?: "menu" | "notice";
+  requiredChainId?: string;
+  attentionRequest?: number;
 }
 
 const labels: Record<ComposerDetection["status"], string> = {
@@ -23,24 +25,33 @@ const labels: Record<ComposerDetection["status"], string> = {
   "unsupported-network": "Select a dashboard network",
 };
 
-export function ComposerStatus({ connection, checking, onRecheck, walletName, onConnectNetwork, connectingNetwork = false, setupMessage, variant = "menu" }: Props) {
+export function ComposerStatus({ connection, checking, onRecheck, walletName, onConnectNetwork, connectingNetwork = false, setupMessage, variant = "menu", requiredChainId, attentionRequest = 0 }: Props) {
   const [copy, setCopy] = useState("");
+  const panel = useRef<HTMLElement>(null);
   const isChain = (id: string) => {
     try { return connection.chainId !== null && BigInt(id) === BigInt(connection.chainId); }
     catch { return false; }
   };
-  const l1 = isChain(L1_CHAIN.chainId);
-  const supported = l1 || isChain(L2_CHAIN.chainId);
+  const requiredMismatch = !!requiredChainId && !isChain(requiredChainId);
+  const l1 = requiredChainId ? BigInt(requiredChainId) === BigInt(L1_CHAIN.chainId) : isChain(L1_CHAIN.chainId);
+  const supported = !!requiredChainId || l1 || isChain(L2_CHAIN.chainId);
   const rpcUrl = supported ? (l1 ? config.l1ProxyRpc : config.l2ProxyRpc) : "";
   const network = supported ? (l1 ? config.l1NetworkName : config.rollupName) : "";
-  const chainId = supported ? BigInt(connection.chainId!).toString() : "";
+  const chainId = supported ? BigInt(requiredChainId ?? connection.chainId!).toString() : "";
   const ethereumMainnet = l1 && chainId === "1";
   const rabby = /rabby/i.test(walletName ?? "");
   const metamask = /metamask/i.test(walletName ?? "");
-  const warning = ["not-detected", "mismatch", "unavailable"].includes(connection.status);
+  const warning = requiredMismatch || checking || connectingNetwork || connection.status !== "detected";
   const failed = connection.status === "unavailable";
 
   useEffect(() => { setCopy(""); }, [rpcUrl]);
+  useEffect(() => {
+    if (!attentionRequest || !panel.current) return;
+    const details = panel.current.querySelector("details");
+    if (details) details.open = true;
+    panel.current.focus({ preventScroll: true });
+    panel.current.scrollIntoView({ behavior: "auto", block: "center" });
+  }, [attentionRequest]);
 
   if (variant === "notice" && !warning) return null;
   const instructions = <>
@@ -76,11 +87,15 @@ export function ComposerStatus({ connection, checking, onRecheck, walletName, on
     </div>}
   </>;
   return <section className={`${styles.panel} ${variant === "notice" ? styles.notice : ""} ${warning ? styles.warning : ""} ${failed ? styles.failed : ""}`}
-    aria-label="Wallet Composer connection">
+    ref={panel} tabIndex={-1} aria-label="Wallet Composer connection">
     <div className={styles.heading} role="status">
-      <span className={connection.status === "detected" ? styles.detected : ""}>{labels[connection.status]}</span>
+      <span className={!warning ? styles.detected : ""}>{requiredMismatch ? "Select the bridge source network" : labels[connection.status]}</span>
       {network && <span className={`${styles.network} ${l1 ? styles.l1 : styles.l2}`}>{network}</span>}
     </div>
+    {variant === "notice" && warning && <p className={styles.required}>
+      Bridging is blocked until Composer is verified. {requiredMismatch && <>Switch your wallet to {network}. </>}
+      Set your wallet’s active RPC to the Composer URL below, then click Recheck.
+    </p>}
     {variant === "notice" ? <details className={styles.settings}>
       <summary>{rabby ? "Rabby RPC setup" : metamask ? "MetaMask RPC setup" : "Wallet RPC settings"}</summary>{instructions}
     </details> : instructions}

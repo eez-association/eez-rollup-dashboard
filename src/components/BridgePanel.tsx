@@ -24,6 +24,8 @@ interface Props {
   onSetMax: () => void;
   onApprove: () => void;
   onBridge: () => void;
+  composerBlocked: boolean;
+  verifyingComposer: boolean;
   onDismiss: () => void;
   onGasOverride: (gasHex: string | null) => void;
   onRefreshFees: () => void;
@@ -43,6 +45,8 @@ export function BridgePanel({
   onSetMax,
   onApprove,
   onBridge,
+  composerBlocked,
+  verifyingComposer,
   onDismiss,
   onGasOverride,
   onRefreshFees,
@@ -258,9 +262,9 @@ export function BridgePanel({
         ref={connectButton}
         onClick={walletAddress ? onBridge : () => setChoosingWallet(!choosingWallet)}
         aria-expanded={!walletAddress ? choosingWallet : undefined}
-        disabled={!!walletAddress && !canBridge}
+        disabled={!!walletAddress && (busy || verifyingComposer || (!composerBlocked && !canBridge))}
       >
-        {!walletAddress ? "Connect wallet" : busy ? (
+        {!walletAddress ? "Connect wallet" : verifyingComposer ? "Checking Composer…" : busy ? (
           <><span className="btn-spinner" /> Bridging...</>
         ) : (
           actionLabel

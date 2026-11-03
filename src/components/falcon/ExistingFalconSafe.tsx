@@ -7,7 +7,7 @@ import type { CrossChainDeployment } from '../../lib/falcon/crossChainDeployment
 import { eezClient } from '../../lib/falcon/eez';
 import { falconReadProvider, confirmationDelay } from '../../lib/falcon/readOnly';
 import { checkChain, FalconTransactionReverted, sameAddress, type ControllerState } from '../../lib/falcon/l1Controller';
-import { attachmentKey, findOwnerRecovery, prepareOwnerAddition, saveAttachment, treasurySafeSuggestion, verifyOwnerAddition } from '../../lib/falcon/existingSafe';
+import { attachmentKey, findOwnerRecovery, inspectSafeSelection, prepareOwnerAddition, saveAttachment, treasurySafeSuggestion, verifyOwnerAddition } from '../../lib/falcon/existingSafe';
 import { recoveryKey, type RecoveryAttempt } from '../../lib/falcon/recoveryJournal';
 import { encodeSafeExecution, packEOAApprovals, safeTransactionHash, safeTypedDataJSON } from '../../lib/treasury/safeTransactions';
 import { UnknownFeeSubmission } from '../../lib/falcon/l2Fees';
@@ -26,6 +26,13 @@ export function ExistingFalconSafe({ wallet, deployment, controller, publicKey, 
   const active = useRef(false), currentAddress = useRef(address); currentAddress.current = address;
   const abortRef = useRef<AbortController | null>(null);
   const callbacks = useRef({ onAttached, isCurrent }); callbacks.current = { onAttached, isCurrent };
+  const selectionBefore = useRef<string | null>(null);
+  useEffect(() => {
+    if (visible) {
+      try { selectionBefore.current = localStorage.getItem(attachmentKey(deployment, publicKey)); }
+      catch { setMessage('Cannot read the selected Safe. Check browser storage before continuing.'); }
+    }
+  }, [visible, deployment, publicKey]);
   useEffect(() => () => { abortRef.current?.abort(); }, []);
   useEffect(() => { onPending(busy || !!journal.attempt || !!journal.error); }, [busy, journal.attempt, journal.error, onPending]);
   const clientFor = (signal: AbortSignal) => eezClient(falconReadProvider(config.l1Rpc, signal, deployment.l1.chainName));
@@ -65,7 +72,7 @@ export function ExistingFalconSafe({ wallet, deployment, controller, publicKey, 
             const key = attachmentKey(deployment, publicKey);
             await navigator.locks.request(key, () => {
               abort.signal.throwIfAborted();
-              saveAttachment(localStorage, key, attachment);
+              saveAttachment(localStorage, key, attachment, attempt.attachmentBefore);
             });
             await journal.finish(attempt.id);
             if (!abort.signal.aborted && callbacks.current.isCurrent()) callbacks.current.onAttached(attachment);
@@ -99,9 +106,24 @@ export function ExistingFalconSafe({ wallet, deployment, controller, publicKey, 
       if (disabled || journal.attempt || journal.error || !wallet.address) return;
       if (!isAddress(address.trim()) || BigInt(address.trim()) <= 1n) throw new Error('Enter a valid L1 Safe address.');
       const target = getAddress(address.trim()), input = address;
+      const attachmentBefore = selectionBefore.current;
       const current = () => !signal.aborted && callbacks.current.isCurrent() && currentAddress.current === input;
+      const client = clientFor(signal);
+      setMessage('Checking the Safe and Falcon controller…');
+      const selected = await inspectSafeSelection(client, deployment, controller.controller, target, signal);
+      if (!current()) throw new Error('Wallet, key or Safe changed. Review again.');
+      if (selected?.attachment) {
+        const attachment = selected.attachment;
+        const key = attachmentKey(deployment, publicKey);
+        await navigator.locks.request(key, () => {
+          if (!current()) throw new Error('Wallet, key or Safe changed. Review again.');
+          saveAttachment(localStorage, key, attachment, attachmentBefore);
+        });
+        if (current()) callbacks.current.onAttached(attachment);
+        return;
+      }
       const session = await wallet.getSession(signal, deployment.l1);
-      const client = clientFor(signal), walletClient = eezClient(session.provider);
+      const walletClient = eezClient(session.provider);
       setMessage('Checking L1 Safe ownership…');
       // Both independent providers must agree before opening the signature prompt.
       const [review, walletReview] = await Promise.all([
@@ -125,7 +147,7 @@ export function ExistingFalconSafe({ wallet, deployment, controller, publicKey, 
       session.assertCurrent();
       if (!current()) throw new Error('Wallet, key or Safe changed. Review again.');
       const attempt: RecoveryAttempt = { version: 1, kind: 'owner', id: crypto.randomUUID(), chainId: deployment.l1.chainId,
-        account: session.account, to: target, nonce: String(nonce), value: '0', data, publicKey, controller: controller.controller, safeNonce: String(review.transaction.message.nonce), startBlock: String(startBlock) };
+        account: session.account, to: target, nonce: String(nonce), value: '0', data, publicKey, controller: controller.controller, safeNonce: String(review.transaction.message.nonce), startBlock: String(startBlock), attachmentBefore };
       await journal.begin(attempt);
       try {
         setMessage(`Confirm the ${deployment.l1.chainName} transaction and network fee in your wallet.`);
@@ -139,10 +161,10 @@ export function ExistingFalconSafe({ wallet, deployment, controller, publicKey, 
     <label className={styles.label} htmlFor="falcon-existing-safe">L1 Safe address</label>
     <input id="falcon-existing-safe" className={styles.input} value={journal.attempt?.to ?? address} disabled={busy || !!journal.attempt || disabled}
       placeholder="0x…" spellCheck={false} onChange={event => { setAddress(event.target.value); setMessage(''); }} />
-    <p className={styles.hint}>Connect an existing owner wallet. Threshold must be 1. Adding Falcon keeps all owners and modules; any owner can execute independently.</p>
+    <p className={styles.hint}>If this Safe already has your Falcon controller as an owner, select it without another owner transaction. Otherwise, connect an existing owner wallet to add Falcon. Threshold must be 1; existing owners and modules are preserved.</p>
     <div className={styles.safeChoices}>
       <button className={`btn btn-outline ${styles.action}`} disabled={disabled || busy || !!journal.attempt || !!journal.error} onClick={onBack}>Go back</button>
-      <button className={`btn btn-solid ${styles.action}`} disabled={disabled || busy || !!journal.attempt || !!journal.error || !wallet.address} onClick={() => void addOwner()}>Add Falcon controller</button>
+      <button className={`btn btn-solid ${styles.action}`} disabled={disabled || busy || !!journal.attempt || !!journal.error || !wallet.address} onClick={() => void addOwner()}>{busy ? 'Checking Safe…' : 'Use this Safe'}</button>
     </div>
     {(message || journal.error) && <p role="status" className={styles.status}>{journal.error || message}</p>}
     {journal.attempt?.hash && <a href={`${deployment.l1.explorer}/tx/${journal.attempt.hash}`} target="_blank" rel="noreferrer">L1 owner transaction</a>}
