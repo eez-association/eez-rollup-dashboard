@@ -23,6 +23,8 @@ export function ExistingFalconSafe({ wallet, deployment, controller, publicKey, 
     try { return treasurySafeSuggestion(localStorage, deployment); } catch { return ''; }
   });
   const [busy, setBusy] = useState(false), [message, setMessage] = useState('');
+  // Shown even after the panel hides, so resolving a conflict is never silent.
+  const [outcome, setOutcome] = useState('');
   const [selectionConflict, setSelectionConflict] = useState<{ attempt: RecoveryAttempt; attachment: SafeAttachment } | null>(null);
   const conflict = selectionConflict?.attempt.id === journal.attempt?.id
     && selectionConflict?.attempt.hash === journal.attempt?.hash ? selectionConflict : null;
@@ -32,6 +34,7 @@ export function ExistingFalconSafe({ wallet, deployment, controller, publicKey, 
   const selectionBefore = useRef<string | null>(null);
   useEffect(() => {
     if (visible) {
+      setOutcome('');
       try { selectionBefore.current = localStorage.getItem(attachmentKey(deployment, publicKey)); }
       catch { setMessage('Cannot read the selected Safe. Check browser storage before continuing.'); }
     }
@@ -136,7 +139,8 @@ export function ExistingFalconSafe({ wallet, deployment, controller, publicKey, 
       // Explicitly acknowledge the verified request, comparing its hash and ID.
       await journal.resolve(attempt);
       setSelectionConflict(null);
-      setMessage(useConfirmed ? '' : `Owner addition confirmed for ${attachment.target}. Your current Safe selection was kept.`);
+      setMessage('');
+      if (!useConfirmed) setOutcome(`Owner addition confirmed for ${attachment.target}. Your current Safe selection was kept; use Change Safe to switch later.`);
       if (useConfirmed && callbacks.current.isCurrent()) callbacks.current.onAttached(attachment);
     });
   }
@@ -198,7 +202,7 @@ export function ExistingFalconSafe({ wallet, deployment, controller, publicKey, 
       } catch (error) { if (!(error instanceof UnknownFeeSubmission)) await journal.reject(attempt); throw error; }
     });
   }
-  if (!visible && !journal.attempt && !journal.error) return null;
+  if (!visible && !journal.attempt && !journal.error) return outcome ? <p role="status" className={styles.status}>{outcome}</p> : null;
   return <div className={styles.fields} aria-label="Add Falcon to an existing Safe">
     <label className={styles.label} htmlFor="falcon-existing-safe">L1 Safe address</label>
     <input id="falcon-existing-safe" className={styles.input} value={journal.attempt?.to ?? address} disabled={busy || !!journal.attempt || disabled}
@@ -208,7 +212,7 @@ export function ExistingFalconSafe({ wallet, deployment, controller, publicKey, 
       <button className={`btn btn-outline ${styles.action}`} disabled={disabled || busy || !!journal.attempt || !!journal.error} onClick={onBack}>Go back</button>
       <button className={`btn btn-solid ${styles.action}`} disabled={disabled || busy || !!journal.attempt || !!journal.error || !wallet.address} onClick={() => void addOwner()}>{busy ? 'Checking Safe…' : 'Use this Safe'}</button>
     </div>
-    {(message || journal.error) && <p role="status" className={styles.status}>{journal.error || message}</p>}
+    {(message || journal.error || outcome) && <p role="status" className={styles.status}>{journal.error || message || outcome}</p>}
     {conflict && <div className={styles.safeChoices} role="group" aria-label="Resolve confirmed Safe selection">
       <button className="btn btn-outline" disabled={busy || !!journal.error} onClick={() => void resolveSelection(false)}>Keep current selection</button>
       <button className="btn btn-solid" disabled={busy || !!journal.error} onClick={() => void resolveSelection(true)}>Use confirmed Safe</button>

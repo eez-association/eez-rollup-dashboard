@@ -846,7 +846,8 @@ export function FalconSafe({ signer, wallet, deployment, fees, onNeedSafeFactory
             setNotice({ kind: 'neutral', text: 'Loading your current Safe…' });
           }}>Keep current Safe</button>}
         </>}
-        {!existingSafe && <SafeFeeQuote fee={fee} config={fees} />}
+        {/* Selecting an existing Safe is free; while choosing, show fees only for a real creation quote. */}
+        {!existingSafe && (!choosingSafe || fee) && <SafeFeeQuote fee={fee} config={fees} />}
       </>}
     </div>}
     {controller && signer.publicKeyHex && <ExistingFalconSafe key={recoveryScope} wallet={wallet} deployment={deployment} controller={controller}

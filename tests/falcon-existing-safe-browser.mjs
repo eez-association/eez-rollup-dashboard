@@ -210,6 +210,7 @@ async function rpc({method,params=[],chain,walletRead=false}) {
  assert(await page.evaluate(key=>!!localStorage.getItem(key),journalKey),'retain recovery until explicit acknowledgement');
  const keepSelection=name==='MetaMask';
  await page.getByRole('button',{name:keepSelection?'Keep current selection':'Use confirmed Safe',exact:true}).click();
+ if(keepSelection) await status('Your current Safe selection was kept');
  await page.getByRole('heading',{name:'Your Safe account',exact:true}).waitFor();
  assert.equal(await page.locator('#safe-address').getAttribute('title'),safe);
  await page.locator('#safe-sign').waitFor();await page.locator('#safe-send').waitFor();await page.locator('#safe-fund').waitFor();
