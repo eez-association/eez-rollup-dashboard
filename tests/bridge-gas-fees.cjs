@@ -3,6 +3,7 @@
 const assert = require('node:assert/strict');
 const { chromium } = require('playwright');
 const { keccak256, toHex, toFunctionSelector } = require('viem');
+const { composerResponse } = require('./composer-fixture.cjs');
 
 const origin = (process.env.EEZ_UI_URL || 'http://127.0.0.1:18777').replace(/\/$/, '');
 const RAW_GAS = 422319n;
@@ -27,6 +28,8 @@ async function fixture(browser, options = {}) {
   const nativeSymbol = options.chain === '0x1' ? 'ETH' : 'xDAI';
   const context = await browser.newContext();
   const page = await context.newPage();
+  await page.exposeFunction('bridgeComposerDiscovery', (data, chain) => options.noComposer ? '0x'
+    : composerResponse(data, chain, options.chain || '0x27d8', options.l2Chain || '0x1892'));
   if (options.clock) await page.clock.install();
   const errors = [], rpcRequests = [];
   let tokenInfoReads = 0;
@@ -46,6 +49,7 @@ async function fixture(browser, options = {}) {
       async request({ method, params }) {
         if (method === 'eth_requestAccounts' || method === 'eth_accounts') return [account];
         if (method === 'eth_chainId') return this.chain;
+        if (method === 'eth_call') return window.bridgeComposerDiscovery(params[0].data, this.chain);
         if (method === 'eth_getTransactionCount') return walletNonce ?? '0x0';
         if (method === 'eth_getBlockByNumber') return { baseFeePerGas: '0x7' };
         if (method === 'wallet_addEthereumChain') { window.walletChains.push(params[0]); return null; }
@@ -72,7 +76,7 @@ async function fixture(browser, options = {}) {
         announce('MetaMask', 'metamask-provider', 'io.metamask', metamask);
       });
     }
-  }, { account, receiptHash, multipleWallets: options.multipleWallets, chain: options.chain, walletNonce: options.walletNonce, holdWallet: options.holdWallet });
+  }, { account, receiptHash, multipleWallets: options.multipleWallets, chain: options.reverse ? options.l2Chain || '0x1892' : options.chain, walletNonce: options.walletNonce, holdWallet: options.holdWallet });
   await page.route('**/*', async route => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
@@ -210,6 +214,13 @@ if (require.main === module) (async () => {
   const browser = await chromium.launch({ headless: true, chromiumSandbox: true });
   try {
     let scenarios = 0;
+    const blocked = await fixture(browser, { noComposer: true });
+    await blocked.button.click();
+    const warning = blocked.page.locator('section[aria-label="Wallet Composer connection"]').filter({ hasText: 'Bridging is blocked' });
+    await until(() => warning.evaluate(el => document.activeElement === el), 'Bridge must focus RPC setup');
+    assert(await warning.locator('details').evaluate(el => el.open), 'RPC instructions must expand');
+    assert.deepEqual(await blocked.page.evaluate(() => window.walletRequests), [], 'No transaction without Composer');
+    await blocked.context.close();
     for (const reverse of [false, true]) for (const erc20 of [false, true]) for (const custom of [null, 500000]) {
       const f = await fixture(browser, { reverse, erc20, destination: recipient });
       const row = f.page.getByText('Estimated gas', { exact: true }).locator('..');

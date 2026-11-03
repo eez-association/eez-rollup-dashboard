@@ -263,7 +263,7 @@ async function fixture(browser, options = {}) {
         const matches = getComputedStyle(el).color === getComputedStyle(expected).color;
         expected.remove();
         return matches;
-      }, mode === 'error' ? '--red' : '--yellow'), true, 'RPC failures use red; setup warnings use amber');
+      }, '--red'), true, 'RPC failures and Composer setup warnings must both be prominent red');
       await failed.menu.getByRole('button', { name: 'Copy RPC URL' }).click();
       assert.equal((await failed.page.evaluate(() => window.copiedURLs)).at(-1), new URL('/composer/l1', origin).href);
       await failed.close(); passed++;
@@ -307,7 +307,8 @@ async function fixture(browser, options = {}) {
           window.walletListeners.Rabby.chainChanged('0xdd6d9');
         }
       }, change);
-      await late.page.getByText('Composer not detected', { exact: true }).waitFor();
+      const expectedNotice = change === 'chain' ? 'Select the bridge source network' : 'Composer not detected';
+      await late.page.getByText(expectedNotice, { exact: true }).waitFor();
       await late.page.evaluate(() => window.heldCalls[0]());
       await late.openMenu();
       await late.menu.getByText('Composer not detected', { exact: true }).waitFor();
@@ -431,6 +432,9 @@ async function fixture(browser, options = {}) {
       }, mainnetProfile ? '0x' + (696990).toString(16) : '0xdd6d9');
       const rollup = mainnetProfile ? 'EEZ-X Mainnet' : 'EEZ-X Devnet';
       const rollupId = mainnetProfile ? 696990 : 906969;
+      await guidance.getByText('Select the bridge source network', { exact: true }).waitFor();
+      assert.equal(await guidance.locator('code').innerText(), front + '/composer/l1', 'Bridge guidance retains the required source, even when the wallet switches');
+      await mm.page.getByRole('button', { name: /^Swap source and destination:/ }).click();
       await until(async () => await guidance.locator('code').textContent() === front + '/composer/l2', 'MetaMask RPC URL follows the selected network');
       if (!await guidance.locator('details').evaluate(el => el.open)) {
         await guidance.getByText('MetaMask RPC setup', { exact: true }).click();

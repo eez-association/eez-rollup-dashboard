@@ -24,6 +24,8 @@ interface Props {
   onSetMax: () => void;
   onApprove: () => void;
   onBridge: () => void;
+  composerBlocked: boolean;
+  verifyingComposer: boolean;
   onDismiss: () => void;
   onGasOverride: (gasHex: string | null) => void;
   onRefreshFees: () => void;
@@ -43,6 +45,8 @@ export function BridgePanel({
   onSetMax,
   onApprove,
   onBridge,
+  composerBlocked,
+  verifyingComposer,
   onDismiss,
   onGasOverride,
   onRefreshFees,
@@ -241,7 +245,9 @@ export function BridgePanel({
         </>
       )}
 
-      {disabledReason && <div className={!walletAddress ? styles.sectionHint : styles.validationHint} role="status">{disabledReason}</div>}
+      {walletAddress && composerBlocked && !busy && !verifyingComposer ? <div className={styles.validationHint} role="status">
+        Your wallet is not sending through the EEZ Composer RPC for this network yet. Click {actionLabel} to see the setup steps.
+      </div> : disabledReason && <div className={!walletAddress ? styles.sectionHint : styles.validationHint} role="status">{disabledReason}</div>}
 
       {choosingWallet && <div className={styles.walletPicker} role="group" aria-label="Choose a wallet"
         onKeyDown={event => { if (event.key === "Escape") { event.preventDefault(); setChoosingWallet(false); connectButton.current?.focus(); } }}>
@@ -258,9 +264,9 @@ export function BridgePanel({
         ref={connectButton}
         onClick={walletAddress ? onBridge : () => setChoosingWallet(!choosingWallet)}
         aria-expanded={!walletAddress ? choosingWallet : undefined}
-        disabled={!!walletAddress && !canBridge}
+        disabled={!!walletAddress && (busy || verifyingComposer || (!composerBlocked && !canBridge))}
       >
-        {!walletAddress ? "Connect wallet" : busy ? (
+        {!walletAddress ? "Connect wallet" : verifyingComposer ? "Checking Composer…" : busy ? (
           <><span className="btn-spinner" /> Bridging...</>
         ) : (
           actionLabel

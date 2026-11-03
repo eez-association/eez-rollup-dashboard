@@ -25,9 +25,9 @@ export const safeAbi = parseAbi([
 const sentinel = '0x0000000000000000000000000000000000000001' as Address;
 const guardSlot = '0x4a204f620c8c5ccdca3fd54d003badd85ba500436a431f0cbda4f558c93c34c8' as Hex;
 const fallbackSlot = '0x6c9a6c4a39284e37ed1cf53d337577d14212a4870fb976a4366c693b939918d5' as Hex;
-export type SafeAttachment = { target: Address; walletOwner: Address };
+export type SafeAttachment = { target: Address; walletOwner?: Address };
 export type RemoteSafe = { attachment?: SafeAttachment; factoryMissing?: boolean; owner: Address; target: Address | null; nonce: bigint | null; balance: bigint | null };
-export type SafeOperation = { kind: 'create' } | {
+export type SafeOperation = { kind: 'create'; attachmentBefore?: string | null } | {
   kind: 'transfer'; attachment?: SafeAttachment; target: Address; owner: Address; recipient: Address; value: bigint; data?: Hex; safeNonce: bigint; safeTxHash: Hex;
 };
 
@@ -186,7 +186,7 @@ export async function verifySafeL1Execution(client: EezClient, d: CrossChainDepl
 }
 
 /** Reuse Treasury's reviewed Safe implementations, allowing its existing modules and handler. */
-export async function inspectExistingSafe(client: EezClient, target: Address, signal: AbortSignal, atBlock?: bigint) {
+export async function inspectExistingSafe(client: EezClient, target: Address, signal: AbortSignal, atBlock?: bigint, authorizedContractOwner?: Address) {
   const artifacts = await loadTreasuryArtifacts();
   signal.throwIfAborted();
   const inspection = await inspectSafe({
@@ -201,7 +201,7 @@ export async function inspectExistingSafe(client: EezClient, target: Address, si
         ...(tag !== 'latest' ? { blockNumber: BigInt(tag) } : {}) }) as Promise<T>;
     },
     runtimeMatches: () => false, // L1 inspection does not accept an L2 owner adapter.
-  }, 'l1', target);
+  }, 'l1', target, authorizedContractOwner);
   signal.throwIfAborted();
   return inspection;
 }
@@ -209,9 +209,10 @@ export async function controllerOwner(client: EezClient, d: CrossChainDeployment
   return client.readContract({ address: d.l1.registry, abi: managerAbi, functionName: 'computeCrossChainProxyAddress', args: [controller, d.l2.rollupId], blockNumber });
 }
 async function loadAttachedSafe(client: EezClient, d: CrossChainDeployment, controller: Address, attachment: SafeAttachment, signal: AbortSignal, blockNumber: bigint): Promise<RemoteSafe> {
-  const [safe, owner] = await Promise.all([inspectExistingSafe(client, attachment.target, signal, blockNumber), controllerOwner(client, d, controller, blockNumber)]);
-  if (safe.threshold !== 1 || sameAddress(owner, attachment.walletOwner)
-    || !safe.owners.some(a => sameAddress(a, owner)) || !safe.owners.some(a => sameAddress(a, attachment.walletOwner))) {
+  const owner = await controllerOwner(client, d, controller, blockNumber);
+  const safe = await inspectExistingSafe(client, attachment.target, signal, blockNumber, owner);
+  if (safe.threshold !== 1 || !safe.owners.some(a => sameAddress(a, owner))
+    || attachment.walletOwner && (sameAddress(owner, attachment.walletOwner) || !safe.owners.some(a => sameAddress(a, attachment.walletOwner!)))) {
     throw new Error('The existing Safe must retain the wallet and Falcon controller as owners, with threshold 1.');
   }
   // The registry creates this deterministic proxy on the first cross-chain call.

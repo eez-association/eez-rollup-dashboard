@@ -2,7 +2,16 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { encodeFunctionResult, toHex, stringToHex } from 'viem';
-import { COMPOSER_DISCOVERY_ABI, COMPOSER_DISCOVERY_ADDRESS, COMPOSER_DISCOVERY_MARKER, probeComposer } from '../src/lib/composerDiscovery.ts';
+import { COMPOSER_DISCOVERY_ABI, COMPOSER_DISCOVERY_ADDRESS, COMPOSER_DISCOVERY_MARKER, probeComposer, sameChainId } from '../src/lib/composerDiscovery.ts';
+
+test('chain comparisons reject malformed provider values without throwing', () => {
+  for (const value of [null, undefined, 'invalid', '', '0x', '10200', 10200, {}, '0xzz']) {
+    assert.equal(sameChainId(value, '0x27d8'), false);
+  }
+  assert.equal(sameChainId('0x027D8', '0x27d8'), true);
+  assert.equal(sameChainId('0x1', '0x27d8'), false);
+  assert.equal(sameChainId('invalid', 'invalid'), false);
+});
 
 const registry = '0x' + '11'.repeat(20);
 const l2 = '0x' + '22'.repeat(20);

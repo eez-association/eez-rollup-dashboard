@@ -15,7 +15,7 @@ import { canonicalReceipt, checkChain, checkComposer, controllerClient, createL1
 import { type SafeCostEvidence } from '../../lib/falcon/safeCosts.ts';
 import { SafeCostComparison } from './SafeCostComparison.tsx';
 import { ExistingFalconSafe } from './ExistingFalconSafe';
-import { attachmentKey, readAttachment } from '../../lib/falcon/existingSafe';
+import { attachmentKey, readAttachment, selectFactorySafe, SafeSelectionConflict } from '../../lib/falcon/existingSafe';
 import { loadSafeAccount } from '../../lib/falcon/safeDiscovery';
 import { SafeFeeQuote } from './SafeFeeQuote.tsx';
 import { fetchFeeQuote, feeErrorMessage, recoverFeeTransaction, StaleFeeQuote, submitFeeQuote, UnknownFeeSubmission, type FeeConfig, type FeeIntent, type FeeTransaction, type QuotedFee } from '../../lib/falcon/l2Fees.ts';
@@ -38,10 +38,13 @@ export function FalconSafe({ signer, wallet, deployment, fees, onNeedSafeFactory
   const [controller, setController] = useState<ControllerState | null>(null);
   const [remote, setRemote] = useState<RemoteSafe | null>(null);
   const [existingSafe, setExistingSafe] = useState(false);
+  const [choosingSafe, setChoosingSafe] = useState(false);
+  const selectionRevision = useRef(0);
   const [ownerPending, setOwnerPending] = useState(false);
   const [attachmentRevision, setAttachmentRevision] = useState(0);
   const [lookedUp, setLookedUp] = useState(false);
   const [loadingSafe, setLoadingSafe] = useState(false);
+  const [safeLoadError, setSafeLoadError] = useState<string | null>(null);
   const [recipient, setRecipient] = useState('');
   const [amount, setAmount] = useState('0.000001');
   const [data, setData] = useState('');
@@ -81,31 +84,62 @@ export function FalconSafe({ signer, wallet, deployment, fees, onNeedSafeFactory
   const currentKey = useRef(signer.publicKeyHex), currentInput = useRef({ amount, recipient, data });
   const currentDeployment = useRef(deployment);
   currentDeployment.current = deployment;
+  const loadedFor = useRef<{ publicKey: string; deployment: CrossChainDeployment; revision: number } | null>(null);
   currentKey.current = signer.publicKeyHex; currentInput.current = { amount, recipient, data };
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; request.current?.abort(); }; }, []);
   useEffect(() => {
     setController(null); setRemote(null); setLookedUp(false); setPrepared(null); setObservation('L1 read');
-    setCopyNotice(''); setExistingSafe(false); setOwnerPending(false);
+    setCopyNotice(''); setExistingSafe(false); setChoosingSafe(false); setOwnerPending(false);
+    setSafeLoadError(null);
+    selectionRevision.current++;
+    // The Safe was just cleared, so locking and unlocking the same key must load it again.
+    loadedFor.current = null;
     if (!running.current) setNotice(initial);
     // Retain submitted hashes: the extension owns any pending transaction prompt.
   }, [signer.publicKeyHex, deployment]);
   useEffect(() => {
+    if (!signer.publicKeyHex) return;
+    const key = attachmentKey(deployment, `0x${signer.publicKeyHex}`);
+    const changed = (event: StorageEvent) => {
+      if (event.storageArea !== localStorage || event.key !== null && event.key !== key) return;
+      selectionRevision.current++;
+      setPrepared(null); setFee(null); setAttachmentRevision(value => value + 1);
+    };
+    window.addEventListener('storage', changed);
+    return () => window.removeEventListener('storage', changed);
+  }, [signer.publicKeyHex, deployment]);
+  useEffect(() => {
     if (!signer.publicKeyHex) { setLoadingSafe(false); return; }
+    if (busy || confirming || fundingPending || ownerPending) return;
+    // Actions toggle the flags above; only reload when the key, network or selection
+    // changed since the last successful load (or that load was interrupted).
+    const last = loadedFor.current;
+    if (last && last.publicKey === signer.publicKeyHex && last.deployment === deployment && last.revision === attachmentRevision) return;
     const publicKey = `0x${signer.publicKeyHex}` as Hex;
+    const revision = attachmentRevision;
     const abort = new AbortController();
     setLoadingSafe(true);
-    setNotice({ kind: 'pending', text: 'Finding your Safe account…' });
+    // Keep an action's result (e.g. "Safe created", or an error) visible during the reload.
+    setNotice(before => before.kind === 'valid' || before.kind === 'invalid' || before.kind === 'error' ? before : { kind: 'pending', text: 'Finding your Safe account…' });
     void (async () => {
       try {
         while (!abort.signal.aborted) {
           try {
             const client = eezClient(falconReadProvider(config.l2ProxyRpc, abort.signal, deployment.l2.chainName));
             const attachment = readAttachment(localStorage, attachmentKey(deployment, publicKey));
-            const { controller: state, remote: target } = await loadSafeAccount(client, l1ReadClient(abort.signal), deployment, publicKey, abort.signal, attachment);
+            const { controller: state, remote: target, safeError } = await loadSafeAccount(client, l1ReadClient(abort.signal), deployment, publicKey, abort.signal, attachment, { allowUnavailableSafe: true });
             abort.signal.throwIfAborted();
             if (!sameKey(publicKey) || currentDeployment.current !== deployment) return;
             setController(state); setRemote(target); setLookedUp(true); setLoadingSafe(false);
-            if (!running.current) setNotice({ kind: target?.target ? 'valid' : 'neutral', text: target?.target
+            setSafeLoadError(safeError ?? null);
+            loadedFor.current = { publicKey: publicKey.slice(2), deployment, revision };
+            if (safeError) {
+              // Replacement is available, but no unverified Safe or authorization is retained.
+              selectionRevision.current++; setPrepared(null); setFee(null); setChoosingSafe(true);
+              setNotice({ kind: 'error', text: 'Your controller is verified, but the selected Safe is unavailable. Recheck it or choose another Safe.' });
+              return;
+            }
+            if (!running.current) setNotice(before => before.kind === 'valid' || before.kind === 'invalid' || before.kind === 'error' ? before : { kind: target?.target ? 'valid' : 'neutral', text: target?.target
               ? 'Safe loaded. Ready to send a transaction.'
               : state ? `Controller ready. Create a Safe or add to an existing Safe on ${deployment.l1.chainName}.`
                 : 'Create your Falcon controller on L2 to begin.' });
@@ -119,7 +153,7 @@ export function FalconSafe({ signer, wallet, deployment, fees, onNeedSafeFactory
       } catch { /* Key changes and unmount cancel read-only discovery. */ }
     })();
     return () => abort.abort();
-  }, [signer.publicKeyHex, deployment, attachmentRevision]);
+  }, [signer.publicKeyHex, deployment, attachmentRevision, busy, confirming, fundingPending, ownerPending]);
   useEffect(() => {
     request.current?.abort(); request.current = null;
     running.current = false; setBusy(false); setButtonActivity(null);
@@ -397,6 +431,8 @@ export function FalconSafe({ signer, wallet, deployment, fees, onNeedSafeFactory
   async function prepareAction(signal: AbortSignal, controllerState = controller, safeState = remote) {
     const controller = controllerState, remote = safeState;
     const key = keySnapshot(), input = currentInput.current;
+    const selection = selectionRevision.current;
+    const savedSelection = localStorage.getItem(attachmentKey(deployment, key.publicKey));
     if (!controller || !remote) throw new Error('Load your controller and Safe first.');
     setPrepared(null); setFee(null); setNotice({ kind: 'pending', text: 'Preparing the Falcon signature…' });
     const transfer = remote.target ? parseSafeTransaction(input.recipient, input.amount, input.data) : null;
@@ -415,6 +451,8 @@ export function FalconSafe({ signer, wallet, deployment, fees, onNeedSafeFactory
     const action = { ...safeOperationCall(deployment, operation), sourceChainId: BigInt(deployment.l2.chainId), destinationChainId: BigInt(deployment.l1.chainId), controller: state.controller, eezL2: deployment.l2.manager, nonce: state.nonce, deadline: state.timestamp + 600n };
     const digest = l1ActionDigest(action);
     const isCurrent = () => key.isCurrent() && currentDeployment.current === deployment
+      && selectionRevision.current === selection
+      && localStorage.getItem(attachmentKey(deployment, key.publicKey)) === savedSelection
       && (operation.kind === 'create' || (currentInput.current.amount === input.amount && currentInput.current.recipient === input.recipient && currentInput.current.data === input.data));
     signal.throwIfAborted();
     session.assertCurrent();
@@ -492,18 +530,26 @@ export function FalconSafe({ signer, wallet, deployment, fees, onNeedSafeFactory
       setNotice({ kind: 'pending', text: `Preparing your Safe on ${deployment.l1.chainName}…` });
       // Only a canonical L2 revert permits retrying a known creation attempt.
       if (submitted?.kind === 'call' && submitted.prepared.operation.kind === 'create'
-        && sameKey(submitted.publicKey) && submitted.hash !== revertedSourceHash) {
+        && sameKey(submitted.publicKey) && submitted.hash !== revertedSourceHash && submitted.hash !== confirmedHash) {
         return;
       }
       if (ownerPending) throw new Error('Finish the existing Safe owner transaction first.');
       const state = controller ?? await findController(key, signal);
       if (!state) throw new Error('Safe setup is not ready. Try loading your Safe again.');
       setController(state); setLookedUp(true);
-      const current = await readRemote(state.controller, signal);
+      // The factory lookup is independent of a previously selected external Safe.
+      const attachmentStorageKey = attachmentKey(deployment, key.publicKey);
+      const previousSelection = localStorage.getItem(attachmentStorageKey);
+      const current = await loadRemoteSafe(l1ReadClient(signal), deployment, state.controller, signal);
       key.assertCurrent();
       if (currentDeployment.current !== deployment) throw new Error('Network changed. Load your Safe again.');
       if (current.target) {
-        setRemote(current); setNotice({ kind: 'valid', text: 'Your Safe already exists. It is ready to load and use.' }); return;
+        await navigator.locks.request(attachmentStorageKey, () => {
+          key.assertCurrent(); signal.throwIfAborted();
+          selectFactorySafe(localStorage, attachmentStorageKey, previousSelection);
+        });
+        selectSafe();
+        setNotice({ kind: 'valid', text: 'Factory Safe selected. Your Falcon controller is unchanged.' }); return;
       }
       setRemote(current);
       if (current.factoryMissing) {
@@ -513,6 +559,7 @@ export function FalconSafe({ signer, wallet, deployment, fees, onNeedSafeFactory
       }
       const next = await prepareAction(signal, state, current);
       if (next.operation.kind !== 'create') throw new Error('A Safe already exists. Load it before continuing.');
+      next.operation.attachmentBefore = previousSelection;
       await sendPrepared(next, signal);
     });
   }
@@ -681,15 +728,42 @@ export function FalconSafe({ signer, wallet, deployment, fees, onNeedSafeFactory
     setNotice({ kind: 'pending', text: `Checking canonical execution on ${deployment.l1.chainName}…` });
     const client = l1ReadClient(signal);
     const { remote: target, receipt } = await verifySafeL1Execution(client, deployment, source.controller, tx.prepared.operation, source.result, settlement, signal);
+    // The creation already executed on L1. If another tab changed the selection
+    // meanwhile, keep that choice: a retry could never succeed and would leave this
+    // confirmation loop running forever.
+    let keptOtherSelection = false;
+    if (tx.prepared.operation.kind === 'create' && target.target) {
+      const key = attachmentKey(deployment, tx.publicKey);
+      const expected = tx.prepared.operation.attachmentBefore;
+      await navigator.locks.request(key, () => {
+        signal.throwIfAborted();
+        try { selectFactorySafe(localStorage, key, expected); }
+        catch (error) {
+          if (error instanceof SafeSelectionConflict) keptOtherSelection = true;
+          else throw new Error(`Safe creation is confirmed on L1, but its selection could not be saved. Restore browser storage access; the transaction hash is retained and no new creation will be submitted. ${error instanceof Error ? error.message : ''}`);
+        }
+      });
+      if (sameKey(tx.publicKey)) {
+        setChoosingSafe(false); setExistingSafe(false);
+        // Canonical confirmation already verified this Safe; only a different selection needs discovery.
+        if (keptOtherSelection) setAttachmentRevision(value => value + 1);
+      }
+    }
     if (!mounted.current) return;
     setL1Hash(settlement.l1TransactionHash);
-    if (sameKey(tx.publicKey)) { setRemote(target); setObservation('Canonical L1 execution'); }
+    if (sameKey(tx.publicKey)) {
+      // With another selection kept, discovery reloads that Safe instead of showing the new one.
+      if (!keptOtherSelection) { setRemote(target); setSafeLoadError(null); }
+      setObservation('Canonical L1 execution');
+    }
     if (!signal.aborted && currentDeployment.current === deployment) setCosts(before => before?.sourceHash === tx.hash && before.receiptFee ? {
       ...before, l1Verified: true, receiptFee: { ...before.receiptFee, l1GasPrice: receipt.effectiveGasPrice },
       settlementFee: { gasUsed: receipt.gasUsed, gasPrice: receipt.effectiveGasPrice, blobGasUsed: receipt.blobGasUsed, blobGasPrice: receipt.blobGasPrice },
     } : before);
     signal.throwIfAborted();
-    setNotice({ kind: 'valid', text: tx.prepared.operation.kind === 'create' ? `Safe created on ${deployment.l1.chainName}.` : `Transfer confirmed on ${deployment.l1.chainName}.` });
+    setNotice({ kind: 'valid', text: tx.prepared.operation.kind !== 'create' ? `Transfer confirmed on ${deployment.l1.chainName}.`
+      : keptOtherSelection ? `Safe created on ${deployment.l1.chainName}. Another tab selected a different Safe, so that selection was kept. Use Change Safe to switch to the new Safe.`
+        : `Safe created on ${deployment.l1.chainName}.` });
   }
 
   async function copyAddress() {
@@ -706,6 +780,18 @@ export function FalconSafe({ signer, wallet, deployment, fees, onNeedSafeFactory
   function clearAuthorization() {
     setPrepared(null); setFee(null);
     setNotice({ kind: 'neutral', text: 'Review the transaction details, then sign with Falcon.' });
+  }
+  function selectSafe() {
+    selectionRevision.current++;
+    setPrepared(null); setFee(null); setCosts(null); setL1Hash(null);
+    setSubmitted(null); setConfirmedHash(null); setRevertedSourceHash(null);
+    setRecipient(''); setAmount('0.000001'); setData(''); setCopyNotice('');
+    setFundedHash(null); setFunding(null); setFundingNotice(null);
+    setRemote(null); setLoadingSafe(true);
+    setSafeLoadError(null);
+    setExistingSafe(false); setChoosingSafe(false); setOwnerPending(false);
+    setNotice({ kind: 'pending', text: 'Loading the selected Safe…' });
+    setAttachmentRevision(value => value + 1);
   }
 
   const unsentControls = (attempt: RecoveryAttempt) => !attempt.hash && <fieldset className={styles.fields} disabled={busy}>
@@ -724,10 +810,10 @@ export function FalconSafe({ signer, wallet, deployment, fees, onNeedSafeFactory
   const unavailable = loadingSafe || busy || confirming || fundingPending || !!controllerJournal.attempt || !!fundingJournal.error || !!controllerJournal.error
     || wallet.networkSetup?.status === 'connecting' || !!uncertain || signer.busy || !signer.publicKeyHex || !wallet.address || !deployment.l1.safe;
   const safeReady = !!remote?.target && remote.balance !== null && remote.nonce !== null;
-  const transactionLocked = busy || confirming || !!uncertain;
+  const transactionLocked = busy || confirming || !!uncertain || choosingSafe || ownerPending;
   const creatingSafe = activeSubmission?.kind === 'call' && activeSubmission.prepared.operation.kind === 'create' && confirming;
   const setupRunning = busy || creatingSafe || !!controllerJournal.attempt?.hash;
-  const showSetup = !!recoveryOwner && lookedUp && (!remote?.target || creatingSafe);
+  const showSetup = !!recoveryOwner && lookedUp && (!remote?.target || creatingSafe || choosingSafe);
   const preparationComplete = !!controller && !controllerJournal.attempt;
   const showAccount = !!remote?.target && !creatingSafe;
   return <section className={styles.card} aria-labelledby="safe-heading">
@@ -740,8 +826,20 @@ export function FalconSafe({ signer, wallet, deployment, fees, onNeedSafeFactory
           <button className="btn btn-sm btn-outline" onClick={() => void copyAddress()} aria-label="Copy Safe address">Copy address</button>
         </div>
         {copyNotice && <p role="status" className={styles.copyNotice}>{copyNotice}</p>}
+        {!choosingSafe && <button className="btn btn-outline" disabled={unavailable || ownerPending} onClick={() => {
+          selectionRevision.current++; clearAuthorization(); setChoosingSafe(true); setExistingSafe(false);
+          setNotice({ kind: 'neutral', text: 'Choose which Safe this Falcon controller should use. Nothing changes on chain until you confirm.' });
+        }}>Change Safe</button>}
       </> : <p>Create a Safe account on {deployment.l1.chainName} controlled by your Falcon key.</p>}
     </header>
+    {safeLoadError && <div role="alert" className={styles.status}>
+      <p>The selected Safe could not be verified: {safeLoadError} Sending and funding this Safe are disabled. You can select another Safe using the same controller.</p>
+      <button className="btn btn-outline" disabled={unavailable || ownerPending} onClick={() => {
+        setNotice({ kind: 'pending', text: 'Rechecking the selected Safe…' });
+        setChoosingSafe(false);
+        setLoadingSafe(true); setAttachmentRevision(value => value + 1);
+      }}>Recheck selected Safe</button>
+    </div>}
     {showSetup && <div className={styles.setupProgress}>
       <ol id="safe-setup-progress" className={styles.setupSteps} aria-label="Safe setup progress" aria-live="polite">
         <li data-state={preparationComplete ? 'complete' : 'active'} aria-current={!preparationComplete ? 'step' : undefined}>
@@ -759,17 +857,26 @@ export function FalconSafe({ signer, wallet, deployment, fees, onNeedSafeFactory
       </button> : <>
         {!existingSafe && <div className={styles.safeChoices}>
           <button id="safe-create" className={`btn btn-solid ${styles.action}`} disabled={unavailable || ownerPending} aria-busy={setupRunning} onClick={() => void createSafe()}>
-            {setupRunning ? 'Creating Safe…' : 'Create a Safe'}
+            {setupRunning ? 'Preparing Safe…' : choosingSafe ? 'Use my Falcon Safe' : 'Create a Safe'}
           </button>
           <button className={`btn btn-solid ${styles.action}`} disabled={unavailable || ownerPending} onClick={() => setExistingSafe(true)}>Add to existing Safe</button>
         </div>}
-        {controller && signer.publicKeyHex && <ExistingFalconSafe key={recoveryScope} wallet={wallet} deployment={deployment} controller={controller}
-          publicKey={`0x${signer.publicKeyHex}`} disabled={unavailable} visible={existingSafe} onPending={setOwnerPending} onBack={() => setExistingSafe(false)}
-          isCurrent={() => mounted.current && currentKey.current === signer.publicKeyHex && currentScope.current === recoveryScope && currentDeployment.current === deployment}
-          onAttached={() => { setExistingSafe(false); setOwnerPending(false); setAttachmentRevision(value => value + 1); }} />}
-        {!existingSafe && <SafeFeeQuote fee={fee} config={fees} />}
+        {choosingSafe && <>
+          <p className={styles.hint}>Reuse the same Falcon controller with another Safe. This replaces the demo’s selection; the previous Safe and its owners stay unchanged. “Use my Falcon Safe” selects the Safe created for this controller, or creates it if it does not exist yet (only then is a transaction needed).</p>
+          {!existingSafe && <button className="btn btn-outline" disabled={unavailable || ownerPending} onClick={() => {
+            setChoosingSafe(false); setRemote(null); setLoadingSafe(true); setAttachmentRevision(value => value + 1);
+            // Neutral, so the reload may replace it (an earlier error would otherwise persist).
+            setNotice({ kind: 'neutral', text: 'Loading your current Safe…' });
+          }}>Keep current Safe</button>}
+        </>}
+        {/* Selecting an existing Safe is free; while choosing, show fees only for a real creation quote. */}
+        {!existingSafe && (!choosingSafe || fee) && <SafeFeeQuote fee={fee} config={fees} />}
       </>}
     </div>}
+    {controller && signer.publicKeyHex && <ExistingFalconSafe key={recoveryScope} wallet={wallet} deployment={deployment} controller={controller}
+      publicKey={`0x${signer.publicKeyHex}`} disabled={unavailable} visible={existingSafe} onPending={setOwnerPending} onBack={() => setExistingSafe(false)}
+      isCurrent={() => mounted.current && currentKey.current === signer.publicKeyHex && currentScope.current === recoveryScope && currentDeployment.current === deployment}
+      onAttached={selectSafe} />}
     {!signer.publicKeyHex && <p role="status" className={`${styles.status} ${styles.unlockNotice}`}><strong>Unlock your Falcon key</strong><br />Your Safe account will load automatically.</p>}
     {(fundingJournal.error || controllerJournal.error) && <p role="alert">{fundingJournal.error || controllerJournal.error}</p>}
     {fundingNotice && <p role="status" className={styles.status} data-result={fundingNotice.kind}>{fundingNotice.text}</p>}
@@ -819,7 +926,7 @@ export function FalconSafe({ signer, wallet, deployment, fees, onNeedSafeFactory
       <p className={styles.hint}>These calls are read-only. A zero address from either factory means that contract has not been created yet.</p>
     </details>}
     {!deployment.l1.safe && <p className={styles.hint}>Safe deployment has not been configured for this network.</p>}
-    {controller && remote && <>
+    {controller && remote && !choosingSafe && !ownerPending && <>
       {remote.target && remote.balance !== null && <div className={styles.safeStats}>
         <div><span className={styles.label}>Safe balance · {symbol}</span><strong id="safe-balance">{remote.balance === null ? '—' : formatUnits(remote.balance, 18)}</strong></div>
         <div role="group" aria-label="Fund Safe on L1">
@@ -864,7 +971,7 @@ export function FalconSafe({ signer, wallet, deployment, fees, onNeedSafeFactory
       </section> : null}
       <details className={styles.details}><summary>Contracts &amp; authority</summary>
         <p className={styles.hint}>{observation} · Controller nonce {controller.nonce.toString()}.</p>
-        <p className={styles.hint}>{remote.attachment ? 'At last check, Falcon was an additional owner with threshold 1; each owner can execute independently. Existing modules and settings are preserved.' : 'At last check, the controller’s L1 proxy was the sole owner, with no modules or guard.'} Keep your encrypted Falcon backup.</p>
+        <p className={styles.hint}>{remote.attachment ? 'At last check, the Falcon controller proxy was an owner with threshold 1. Each owner can execute independently. Existing modules and settings are preserved.' : 'At last check, the controller’s L1 proxy was the sole owner, with no modules or guard.'} Keep your encrypted Falcon backup.</p>
         <p className={styles.contractDetails}><a id="safe-controller" href={`${deployment.l2.explorer}/address/${controller.controller}`} target="_blank" rel="noreferrer">L2 controller · {controller.controller}</a></p>
         <p className={styles.contractDetails}><a href={`${deployment.l1.explorer}/address/${remote.owner}`} target="_blank" rel="noreferrer">L1 owner proxy · {remote.owner}</a></p>
       </details>

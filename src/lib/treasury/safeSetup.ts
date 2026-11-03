@@ -58,7 +58,8 @@ export function ownerFingerprint(owners: readonly Address[], threshold: number) 
 }
 
 /** Inspect a real Safe at one canonical block; version() alone is insufficient. */
-export async function inspectSafe(d: Pick<DeploymentIO, "artifacts" | "rpc" | "read" | "runtimeMatches">, chain: SetupChain, address: Address): Promise<SafeInspection> {
+export async function inspectSafe(d: Pick<DeploymentIO, "artifacts" | "rpc" | "read" | "runtimeMatches">, chain: SetupChain, address: Address,
+  authorizedContractOwner?: Address): Promise<SafeInspection> {
   const block = await d.rpc<{ number: Hex; hash: Hex }>(chain, "eth_getBlockByNumber", ["latest", false]);
   check(block, "Canonical Safe state is unavailable");
   const [proxy, slot, guard] = await Promise.all([
@@ -104,7 +105,8 @@ export async function inspectSafe(d: Pick<DeploymentIO, "artifacts" | "rpc" | "r
     check(registration[0] && same(registration[1], safeL1) && registration[2] === 0n && proxyCode !== "0x", "Owner adapter's L1 Safe proxy is not registered");
     adapter = { address: owners[0]!, safeL1, manager };
   }
-  check(adapter || signableOwners.length >= Number(threshold), owners.length === 1
+  check(adapter || signableOwners.length >= Number(threshold)
+    || chain === "l1" && threshold === 1n && authorizedContractOwner && owners.some(owner => same(owner, authorizedContractOwner)), owners.length === 1
     ? `This Safe is controlled by contract ${owners[0]}. This setup cannot collect contract-owner signatures; authorize changes through the existing owner.`
     : "This Safe requires contract-owner signatures that this setup UI cannot collect");
   const again = await d.rpc<{ hash: Hex }>(chain, "eth_getBlockByNumber", [block.number, false]);

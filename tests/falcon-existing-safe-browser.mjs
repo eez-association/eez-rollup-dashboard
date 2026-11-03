@@ -122,7 +122,7 @@ async function rpc({method,params=[],chain,walletRead=false}) {
   assert.equal(await page.locator('#falcon-infrastructure').count(),0,'L2 infrastructure is enough to choose an existing Safe');
   await page.locator('[aria-labelledby="safe-heading"]').screenshot({path:'/tmp/falcon-safe-choices.png'});
   await page.getByRole('button',{name:'Add to existing Safe',exact:true}).click(); } catch(error) { console.error(await page.locator('body').innerText()); throw error; }
- const input=page.getByLabel('L1 Safe address',{exact:true}),add=page.getByRole('button',{name:'Add Falcon controller',exact:true});
+ const input=page.getByLabel('L1 Safe address',{exact:true}),add=page.getByRole('button',{name:'Use this Safe',exact:true});
  assert.equal((await input.inputValue()).toLowerCase(),safe.toLowerCase(),'Treasury L1 address is prefilled, not its mirror');
  await page.locator('[aria-labelledby="safe-heading"]').screenshot({path:'/tmp/falcon-add-controller.png'});
  assert.equal(await page.getByText(/Gas wallet ·/).count(),0);
@@ -185,6 +185,9 @@ async function rpc({method,params=[],chain,walletRead=false}) {
  await release();await status('wallet');
  const journalKey=scopedRecoveryKey(recoveryKey(d,'owner'),{account,publicKey});
  await page.waitForFunction(key=>!!localStorage.getItem(key),journalKey);
+ // The recovery journal is deliberately persisted before opening the wallet.
+ // Wait for the actual submission, not merely that earlier storage write.
+ await page.waitForFunction(()=>window.existingSafeWallet.loseReply===false);
  assert.equal(sends.length,1);await page.waitForFunction(()=>document.querySelector('#falcon-existing-safe')?.disabled);
  const savedRequest=await page.evaluate(key=>localStorage.getItem(key),journalKey);
  await page.evaluate(({key,other})=>{const record=JSON.parse(localStorage.getItem(key));record.account=other;localStorage.setItem(key,JSON.stringify(record));},{key:journalKey,other:a(999)});
@@ -195,7 +198,19 @@ async function rpc({method,params=[],chain,walletRead=false}) {
  await status('Checking automatically');assert.equal(sends.length,1,'reload never resubmits');
  assert.equal(await page.getByText('Owner transaction recovery',{exact:true}).count(),0);
  assert.equal(await page.getByLabel('Owner transaction hash',{exact:true}).count(),0);
+ // A different selection can be saved while the wallet's transaction is pending.
+ // Retain the receipt until the user explicitly resolves the selection conflict.
+ await page.evaluate(({key,target,walletOwner})=>{
+  localStorage.setItem(key,JSON.stringify({target,walletOwner}));
+  window.dispatchEvent(new StorageEvent('storage',{key,storageArea:localStorage}));
+ },{key:attachmentKey(d,publicKey),target:safe,walletOwner:other});
  owners=[owner,account,other];nonce=8n;confirmed=true;
+ await page.getByRole('group',{name:'Resolve confirmed Safe selection'}).waitFor();
+ assert.equal(sends.length,1,'a selection conflict must not resubmit the owner transaction');
+ assert(await page.evaluate(key=>!!localStorage.getItem(key),journalKey),'retain recovery until explicit acknowledgement');
+ const keepSelection=name==='MetaMask';
+ await page.getByRole('button',{name:keepSelection?'Keep current selection':'Use confirmed Safe',exact:true}).click();
+ if(keepSelection) await status('Your current Safe selection was kept');
  await page.getByRole('heading',{name:'Your Safe account',exact:true}).waitFor();
  assert.equal(await page.locator('#safe-address').getAttribute('title'),safe);
  await page.locator('#safe-sign').waitFor();await page.locator('#safe-send').waitFor();await page.locator('#safe-fund').waitFor();
@@ -205,6 +220,20 @@ async function rpc({method,params=[],chain,walletRead=false}) {
  await page.screenshot({path:'/tmp/falcon-existing-safe.png',fullPage:true});
  await page.reload();await page.locator('#unlock-saved').waitFor();await page.getByLabel('Saved key password',{exact:true}).fill('existing-safe-test-password');await page.locator('#unlock-saved').click();
  await page.getByRole('heading',{name:'Your Safe account',exact:true}).waitFor();assert.equal(sends.length,1);
+ // A previously saved Safe can become invalid without invalidating the controller.
+ threshold=2n;
+ await page.reload();await page.locator('#unlock-saved').waitFor();
+ await page.getByLabel('Saved key password',{exact:true}).fill('existing-safe-test-password');await page.locator('#unlock-saved').click();
+ await page.getByRole('alert').filter({hasText:'The selected Safe could not be verified'}).waitFor();
+ assert.equal(await page.locator('#safe-sign').count(),0);
+ assert.equal(await page.locator('#safe-fund').count(),0);
+ assert.equal(await page.locator('#controller-create').count(),0,'reuse the verified controller');
+ await page.getByRole('button',{name:'Add to existing Safe',exact:true}).click();
+ threshold=1n;
+ await page.getByLabel('L1 Safe address',{exact:true}).fill(safe);
+ await page.getByRole('button',{name:'Use this Safe',exact:true}).click();
+ await page.locator('#safe-sign').waitFor();
+ assert.equal(sends.length,1,'reselecting an authorized Safe must not submit another transaction');
  assert(!reads.some(r=>r.method==='eth_call'&&eq(r.params[0].to,l2Safe)),'attachment never reads or changes the L2 mirror');
  if(d.walletSetup){
   assert(!reads.some(r=>r.method==='eth_call'&&eq(r.params[0].to,d.l1.safe.factory.address)),'existing Safe never calls the absent creation factory');

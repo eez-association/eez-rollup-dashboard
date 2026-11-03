@@ -34,6 +34,8 @@ try {
     const controllerSends = [];
     let failFirstReceipt = missingNetwork && name === 'MetaMask';
     const quotes = [], sends = [], walletCalls = [], observationCalls = [], fundingSends = [];
+    const factoryReads = () => observationCalls.filter(c => c.method === 'eth_call' && same(c.params[0].to, d.l2.factory.address)).length;
+    let factoryReadsAtSettlement;
     let safeBalance = 0n, mockRpc;
     let safeOwners = [owner];
     let optionFailure = false;
@@ -72,7 +74,10 @@ try {
       if (method === 'eth_getLogs') return [];
       if (method === 'eth_getTransactionBySenderAndNonce') return name === 'MetaMask' && controllerSends.length ? { hash: controllerTxHash } : null;
       if (method === 'eez_getSettlementByL2Block' && holdSettlement) return null;
-      if (method === 'eez_getSettlementByL2Block') return { canonicalL2: true, l1BlockNumber: toHex(blockNumber), l1BlockHash, l1TransactionHash: settlementHash, l2Blocks: [{ hash: blockHash, number: toHex(blockNumber) }] };
+      if (method === 'eez_getSettlementByL2Block') {
+        factoryReadsAtSettlement = factoryReads();
+        return { canonicalL2: true, l1BlockNumber: toHex(blockNumber), l1BlockHash, l1TransactionHash: settlementHash, l2Blocks: [{ hash: blockHash, number: toHex(blockNumber) }] };
+      }
       if (method === 'eth_sendTransaction' && same(params[0].to, d.l2.factory.address)) {
         assert.equal(decodeFunctionData({ abi: l1ControllerFactoryAbi, data: params[0].data }).functionName, 'createController');
         controllerReady = true; controllerSends.push(params[0]); return controllerTxHash;
@@ -352,6 +357,10 @@ try {
       holdSettlement = false;
     }
     await status('Safe created on');
+    if (name === 'MetaMask') {
+      await page.waitForFunction(() => document.querySelector('#safe-sign')?.disabled === false);
+      assert.equal(factoryReads(), factoryReadsAtSettlement, 'creation confirmation reuses the verified Safe without restarting controller discovery');
+    }
     assert.equal(await setupSteps.count(), 0, 'setup steps disappear once the Safe is ready');
     assert(!observationCalls.some(call => call.method === 'eth_gasPrice' && call.path.endsWith('/rpc/l1')), 'setup does not calculate a cost comparison');
     assert.equal(await page.locator('#safe-check-source, #safe-check-l1, #safe-replay').count(), 0);
@@ -377,7 +386,7 @@ try {
     assert(calls.filter(c => c.method === 'wallet_switchEthereumChain').every(c => c.params[0].chainId === toHex(d.l2.chainId)), 'Safe reads and confirmation must not switch the wallet to L1');
     if (name === 'MetaMask' && d.l2.chainId === 699169) {
       const sendsBeforeSwitch = sends.length;
-      const mappingsBeforeSwitch = observationCalls.filter(c => c.method === 'eth_call' && same(c.params[0].to, d.l2.factory.address)).length;
+      const mappingsBeforeSwitch = factoryReads();
       for (const gasWallet of ['0x'+'99'.repeat(20), account]) {
         await page.evaluate(account => { const w = window.falconWalletTest; w.account = account; w.emit('accountsChanged', [account]); }, gasWallet);
         await page.waitForFunction(expected => !!document.querySelector('#safe-trace') === expected, gasWallet === account);
@@ -386,7 +395,7 @@ try {
         assert.equal(await page.locator('#safe-trace').count(), gasWallet === account ? 1 : 0, 'trace follows the same transaction context');
       }
       assert.equal(sends.length, sendsBeforeSwitch, 'changing the gas wallet never sends a transaction');
-      assert.equal(observationCalls.filter(c => c.method === 'eth_call' && same(c.params[0].to, d.l2.factory.address)).length,
+      assert.equal(factoryReads(),
         mappingsBeforeSwitch, 'changing the gas wallet retains the key-scoped Safe without repeating discovery');
       assert.equal(await page.locator('#safe-balance').textContent(), '0');
       await page.locator('#safe-recipient').fill('0x'+'99'.repeat(20));
