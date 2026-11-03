@@ -5,6 +5,7 @@ import { createServer } from 'vite';
 import react from '@vitejs/plugin-react';
 import { chromium } from 'playwright';
 import { keccak256, toHex } from 'viem';
+import { composerResponse } from './composer-fixture.cjs';
 import { setupIdentity } from '../src/lib/treasury/mainnetSetup.ts';
 import { savedNetworkKey } from '../src/lib/treasury/savedNetwork.ts';
 
@@ -37,6 +38,9 @@ try {
     }, runtime.bridgeL1Address, runtime.bridgeL2Address, runtime.treasuryTokenAddress) : null;
     const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
     const page = await context.newPage(), errors = [];
+    await page.exposeFunction('gasBridgeComposer', (data, chain) => composerResponse(data, chain,
+      toHex(network.chains.l1.chainId), toHex(network.chains.l2.chainId),
+      { eezRegistryAddress: network.registry, eezL2Address: network.manager }));
     activePage = page;
     page.setDefaultTimeout(10000);
     page.on('pageerror', error => errors.push(error.message));
@@ -48,7 +52,7 @@ try {
       window.ethereum = { isMetaMask: true, chain, on() {}, removeListener() {}, async request({ method, params }) {
         if (method === 'eth_accounts') return [account];
         if (method === 'eth_chainId') return this.chain;
-        if (method === 'eth_call') return '0x';
+        if (method === 'eth_call') return window.gasBridgeComposer(params[0].data, this.chain);
         if (method.startsWith('wallet_') || /send|sign/.test(method)) {
           window.gasBridgeTest.walletOps.push({ method, params });
           if (method === 'wallet_switchEthereumChain') this.chain = params[0].chainId;
@@ -116,6 +120,12 @@ try {
     await page.getByRole('button', { name: 'Bridge to L2', exact: true }).click();
     await page.getByLabel('Bridge amount', { exact: true }).fill('0.01');
     const send = page.getByRole('button', { name: 'Bridge ' + symbol, exact: true });
+    await send.click();
+    const guidance = page.getByRole('region', { name: 'Wallet Composer connection' }).filter({ hasText: 'Bridging is blocked.' });
+    await guidance.getByText('Select the bridge source network', { exact: true }).waitFor();
+    assert.deepEqual(await page.evaluate(() => window.gasBridgeTest.walletOps), [], 'Blocked submission must not request a network switch or signature');
+    await guidance.getByRole('button', { name: 'Switch to source network', exact: true }).click();
+    await guidance.waitFor({ state: 'hidden' });
     await send.click();
     await page.waitForFunction(() => window.gasBridgeTest.walletOps.some(op => op.method === 'eth_sendTransaction'));
     await page.getByRole('dialog').getByRole('button', { name: 'Close', exact: true }).click();

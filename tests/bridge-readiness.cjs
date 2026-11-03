@@ -30,18 +30,19 @@ async function until(predicate, message) {
 async function fixture(browser, options = {}) {
   const context = await browser.newContext();
   const page = await context.newPage();
-  await page.exposeFunction('bridgeComposerDiscovery', data => composerResponse(data, '0x27d8'));
+  await page.exposeFunction('bridgeComposerDiscovery', (data, chain) => composerResponse(data, chain));
   await page.clock.install();
   const errors = [], writes = [], calls = [];
   const modes = { l1: 'ready', l2: 'ready', ...options.modes };
   let configRequested = false;
   page.on('pageerror', error => errors.push(error.message));
-  await page.addInitScript(() => {
-    window.ethereum = { isRabby: true, on() {}, removeListener() {}, async request({ method, params }) {
+  await page.addInitScript(chain => {
+    window.ethereum = { isRabby: true, chain, on() {}, removeListener() {}, async request({ method, params }) {
       if (method === 'eth_requestAccounts' || method === 'eth_accounts') return ['0x' + '77'.repeat(20)];
-      if (method === 'eth_chainId') return '0x27d8';
-      if (method === 'eth_call') return window.bridgeComposerDiscovery(params[0].data);
-      if (method === 'wallet_addEthereumChain' || method === 'wallet_switchEthereumChain') return null;
+      if (method === 'eth_chainId') return this.chain;
+      if (method === 'eth_call') return window.bridgeComposerDiscovery(params[0].data, this.chain);
+      if (method === 'wallet_addEthereumChain') return null;
+      if (method === 'wallet_switchEthereumChain') { this.chain = params[0].chainId; return null; }
       throw new Error('Unexpected wallet operation: ' + method);
     } };
     window.bridgeMissingMessages = [];
@@ -51,7 +52,7 @@ async function fixture(browser, options = {}) {
         window.bridgeMissingMessages.push(text);
       }
     }).observe(document, { subtree: true, childList: true, characterData: true });
-  });
+  }, options.chain || '0x27d8');
   await page.route('**/*', async route => {
     const request = route.request();
     const pathname = new URL(request.url()).pathname;
@@ -184,12 +185,16 @@ async function fixture(browser, options = {}) {
       await f.clean();
     }
 
-    const reverse = await fixture(browser, { modes: { l2: 'no-code' } });
+    const reverse = await fixture(browser, { chain: '0x1892', modes: { l2: 'no-code' } });
     await reverse.page.getByTitle('Swap direction').click();
+    const guidance = reverse.page.getByRole('region', { name: 'Wallet Composer connection' }).filter({ hasText: 'Bridging is blocked.' });
+    await guidance.waitFor({ state: 'hidden' });
     await reverse.page.getByText(missing + ' on L2.', { exact: true }).waitFor();
     await reverse.page.getByLabel('Bridge amount', { exact: true }).fill('0.001');
     assert.equal(await reverse.button.isDisabled(), true);
     await reverse.page.getByTitle('Swap direction').click();
+    await guidance.getByRole('button', { name: 'Switch to source network', exact: true }).click();
+    await guidance.waitFor({ state: 'hidden' });
     await until(() => reverse.button.isEnabled(), 'L2 missing deployment incorrectly blocked ready L1');
     results.push('Direction changes display the correct chain readiness independently');
     await reverse.clean();
