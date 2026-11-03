@@ -14,6 +14,8 @@ export function useWallet(log: Logger, configLoaded = false) {
     chainId: null,
     l1Balance: null,
     l2Balance: null,
+    l1BalanceRaw: null,
+    l2BalanceRaw: null,
     isConnected: false,
   });
 
@@ -92,34 +94,45 @@ export function useWallet(log: Logger, configLoaded = false) {
     return () => clearTimeout(timer);
   }, []);
 
-  const refreshBalance = useCallback(async (address: string) => {
-    // Fetch L1 and L2 balances in parallel
-    const [l1Result, l2Result] = await Promise.allSettled([
-      rpcCall(config.l1Rpc, "eth_getBalance", [address, "latest"]),
-      rpcCall(config.l2Rpc, "eth_getBalance", [address, "latest"]),
-    ]);
+  const balanceRequest = useRef<{ key: string; controller: AbortController; promise: Promise<void> } | null>(null);
+  const refreshBalance = useCallback((address: string) => {
+    const key = `${address.toLowerCase()}:${config.l1Rpc}:${config.l2Rpc}`;
+    if (balanceRequest.current?.key === key && !balanceRequest.current.controller.signal.aborted) return balanceRequest.current.promise;
+    balanceRequest.current?.controller.abort();
+    const controller = new AbortController();
+    const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(10_000)]);
+    const promise = (async () => {
+      const [l1Result, l2Result] = await Promise.allSettled([
+        rpcCall(config.l1Rpc, "eth_getBalance", [address, "latest"], signal),
+        rpcCall(config.l2Rpc, "eth_getBalance", [address, "latest"], signal),
+      ]);
 
-    // Use BigInt for precision — parseInt + /1e18 loses precision for
-    // values above ~2^53 wei (which includes the CCM's 1M ETH genesis pre-mint).
-    const formatEth = (hex: string): string => {
-      try {
-        const wei = BigInt(hex);
-        const ONE_ETH = 10n ** 18n;
-        const whole = wei / ONE_ETH;
-        // Cap unreasonable balances (e.g. CCM with 1M ETH pre-mint)
-        if (whole > 10n ** 9n) return "∞";
-        const frac = wei % ONE_ETH;
-        const fracStr = frac.toString().padStart(18, "0").slice(0, 4);
-        return `${whole.toString()}.${fracStr}`;
-      } catch {
-        return "—";
-      }
-    };
+      // Use BigInt for precision — parseInt + /1e18 loses precision for
+      // values above ~2^53 wei (which includes the CCM's 1M ETH genesis pre-mint).
+      const formatEth = (hex: string): string => {
+        try {
+          const wei = BigInt(hex);
+          const ONE_ETH = 10n ** 18n;
+          const whole = wei / ONE_ETH;
+          // Cap unreasonable balances (e.g. CCM with 1M ETH pre-mint)
+          if (whole > 10n ** 9n) return "∞";
+          const frac = wei % ONE_ETH;
+          const fracStr = frac.toString().padStart(18, "0").slice(0, 4);
+          return `${whole.toString()}.${fracStr}`;
+        } catch {
+          return "—";
+        }
+      };
 
-    const l1Bal = l1Result.status === "fulfilled" ? formatEth(l1Result.value as string) : null;
-    const l2Bal = l2Result.status === "fulfilled" ? formatEth(l2Result.value as string) : null;
+      const l1Bal = l1Result.status === "fulfilled" ? formatEth(l1Result.value as string) : null;
+      const l2Bal = l2Result.status === "fulfilled" ? formatEth(l2Result.value as string) : null;
 
-    setState((s) => ({ ...s, l1Balance: l1Bal, l2Balance: l2Bal }));
+      const raw = (result: PromiseSettledResult<unknown>) => result.status === "fulfilled" && typeof result.value === "string" && /^0x[0-9a-f]+$/i.test(result.value) ? BigInt(result.value) : null;
+      if (!controller.signal.aborted) setState((s) => s.address?.toLowerCase() === address.toLowerCase()
+        ? { ...s, l1Balance: l1Bal, l2Balance: l2Bal, l1BalanceRaw: raw(l1Result), l2BalanceRaw: raw(l2Result) } : s);
+    })().finally(() => { if (balanceRequest.current?.controller === controller) balanceRequest.current = null; });
+    balanceRequest.current = { key, controller, promise };
+    return promise;
   }, []);
 
   const connect = useCallback(async (providerId?: string) => {
@@ -154,6 +167,8 @@ export function useWallet(log: Logger, configLoaded = false) {
         chainId,
         l1Balance: null,
         l2Balance: null,
+        l1BalanceRaw: null,
+        l2BalanceRaw: null,
         isConnected: true,
       });
       localStorage.setItem("walletConnected", "true");
@@ -162,11 +177,10 @@ export function useWallet(log: Logger, configLoaded = false) {
         `${choice.name} connected: ${addr.slice(0, 8)}...${addr.slice(-6)}`,
         "info",
       );
-      refreshBalance(addr);
     } catch (e) {
       log(`Wallet connect failed: ${(e as Error).message}`, "err");
     }
-  }, [hasProvider, walletOptions, log, refreshBalance]);
+  }, [hasProvider, walletOptions, log]);
 
   const disconnect = useCallback(() => {
     selectedProviderRef.current = null;
@@ -176,6 +190,8 @@ export function useWallet(log: Logger, configLoaded = false) {
       chainId: null,
       l1Balance: null,
       l2Balance: null,
+      l1BalanceRaw: null,
+      l2BalanceRaw: null,
       isConnected: false,
     });
     localStorage.removeItem("walletConnected");
@@ -336,15 +352,16 @@ export function useWallet(log: Logger, configLoaded = false) {
             chainId,
             l1Balance: null,
             l2Balance: null,
+            l1BalanceRaw: null,
+            l2BalanceRaw: null,
             isConnected: true,
           });
-          refreshBalance(addr);
         } catch {
           /* silent */
         }
       })();
     }
-  }, [configLoaded, discoveryReady, hasProvider, walletOptions, refreshBalance]);
+  }, [configLoaded, discoveryReady, hasProvider, walletOptions]);
 
   // Listen for account/chain changes
   useEffect(() => {
@@ -357,8 +374,7 @@ export function useWallet(log: Logger, configLoaded = false) {
         disconnect();
       } else {
         setWalletRevision(revision => revision + 1);
-        setState((s) => ({ ...s, address: accounts[0]! }));
-        refreshBalance(accounts[0]!);
+        setState((s) => ({ ...s, address: accounts[0]!, l1Balance: null, l2Balance: null, l1BalanceRaw: null, l2BalanceRaw: null }));
       }
     }) as (...args: unknown[]) => void;
 
@@ -374,14 +390,19 @@ export function useWallet(log: Logger, configLoaded = false) {
       eth.removeListener("accountsChanged", onAccountsChanged);
       eth.removeListener("chainChanged", onChainChanged);
     };
-  }, [selectedProvider, disconnect, refreshBalance]);
+  }, [selectedProvider, disconnect]);
 
   // Periodic balance refresh
   useEffect(() => {
-    if (!state.isConnected || !state.address) return;
-    const interval = setInterval(() => refreshBalance(state.address!), 10000);
-    return () => clearInterval(interval);
-  }, [state.isConnected, state.address, refreshBalance]);
+    if (!configLoaded || !state.isConnected || !state.address) return;
+    let stopped = false, timer: ReturnType<typeof setTimeout>;
+    const poll = async () => {
+      await refreshBalance(state.address!);
+      if (!stopped) timer = setTimeout(poll, 10_000);
+    };
+    void poll();
+    return () => { stopped = true; clearTimeout(timer); balanceRequest.current?.controller.abort(); };
+  }, [configLoaded, state.isConnected, state.address, refreshBalance, config.l1Rpc, config.l2Rpc]);
 
   return {
     ...state,

@@ -197,6 +197,7 @@ export function useBridge(
   walletAddress: string | null,
   configLoaded: boolean,
   quoteFees: QuoteFees,
+  { active, l1Balance, l2Balance }: { active: boolean; l1Balance: bigint | null; l2Balance: bigint | null },
 ) {
   const defaultGas: BridgeGasState = {
     status: "idle", estimate: null, gasLimit: null,
@@ -249,7 +250,7 @@ export function useBridge(
   // Configuration loads asynchronously. Unknown or failed reads must not be
   // presented as a confirmed missing deployment.
   useEffect(() => {
-    if (!configLoaded) return;
+    if (!configLoaded || !active) return;
     let cancelled = false;
     let checking = false;
     setState((s) => ({ ...s, l1BridgeReady: null, l2BridgeReady: null,
@@ -299,47 +300,44 @@ export function useBridge(
     }, 10000);
     void checkBoth().then((ready) => { if (ready) clearInterval(interval); });
     return () => { cancelled = true; clearInterval(interval); };
-  }, [configLoaded, config.l1Rpc, config.l2Rpc, config.l1Bridge, config.l2Bridge]);
+  }, [active, configLoaded, config.l1Rpc, config.l2Rpc, config.l1Bridge, config.l2Bridge]);
 
-  // Fetch balance and allowance
+  // Header and Bridge share one account-scoped native balance observation.
+  useEffect(() => {
+    if (state.asset !== "eth") return;
+    const raw = walletAddress ? state.direction === "l1-to-l2" ? l1Balance : l2Balance : null;
+    setState(s => ({ ...s, sourceBalance: raw === null ? null : formatBalance(raw, 18), sourceBalanceRaw: raw,
+      allowance: null, tokenNeedsApproval: null, tokenReadError: null }));
+  }, [walletAddress, state.asset, state.direction, l1Balance, l2Balance]);
+
+  // ERC-20 reads belong to the active Bridge view; receipt tracking runs separately.
   useEffect(() => {
     if (!walletAddress) {
       setState((s) => ({ ...s, sourceBalance: null, sourceBalanceRaw: null, allowance: null, tokenNeedsApproval: null, tokenReadError: null }));
       return;
     }
 
-    let cancelled = false;
+    if (!active || state.asset === "eth") return;
+
+    let cancelled = false, timer: ReturnType<typeof setTimeout>;
+    const controller = new AbortController();
     const { direction, asset, tokenAddress } = state;
     setState(s => ({ ...s, sourceBalance: null, sourceBalanceRaw: null, allowance: null, tokenNeedsApproval: null, tokenReadError: null }));
 
     async function fetchBalances() {
+      const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(10_000)]);
       const sourceRpc = direction === "l1-to-l2" ? config.l1Rpc : config.l2Rpc;
       const bridgeAddr = direction === "l1-to-l2" ? config.l1Bridge : config.l2Bridge;
 
       try {
-        if (asset === "eth") {
-          const bal = (await rpcCall(sourceRpc, "eth_getBalance", [
-            walletAddress, "latest",
-          ])) as string;
-          const raw = BigInt(bal);
-          if (!cancelled) {
-            setState((s) => ({
-              ...s,
-              sourceBalance: formatBalance(raw, 18),
-              sourceBalanceRaw: raw,
-              allowance: null,
-              tokenNeedsApproval: null,
-              tokenReadError: null,
-            }));
-          }
-        } else if (tokenAddress && /^0x[0-9a-fA-F]{40}$/.test(tokenAddress)) {
+        if (tokenAddress && /^0x[0-9a-fA-F]{40}$/.test(tokenAddress)) {
           if (stateRef.current.tokenMeta?.predicted) {
-            const code = await rpcCall(sourceRpc, "eth_getCode", [tokenAddress, "latest"]);
+            const code = await rpcCall(sourceRpc, "eth_getCode", [tokenAddress, "latest"], signal);
             if (code === "0x" || code === "0x0") {
               if (!cancelled) setState(s => ({ ...s, sourceBalance: "0", sourceBalanceRaw: 0n, allowance: 0n, tokenNeedsApproval: false, tokenReadError: null }));
               return;
             }
-            const meta = await readBridgeToken(sourceRpc, tokenAddress, Number(BigInt(direction === "l1-to-l2" ? L1_CHAIN.chainId : L2_CHAIN.chainId)));
+            const meta = await readBridgeToken(sourceRpc, tokenAddress, Number(BigInt(direction === "l1-to-l2" ? L1_CHAIN.chainId : L2_CHAIN.chainId)), signal);
             if (!cancelled) {
               setState(s => ({ ...s, tokenMeta: { ...s.tokenMeta, ...meta, predicted: false } }));
               setRecentTokens(tokens => saveBridgeToken({ ...meta, predicted: false }, tokens));
@@ -354,14 +352,14 @@ export function useBridge(
               data: ERC20_ABI.balanceOf + pad32(walletAddress!),
             },
             "latest",
-          ])) as string;
+          ], signal)) as string;
           const raw = decodeUint256(balResult);
 
           // The bridge burns its own wrapped tokens directly; only native
           // tokens go through transferFrom and need an ERC20 allowance.
           const tokenInfo = await rpcCall(sourceRpc, "eth_call", [
             { to: bridgeAddr, data: BRIDGE_ABI.wrappedTokenInfo + pad32(tokenAddress) }, "latest",
-          ]);
+          ], signal);
           if (typeof tokenInfo !== "string" || !/^0x0{24}[0-9a-fA-F]{40}[0-9a-fA-F]{64}$/.test(tokenInfo)) {
             throw new Error("Invalid bridge token information response");
           }
@@ -370,7 +368,7 @@ export function useBridge(
           if (tokenNeedsApproval) {
             const allowResult = await rpcCall(sourceRpc, "eth_call", [
               { to: tokenAddress, data: ERC20_ABI.allowance + pad32(walletAddress!) + pad32(bridgeAddr) }, "latest",
-            ]);
+            ], signal);
             if (typeof allowResult !== "string" || !/^0x[0-9a-fA-F]{64}$/.test(allowResult)) throw new Error("Invalid token allowance response");
             allowance = decodeUint256(allowResult);
           }
@@ -392,10 +390,10 @@ export function useBridge(
       }
     }
 
-    fetchBalances();
-    const interval = setInterval(fetchBalances, 5000);
-    return () => { cancelled = true; clearInterval(interval); };
-  }, [walletAddress, state.direction, state.asset, state.tokenAddress, state.tokenMeta?.decimals, configLoaded, config.l1Bridge, config.l2Bridge, config.l1Rpc, config.l2Rpc]);
+    const poll = async () => { await fetchBalances(); if (!cancelled) timer = setTimeout(poll, 5000); };
+    void poll();
+    return () => { cancelled = true; controller.abort(); clearTimeout(timer); };
+  }, [active, walletAddress, state.direction, state.asset, state.tokenAddress, state.tokenMeta?.decimals, configLoaded, config.l1Bridge, config.l2Bridge, config.l1Rpc, config.l2Rpc]);
 
   // Fetch token metadata on address change (debounced)
   useEffect(() => {
@@ -425,136 +423,69 @@ export function useBridge(
 
   const bridgeCompleted = state.phase === "confirmed";
 
-  // Gas estimation effect — runs when bridge params change
-  useEffect(() => {
-    const { direction, asset, amount, tokenAddress, tokenMeta } = state;
-    const bridgeAddr = direction === "l1-to-l2" ? config.l1Bridge : config.l2Bridge;
-
-    estimatedRequest.current = null;
-    if (bridgeCompleted || !configLoaded || !walletAddress || !bridgeAddr || !amount) {
-      setState((s) => ({ ...s, gas: defaultGas }));
-      return;
-    }
-    if (state.destinationAddress && !/^0x[0-9a-fA-F]{40}$/.test(state.destinationAddress)) {
-      setState(s => ({ ...s, gas: defaultGas }));
-      return;
-    }
-
-    const decimals = asset === "eth" ? 18 : (tokenMeta?.decimals ?? 18);
-    const rawAmount = parseAmount(amount, decimals);
-    if (!rawAmount || rawAmount === 0n) {
-      setState((s) => ({ ...s, gas: defaultGas }));
-      return;
-    }
-
-    if (asset === "erc20" && (!tokenMeta || tokenMeta.predicted || !tokenAddress || !/^0x[0-9a-fA-F]{40}$/.test(tokenAddress))) {
-      setState((s) => ({ ...s, gas: defaultGas }));
-      return;
-    }
-
-    // Locking an original ERC20 cannot succeed until its allowance is ready.
-    // Show the approval action without estimating a transfer that must revert.
-    if (asset === "erc20" && (state.tokenNeedsApproval === null ||
-        state.tokenNeedsApproval && (state.allowance === null || state.allowance < rawAmount))) {
-      setState(s => ({ ...s, gas: defaultGas }));
-      return;
-    }
-
-    let cancelled = false;
-    const controller = new AbortController();
-    setState((s) => ({
-      ...s,
-      gas: { ...defaultGas, status: "estimating" },
-    }));
-
-    const timer = setTimeout(async () => {
-      let requestKey: string | null = null;
-      try {
-        const transaction = bridgeTransaction(state, walletAddress);
-        const rpcUrl = direction === "l1-to-l2" ? config.l1ProxyRpc : config.l2ProxyRpc;
-        requestKey = rpcUrl + JSON.stringify(transaction);
-        const result = await estimateBridgeGas({ rpcUrl, ...transaction, signal: controller.signal });
-        if (!cancelled) {
-          estimatedRequest.current = requestKey;
-          setState((s) => ({
-            ...s,
-            gas: {
-              status: "estimated",
-              estimate: Number(result.rawEstimate),
-              gasLimit: Number(result.rawEstimate),
-              gasHex: gasToHex(result.rawEstimate),
-              method: "Composer",
-              errorMessage: null,
-            },
-          }));
-        }
-      } catch (e) {
-        if (!cancelled) {
-          const unsupported = e instanceof GasEstimateError && e.type === "unsupported";
-          estimatedRequest.current = unsupported ? requestKey : null;
-          setState((s) => ({
-            ...s,
-            gas: {
-              ...defaultGas,
-              status: unsupported ? "unsupported" : "error",
-              errorMessage: (e as Error).message || "Gas estimation failed",
-            },
-          }));
-        }
-      }
-    }, 400);
-
-    return () => { cancelled = true; clearTimeout(timer); controller.abort(); };
-  }, [bridgeCompleted, state.direction, state.asset, state.amount, state.tokenAddress, state.tokenMeta?.decimals, state.tokenMeta?.predicted, state.destinationAddress, state.allowance, state.tokenNeedsApproval, walletAddress, configLoaded, config.l1Bridge, config.l2Bridge, config.rollupId, config.l1ProxyRpc, config.l2ProxyRpc]);
-
   const feeSource = state.direction === "l1-to-l2" ? "l1" : "l2";
   const feeRpc = feeSource === "l1" ? config.l1ProxyRpc : config.l2ProxyRpc;
   const feeChain = feeSource === "l1" ? L1_CHAIN : L2_CHAIN;
   const feesEnabled = feeSource === "l1" ? config.l1FeesEnabled : config.l2FeesEnabled;
-  let feeTransaction: Record<string, string> | null = null;
-  if (!bridgeCompleted && configLoaded && feesEnabled && walletAddress && state.amount &&
-      (state.gas.status === "estimated" || state.gas.status === "unsupported" && state.gasOverrideHex)) {
-    const amount = parseAmount(state.amount, state.asset === "eth" ? 18 : state.tokenMeta?.decimals ?? 18);
-    const approved = state.asset === "eth" || state.tokenNeedsApproval === false ||
-      state.tokenNeedsApproval === true && state.allowance !== null && amount !== null && state.allowance >= amount;
-    if (approved && amount && amount > 0n) {
-      const transaction = bridgeTransaction(state, walletAddress);
-      if (estimatedRequest.current === feeRpc + JSON.stringify(transaction)) {
-        feeTransaction = { ...transaction, gas: state.gasOverrideHex ?? state.gas.gasHex! };
-      }
-    }
-  }
-  const feeRequestKey = feeTransaction ? JSON.stringify([feeRpc, feeChain.chainId, feeTransaction]) : null;
+  const preparationTransaction = (() => {
+    const { direction, asset, amount, tokenAddress, tokenMeta, destinationAddress } = state;
+    if (bridgeCompleted || !configLoaded || !walletAddress || !amount ||
+        !(direction === "l1-to-l2" ? config.l1Bridge : config.l2Bridge) ||
+        destinationAddress && !/^0x[0-9a-fA-F]{40}$/.test(destinationAddress)) return null;
+    const rawAmount = parseAmount(amount, asset === "eth" ? 18 : tokenMeta?.decimals ?? 18);
+    if (!rawAmount || rawAmount <= 0n) return null;
+    if (asset === "erc20" && (!tokenMeta || tokenMeta.predicted || !/^0x[0-9a-fA-F]{40}$/.test(tokenAddress) ||
+        state.tokenNeedsApproval === null || state.tokenNeedsApproval && (state.allowance === null || state.allowance < rawAmount))) return null;
+    return bridgeTransaction(state, walletAddress);
+  })();
+  const quoteTransaction = preparationTransaction && feesEnabled
+    ? { ...preparationTransaction, ...(state.gasOverrideHex ? { gas: state.gasOverrideHex } : {}) } : null;
+  const feeRequestKey = quoteTransaction ? JSON.stringify([feeRpc, feeChain.chainId, quoteTransaction]) : null;
   const feeRequestRef = useRef(feeRequestKey);
   feeRequestRef.current = feeRequestKey;
+  const preparationKey = preparationTransaction ? JSON.stringify([feeRpc, feeChain.chainId, preparationTransaction, feeRequestKey]) : null;
 
   useEffect(() => {
-    if (!feeRequestKey || !feeTransaction) {
-      setState(s => ({ ...s, fees: EMPTY_FEES }));
+    // Keep the final quote visible while the wallet is signing or settlement is pending.
+    if (!["idle", "failed", "confirmed"].includes(state.phase)) return;
+    estimatedRequest.current = null;
+    if (!preparationTransaction || !active) {
+      setState(s => ({ ...s, gas: defaultGas, fees: EMPTY_FEES }));
       return;
     }
-    // Freeze the final quote while the user copies its values into the wallet.
-    // A background preview must never replace the quote being signed.
-    if (!["idle", "failed"].includes(state.phase)) return;
     const controller = new AbortController();
     let expiryTimer: ReturnType<typeof setTimeout> | undefined;
-    setState(s => ({ ...s, fees: { ...EMPTY_FEES, requestKey: feeRequestKey, status: "loading" } }));
+    const requestKey = feeRpc + JSON.stringify(preparationTransaction);
+    setState(s => ({ ...s, gas: { ...defaultGas, status: "estimating" },
+      fees: { ...EMPTY_FEES, requestKey: feeRequestKey, status: feesEnabled ? "loading" : "idle" } }));
     const timer = setTimeout(async () => {
+      const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(12_000)]);
       try {
-        const quote = await quoteFees(feeSource, feeTransaction!, controller.signal);
+        // Compact quotes resolve automatic gas. Only a user's override is sent;
+        // the preview's gas must not become an implicit override on final Send.
+        const quote = quoteTransaction ? await quoteFees(feeSource, quoteTransaction, signal) : null;
+        if (quote && !quote.transaction.gas) throw new Error("Composer fee quote did not resolve gas");
+        const gas = quote ? BigInt(quote.transaction.gas!)
+          : (await estimateBridgeGas({ rpcUrl: feeRpc, ...preparationTransaction, signal })).rawEstimate;
         if (controller.signal.aborted) return;
-        setState(s => ({ ...s, fees: { status: "ready", requestKey: feeRequestKey, quote, errorMessage: null } }));
-        expiryTimer = setTimeout(() => {
+        estimatedRequest.current = requestKey;
+        setState(s => ({ ...s,
+          gas: { status: "estimated", estimate: Number(gas), gasLimit: Number(gas), gasHex: gasToHex(gas), method: "Composer", errorMessage: null },
+          fees: quote ? { status: "ready", requestKey: feeRequestKey, quote, errorMessage: null } : EMPTY_FEES }));
+        if (quote) expiryTimer = setTimeout(() => {
           setState(s => ({ ...s, fees: { ...EMPTY_FEES, requestKey: feeRequestKey, status: "expired" } }));
         }, Math.max(0, Number(BigInt(quote.expiresAt) * 1000n) - Date.now()));
       } catch (error) {
-        if (!controller.signal.aborted) setState(s => ({ ...s, fees: {
-          ...EMPTY_FEES, requestKey: feeRequestKey, status: "error", errorMessage: (error as Error).message,
-        } }));
+        if (controller.signal.aborted) return;
+        const unsupported = !feesEnabled && error instanceof GasEstimateError && error.type === "unsupported";
+        estimatedRequest.current = unsupported ? requestKey : null;
+        const errorMessage = signal.aborted ? "Composer preparation timed out. Try again." : (error as Error).message;
+        setState(s => ({ ...s, gas: { ...defaultGas, status: unsupported ? "unsupported" : "error", errorMessage },
+          fees: feesEnabled ? { ...EMPTY_FEES, requestKey: feeRequestKey, status: "error", errorMessage } : EMPTY_FEES }));
       }
     }, 250);
     return () => { controller.abort(); clearTimeout(timer); clearTimeout(expiryTimer); };
-  }, [feeRequestKey, feeRefresh, quoteFees, state.phase]);
+  }, [active, preparationKey, feeRefresh, quoteFees, state.phase]);
 
   const setGasOverride = useCallback((hex: string | null) => {
     setState(s => ({ ...s, gasOverrideHex: hex }));
@@ -782,7 +713,8 @@ export function useBridge(
       const sourceRpc = direction === "l1-to-l2" ? config.l1Rpc : config.l2Rpc;
       const feesEnabled = direction === "l1-to-l2" ? config.l1FeesEnabled : config.l2FeesEnabled;
       const fees = feesEnabled ? {} : await getEip1559Fees(sourceRpc);
-      const gasParam = { gas: resolvedGas, gasLimit: resolvedGas, ...fees };
+      const gasParam: Record<string, string> = feesEnabled ? (gasOverrideHex ? { gas: gasOverrideHex } : {})
+        : { gas: resolvedGas, gasLimit: resolvedGas, ...fees };
       if (walletRef.current !== from || estimatedRequest.current !== composerRpc + JSON.stringify(transaction)) {
         throw new Error("Bridge transaction changed; wait for a new Composer gas estimate");
       }

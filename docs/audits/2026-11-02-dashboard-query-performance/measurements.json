@@ -1,0 +1,160 @@
+{
+  "date": "2026-11-02",
+  "repository": "eez-association/eez-rollup-dashboard",
+  "baseline": "4381f389c98bbbb00dca09cfdede3b093daa8f0a",
+  "baselineDeployedEquivalent": "c1c9c234bffa918b58471092b19c008e96ab7770",
+  "candidateCode": "19208b161fa6a8390c861c059c2276572adba51b",
+  "candidateTree": "bf69c813b3d7378fe1a1e293acb03647505b06d1",
+  "protocol": "855fe0602484750861b4c31502a1a91355d33ed6",
+  "node": "22.23.4",
+  "browser": "Chromium 153.0.8010.12",
+  "controlledVisualizer": {
+    "baseline": {
+      "baseline": true,
+      "delayMs": 100,
+      "historyMs": 1378,
+      "selectedMs": 2169,
+      "observedMs": 20000,
+      "requests": 320,
+      "receipts": 102,
+      "settlementLookups": 100
+    },
+    "candidate": {
+      "baseline": false,
+      "delayMs": 100,
+      "historyMs": 859,
+      "selectedMs": 1144,
+      "observedMs": 20001,
+      "requests": 25,
+      "receipts": 4,
+      "settlementLookups": 1
+    },
+    "samplesPerCondition": 1,
+    "viewport": [
+      1440,
+      1000
+    ],
+    "fixedBatchCount": 50,
+    "sameRpcFixture": true
+  },
+  "liveReadOnly": [
+    {
+      "name": "bridge-l2-quote",
+      "dataRequests": 17,
+      "balances": 6,
+      "gasEstimates": 0,
+      "feePreviewMs": 261,
+      "pageErrors": [],
+      "actionError": null,
+      "pendingAtCutoffMs": [],
+      "sha256": "4f8abf73b9958940bc56a2b4a0327fac501c056588de8852148a9f0ee6592abe"
+    },
+    {
+      "name": "bridge-quote",
+      "dataRequests": 17,
+      "balances": 6,
+      "gasEstimates": 0,
+      "feePreviewMs": 270,
+      "pageErrors": [],
+      "actionError": null,
+      "pendingAtCutoffMs": [
+        4,
+        3
+      ],
+      "sha256": "af2242afdd408d107efdb8f93d2a4d2701592ba1a50c47727f4c0a568c36f820"
+    },
+    {
+      "name": "falcon-connected",
+      "dataRequests": 21,
+      "balances": 6,
+      "gasEstimates": 0,
+      "feePreviewMs": null,
+      "pageErrors": [],
+      "actionError": null,
+      "pendingAtCutoffMs": [],
+      "sha256": "7947c55c2ef57cfee78bacf2b67c1f1c50fcd98b6ec2956c6a0eedefaffbfb63"
+    },
+    {
+      "name": "visualizer",
+      "dataRequests": 40,
+      "balances": 0,
+      "gasEstimates": 0,
+      "feePreviewMs": null,
+      "pageErrors": [],
+      "actionError": null,
+      "pendingAtCutoffMs": [],
+      "sha256": "13b8634b1b8db082255bf4401e2053e53e4168dda7b094b737f26e346e43934c"
+    }
+  ],
+  "checks": {
+    "unitTests": 733,
+    "unitFailures": 0,
+    "unitSkipped": 0,
+    "bridgeGasBrowserScenarios": 27,
+    "bridgeFeesBrowserScenarios": 64,
+    "bridgeLifecycleBrowserScenarios": 10,
+    "counterBrowserScenarios": 17,
+    "bridgeAssetBrowserScenarios": 15,
+    "genericCallsBrowserScenarios": 26,
+    "walletBalances": "pass",
+    "visualizerNavigation": "pass",
+    "visualizerOnDemandFiltersPause": "pass",
+    "tokenPicker": "pass",
+    "falconBrowserSuite": "pass",
+    "build": "pass"
+  },
+  "artifactsLocalOnly": [
+    {
+      "path": ".runtime/build-v3.log",
+      "sha256": "75238d6301f68550f572dbc5d855c1adfac7f88be2fbef1a367377ddbce02edc"
+    },
+    {
+      "path": ".runtime/unit-suite-ready.log",
+      "sha256": "79712180cdb795a379515ac88d0aa3b80ae89992812d1302a216ddbf8ddd6460"
+    },
+    {
+      "path": ".runtime/bridge-gas-candidate.log",
+      "sha256": "d1fbfead7ddd4a6239189eefa6ebbb9e1a1dd1517a5034401b0328adb7b4553f"
+    },
+    {
+      "path": ".runtime/fees-final.log",
+      "sha256": "2627260bf85bf902c5b7ae312ab7fdcca3fcc3eb0b2ca46aa09c1011f60fa7a2"
+    },
+    {
+      "path": ".runtime/wallet-v3.log",
+      "sha256": "d268ed4eab36fc288ce8ef851cb2d912d016bed0e9efc5673fde91a4401230b1"
+    },
+    {
+      "path": ".runtime/visualizer-view-v3.log",
+      "sha256": "8188a17e1a4018aa25089741f8d9b427183e7c1b77481ad9b7ecfc41d301f5f4"
+    },
+    {
+      "path": ".runtime/counter-v3.log",
+      "sha256": "49a297022af01c0c3f8f8b5c19ccca6bf9dfe72b6e5fe06dd0d13705c0fb17bb"
+    },
+    {
+      "path": ".runtime/lifecycle-v4.log",
+      "sha256": "24e7423c2093390a22e0336500188be0f7db8657f0c8b3b420b0d5bc0f46b875"
+    },
+    {
+      "path": ".runtime/asset-swap-v4.log",
+      "sha256": "66a70c17b390b1dffac07cd007b7a7ef40233e79b0c911bfa58117ffb3d7b5f1"
+    },
+    {
+      "path": ".runtime/token-picker-v4.log",
+      "sha256": "33d9400a09f0796184fa5611628f33941746ce29a8aebf116c6f99c72f3eb14d"
+    },
+    {
+      "path": ".runtime/falcon-regressions-v4.log",
+      "sha256": "702062b41844980d9c5f3b161081513b0e8e44de5b7c322a04e23f88562b3285"
+    },
+    {
+      "path": ".runtime/visualizer-baseline-final-20s.log",
+      "sha256": "5b0bab7da6523acf82a72de01e0acf4029b0aca8c352a93d3690815473a6a6f2"
+    },
+    {
+      "path": ".runtime/visualizer-candidate-final-20s.log",
+      "sha256": "8dc90f8e5a5e4155dfd993530f2596ffd819c405bb8d4dfc8dee144d2f37f748"
+    }
+  ]
+}

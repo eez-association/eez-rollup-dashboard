@@ -30,7 +30,7 @@ async function fixture(browser, options = {}) {
   if (options.clock) await page.clock.install();
   const errors = [], rpcRequests = [];
   let tokenInfoReads = 0;
-  const feeQuote = { failure: !!options.quoteFailure, gasPrice: '9000000007', priorityFee: '9000000000', hold: null };
+  const feeQuote = { failure: !!options.quoteFailure, gas: RAW_GAS, gasPrice: '9000000007', priorityFee: '9000000000', hold: null };
   const receipt = { result: null };
   const estimation = { unsupported: options.unsupported ?? false, error: options.estimateError ?? null, result: options.estimateResult ?? "0x671af", transient: options.transientEstimates ?? 0 };
   page.on('pageerror', e => errors.push(e.message));
@@ -96,8 +96,8 @@ async function fixture(browser, options = {}) {
       const [request, selection] = params;
       assert.equal(request.chainId, path === '/composer/l1' ? options.chain || '0x27d8' : options.l2Chain || '0x1892');
       assert.deepEqual(selection.transactionTypes, [request.type]);
-      const transaction = { nonce: '0x0', gas: '0x' + RAW_GAS.toString(16), ...request };
-      rpcRequests.push({ path, transaction });
+      const transaction = { nonce: '0x0', gas: '0x' + feeQuote.gas.toString(16), ...request };
+      rpcRequests.push({ path, transaction, intent: request });
       if (feeQuote.failure) return route.fulfill({ json: { jsonrpc: '2.0', id,
         error: { code: -32004, message: 'quote_unavailable: fixture unavailable', data: { code: 'quote_unavailable' } } } });
       const tip = BigInt(feeQuote.priorityFee), price = BigInt(feeQuote.gasPrice);
@@ -194,6 +194,7 @@ async function fixture(browser, options = {}) {
   const button = page.getByRole('button', { name: options.erc20 ? 'Bridge ' + (options.symbol || '???') : 'Bridge ' + nativeSymbol, exact: true });
   if (options.tokenInfoError) await page.getByText('Unable to check the token:', {exact:false}).waitFor();
   else if (options.approvalRequired) await page.getByRole('button', {name:'Approve ' + (options.symbol || '???'),exact:true}).waitFor();
+  else if (options.quoteFailure || options.feeCeiling === '1') await page.getByRole('alert').filter({ hasText: 'Fee quote failed:' }).waitFor();
   else if (options.unsupported) await page.getByText('This Composer cannot estimate cross-chain gas yet.', {exact:false}).waitFor();
   else if (options.estimateError || options.estimateResult) await page.getByRole('alert').filter({ hasText: 'Gas estimation failed:' }).waitFor();
   else await until(async () => !(await button.isDisabled()), 'Composer estimate or bridge readiness did not finish');

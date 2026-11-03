@@ -213,10 +213,10 @@ export async function fetchDebugBlock(chain: DebugChain, selector: string, rpc: 
   return { ...block, chain, transactions };
 }
 
-async function withCounterpart(sourceBlock: DebugBlock, selected: DebugTransaction | null, rpc: Rpc, syncOnly = false): Promise<DebugContext> {
+async function withCounterpart(sourceBlock: DebugBlock, selected: DebugTransaction | null, rpc: Rpc, syncOnly = false, knownSettlement?: Settlement): Promise<DebugContext> {
   const context: DebugContext = { sourceChain: sourceBlock.chain, sourceBlock, selected, blocks: [sourceBlock], settlements: [], warnings: [], syncOnly: syncOnly && sourceBlock.chain === "l1" };
   try {
-    const response = await rpc(config.l2ProxyRpc, sourceBlock.chain === "l1" ? "eez_getSettledL2RangesByL1Block" : "eez_getSettlementByL2Block", [sourceBlock.hash]);
+    const response = knownSettlement ? [knownSettlement] : await rpc(config.l2ProxyRpc, sourceBlock.chain === "l1" ? "eez_getSettledL2RangesByL1Block" : "eez_getSettlementByL2Block", [sourceBlock.hash]);
     context.settlements = (Array.isArray(response) ? response : response ? [response] : []) as Settlement[];
     if (selected?.payload?.method === "postAndVerifyBatch") context.settlements = context.settlements.filter(item => same(item.l1TransactionHash, selected.tx.hash));
   } catch (error) {
@@ -331,6 +331,7 @@ export async function fetchDebugTrace(tx: DebugTransaction, rpc: Rpc = debugRequ
 export type LiveBatch = {
   transactionHash: string; blockHash: string; blockNumber: string; logIndex: string; registryAddress: string; rollupIds?: unknown;
   l2BlockCount?: number; settlementCheckedAt?: number;
+  settlement?: Settlement | null;
   l2Range?: { first: string; last: string }; canonicalL2?: boolean; l2Finalized?: boolean;
 };
 export type LiveBatchHistory = {
@@ -347,12 +348,16 @@ export async function inspectPostedBatch(batch: LiveBatch, rpc: Rpc = debugReque
   }
   const selected = block.transactions.find(tx => same(tx.tx.hash, batch.transactionHash));
   if (!selected) throw new Error("Posted transaction is missing from its block; retrying inspection");
-  return withCounterpart(block, selected, rpc, true);
+  // Reuse only the recent history observation for this exact posting block/tx.
+  // Later inspections recheck the mutable settlement index, including reorgs.
+  const known = batch.settlement;
+  const fresh = Date.now() - (batch.settlementCheckedAt ?? 0) < 5000;
+  return withCounterpart(block, selected, rpc, true, fresh && known && same(known.l1BlockHash, block.hash) && same(known.l1TransactionHash, selected.tx.hash) ? known : undefined);
 }
 
 // Read compact posting logs, rather than hydrating thousands of L2 blocks on
 // every poll. Selecting a post loads its exact receipts and settlement range.
-export async function fetchLiveBatchHistory(previous: LiveBatchHistory | null = null, rpc: Rpc = debugRequest): Promise<LiveBatchHistory> {
+export async function fetchLiveBatchHistory(previous: LiveBatchHistory | null = null, rpc: Rpc = debugRequest, settlementBatch?: string): Promise<LiveBatchHistory> {
   const heads = await Promise.allSettled([rpc(debugRpc("l1"), "eth_blockNumber", []), rpc(debugRpc("l2"), "eth_blockNumber", [])]);
   if (heads[0].status === "rejected") throw new Error(`L1 batch history unavailable: ${message(heads[0].reason)}`);
   const l1Head = heads[0].value as string;
@@ -409,7 +414,11 @@ export async function fetchLiveBatchHistory(previous: LiveBatchHistory | null = 
       return old && same(old.blockHash, batch.blockHash) ? { ...old, ...batch } : batch;
     });
     if (heads[1].status === "fulfilled") {
-      const missing = batches.filter(batch => (batch.l2BlockCount === undefined || batch.l2Finalized === false) && checkedAt - (batch.settlementCheckedAt ?? 0) >= 30000);
+      // Without a configured registry, retain index-based discovery before
+      // presenting logs as this rollup's history. Scoped loading applies after it.
+      const selectedHash = registryAddress ? settlementBatch === "latest" ? batches[0]?.transactionHash : settlementBatch : undefined;
+      const missing = batches.filter(batch => (!selectedHash || same(batch.transactionHash, selectedHash)) &&
+        (batch.l2BlockCount === undefined || batch.l2Finalized === false) && checkedAt - (batch.settlementCheckedAt ?? 0) >= 30000);
       await mapLimited([...new Set(missing.map(batch => batch.blockHash))], async hash => {
         if (!indexError) {
           try {
@@ -421,16 +430,23 @@ export async function fetchLiveBatchHistory(previous: LiveBatchHistory | null = 
             const settlements = await lookup;
             for (const batch of missing.filter(item => same(item.blockHash, hash))) {
               const settlement = settlements.find(item => same(item.l1TransactionHash, batch.transactionHash));
+              batch.settlement = settlement ?? null;
               if (settlement) {
                 batch.l2Range = settlementRange(settlement);
                 batch.canonicalL2 = settlement.canonicalL2;
                 batch.l2Finalized = settlement.l2Finalized;
                 batch.l2BlockCount = settlement.canonicalL2 === false ? undefined : settlement.l2Blocks.length;
+              } else {
+                batch.l2Range = undefined; batch.canonicalL2 = undefined;
+                batch.l2Finalized = undefined; batch.l2BlockCount = undefined;
               }
             }
           } catch (error) { indexError ??= message(error); }
         }
-        for (const batch of missing.filter(item => same(item.blockHash, hash))) batch.settlementCheckedAt = checkedAt;
+        for (const batch of missing.filter(item => same(item.blockHash, hash))) {
+          batch.settlementCheckedAt = checkedAt;
+          if (indexError) batch.settlement = undefined;
+        }
       });
     }
     for (const batch of batches) cached.set(batch.transactionHash.toLowerCase(), batch);

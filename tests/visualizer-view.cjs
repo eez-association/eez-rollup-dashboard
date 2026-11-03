@@ -79,9 +79,9 @@ const records = ['l1', 'l2'].map(side => ({ id: side, type: 'cross-chain-call', 
       await row.getByRole('button', { name: 'View execution', exact: true }).click();
       await page.waitForFunction(({ hash, side }) => {
         const params = new URLSearchParams(location.hash.split('?')[1]);
-        return params.get('mode') === 'inspect' && params.get('tx') === hash && params.get('chain') === side && params.has('tab');
+        return params.get('mode') === 'trace' && params.get('tx') === hash && params.get('chain') === side;
       }, { hash: hashes[side], side });
-      await page.getByRole('button', { name: '← Dashboard', exact: true }).click();
+      await page.goto(origin + '/#/bridge');
     }
     await page.goto(origin + '/#/visualizer');
     const modes = page.getByRole('navigation', { name: 'Visualizer modes' });

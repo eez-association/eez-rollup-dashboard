@@ -5,6 +5,7 @@ import {
   type CallTrace, type DebugChain, type DebugContext, type DebugTransaction, type LiveBatch, type LiveBatchHistory, type InspectionKind,
 } from "../../lib/executionDebugger";
 import { ExplorerLink } from "../ExplorerLink";
+import { rpcCall } from "../../rpc";
 import { contextTransactions, inspectionHash, isEezTransaction, summarizeBatch, txKey, type BatchExecutionSummary } from "../../lib/executionAnalysis";
 import { ExecutionInspector, inspectorTab, type InspectorTab } from "./ExecutionInspector";
 import { SettlementProgress } from "./SettlementProgress";
@@ -56,6 +57,9 @@ export function ExecutionDebugger({ onBack, initialDebugHash, initialMode, initi
   const [executionFilter, setExecutionFilter] = useState("all");
   const [collapsed, setCollapsed] = useState(false);
   const [entryLoading, setEntryLoading] = useState(false);
+  const [inspectAll, setInspectAll] = useState(false);
+  const allEntries = inspectAll || !!batchSearch.trim() || ["crosschain", "failed", "skipped"].includes(executionFilter);
+  const allSettlements = allEntries || settlementFilter !== "all";
   const summariesRef = useRef<Record<string, BatchExecutionSummary>>({});
   const summaryVersions = useRef(new Map<string, string>());
   const batchRequests = useRef(new Map<string, Promise<DebugContext>>());
@@ -76,7 +80,9 @@ export function ExecutionDebugger({ onBack, initialDebugHash, initialMode, initi
       if (contextCache.current.size > 50) contextCache.current.delete(contextCache.current.keys().next().value!);
     }
     const batch = historyRef.current?.batches.find(item => item.transactionHash.toLowerCase() === key);
-    if (batch) summaryVersions.current.set(key, batchVersion(batch));
+    const settlement = result.settlements.find(item => item.l1TransactionHash.toLowerCase() === key);
+    if (batch) summaryVersions.current.set(key, batchVersion(settlement
+      ? { ...batch, l2Range: settlementRange(settlement), canonicalL2: settlement.canonicalL2 } : batch));
     summariesRef.current = { ...summariesRef.current, [key]: summarizeBatch(result) };
     setSummaries(summariesRef.current);
   }, []);
@@ -126,10 +132,10 @@ export function ExecutionDebugger({ onBack, initialDebugHash, initialMode, initi
     finally { loader.running = false; if (alive.current) setEntryLoading(false); }
   }, [inspectLiveBatch, remember]);
   useEffect(() => {
-    entryLoader.current.enabled = mode === "live" && live;
+    entryLoader.current.enabled = mode === "live" && live && allEntries;
     if (entryLoader.current.enabled && history) void loadEntries();
     return () => { entryLoader.current.enabled = false; };
-  }, [mode, live, history, loadEntries]);
+  }, [mode, live, history, allEntries, loadEntries]);
   const loadTrace = useCallback(async (tx: DebugTransaction) => {
     const key = txKey(tx);
     let pending = traceRequests.current.get(key);
@@ -207,11 +213,14 @@ export function ExecutionDebugger({ onBack, initialDebugHash, initialMode, initi
     if (mode !== "live") return;
     if (!live) { setLiveLoading(false); return; }
     let stopped = false;
+    const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout>;
     const poll = async () => {
       if (!historyRef.current) setLiveLoading(true);
       try {
-        const result = await fetchLiveBatchHistory(historyRef.current);
+        const result = await fetchLiveBatchHistory(historyRef.current,
+          (url, method, params) => rpcCall(url, method, params, AbortSignal.any([controller.signal, AbortSignal.timeout(30_000)])),
+          allSettlements ? undefined : liveSelection.current ?? "latest");
         if (stopped) return;
         historyRef.current = result; setHistory(result);
         const retained = new Set(result.batches.map(batch => batch.transactionHash.toLowerCase()));
@@ -241,8 +250,8 @@ export function ExecutionDebugger({ onBack, initialDebugHash, initialMode, initi
       if (!stopped) timer = setTimeout(() => void poll(), 5000);
     };
     void poll();
-    return () => { stopped = true; clearTimeout(timer); };
-  }, [mode, live, load]);
+    return () => { stopped = true; controller.abort(); clearTimeout(timer); };
+  }, [mode, live, load, allSettlements]);
   useEffect(() => { alive.current = true; return () => { alive.current = false; request.current++; entryLoader.current.enabled = false; }; }, []);
   useEffect(() => {
     if (mode !== "inspect" || source.kind !== "transaction" || !/^0x[\da-f]{64}$/i.test(source.value)) return;
@@ -325,7 +334,7 @@ export function ExecutionDebugger({ onBack, initialDebugHash, initialMode, initi
     const searchedBlock = /^\d+$/.test(search) ? BigInt(search) : null;
     const inRange = searchedBlock !== null && batch.l2Range && searchedBlock >= BigInt(batch.l2Range.first) && searchedBlock <= BigInt(batch.l2Range.last);
     if (search && !inRange && !metadata.includes(search) && !summary?.search.includes(search)) return false;
-    const settlement = batch.canonicalL2 === false ? "noncanonical" : batch.l2BlockCount === undefined ? "awaiting" : batch.l2Finalized ? "finalized" : "indexed";
+    const settlement = batch.canonicalL2 === false ? "noncanonical" : batch.l2BlockCount === undefined ? batch.settlement === null ? "awaiting" : "unloaded" : batch.l2Finalized ? "finalized" : "indexed";
     if (settlementFilter !== "all" && settlementFilter !== settlement) return false;
     return executionFilter === "all" || executionFilter === "uninspected" && !summary || executionFilter === "unavailable" && summary?.state === "Unavailable" || summary?.state === "Inspected" && (executionFilter === "crosschain" && summary.crossChain || executionFilter === "failed" && summary.failures > 0 || executionFilter === "skipped" && summary.skipped > 0);
   });
@@ -354,8 +363,9 @@ export function ExecutionDebugger({ onBack, initialDebugHash, initialMode, initi
         <label>Search batches<input aria-label="Search batches" value={batchSearch} onChange={event => setBatchSearch(event.target.value)} placeholder="TX, block, contract, or call hash" spellCheck={false} /></label>
         <label>Settlement<select aria-label="Settlement filter" value={settlementFilter} onChange={event => setSettlementFilter(event.target.value)}><option value="all">All settlement states</option><option value="indexed">Indexed</option><option value="finalized">Finalized</option><option value="awaiting">Awaiting settlement</option><option value="noncanonical">Noncanonical</option></select></label>
         <label>Execution<select aria-label="Execution filter" value={executionFilter} onChange={event => setExecutionFilter(event.target.value)}><option value="all">All executions</option><option value="crosschain">Cross-chain calls observed</option><option value="failed">Reverted transactions</option><option value="skipped">Skipped entries</option><option value="uninspected">Entries pending</option><option value="unavailable">Inspection unavailable</option></select></label>
-        {Object.values(summaries).some(summary => summary.state === "Unavailable") && <button className="btn btn-sm btn-outline" disabled={!live} onClick={() => { entryLoader.current.retryAt.clear(); void loadEntries(); }}>Retry unavailable batches</button>}
-      </div><p className={styles.muted} role="status">Showing {filteredBatches?.length ?? 0} / {history?.batches.length ?? 0} batches · execution details loaded for {coverage} / {history?.batches.length ?? 0}.{!live ? " Automatic entry loading paused." : entryLoading ? " Loading entry details automatically…" : coverage < (history?.batches.length ?? 0) ? " Pending entry details retry automatically." : " Entry details up to date."}</p>
+        {!allEntries && coverage < (history?.batches.length ?? 0) && <button className="btn btn-sm btn-outline" disabled={!live} onClick={() => setInspectAll(true)}>Load all details</button>}
+        {Object.values(summaries).some(summary => summary.state === "Unavailable") && <button className="btn btn-sm btn-outline" disabled={!live} onClick={() => { entryLoader.current.retryAt.clear(); setInspectAll(true); void loadEntries(); }}>Retry unavailable batches</button>}
+      </div><p className={styles.muted} role="status">Showing {filteredBatches?.length ?? 0} / {history?.batches.length ?? 0} batches · execution details loaded for {coverage} / {history?.batches.length ?? 0}.{!live ? " Live updates paused." : entryLoading ? " Loading entry details…" : coverage < (history?.batches.length ?? 0) ? allEntries ? " Pending entry details retry automatically." : " Select a batch to load its details. Search and execution filters load all details." : " Entry details up to date."}</p>
       <div className={styles.batchList}>
       {!liveLoading && filteredBatches?.length === 0 && <div className={styles.empty}><p>{history?.batches.length ? "No batches match these filters." : "No EEZ batches found in the recent history window."}</p>
         {!!batchSearch.trim() && /^(latest|\d+|0x[\da-f]+)$/i.test(batchSearch.trim()) && <button className="btn btn-outline" disabled={loading} onClick={inspectSearch}>Inspect ‘{batchSearch.trim()}’ →</button>}
@@ -379,15 +389,15 @@ export function ExecutionDebugger({ onBack, initialDebugHash, initialMode, initi
           <div className={styles.batchSummary}>
             <ExplorerLink value={BigInt(batch.blockNumber).toString()} type="block" chain="l1" label={`L1 #${quantity(batch.blockNumber)}`} className={styles.batchBlock} />
             <span>postAndVerifyBatch</span>
-            <span>{count === undefined ? "Awaiting L2 settlement" : loaded !== null && context?.syncOnly ? `${quantity(count)} L2 block${BigInt(count) === 1n ? "" : "s"} · sync block loaded` : loaded !== null ? `L2 blocks: ${quantity(loaded)} / ${quantity(count)} loaded` : `${quantity(count)} L2 block${BigInt(count) === 1n ? "" : "s"}`}</span>
+            <span>{count === undefined ? batch.settlement === null ? "Awaiting L2 settlement" : "Select to load settlement" : loaded !== null && context?.syncOnly ? `${quantity(count)} L2 block${BigInt(count) === 1n ? "" : "s"} · sync block loaded` : loaded !== null ? `L2 blocks: ${quantity(loaded)} / ${quantity(count)} loaded` : `${quantity(count)} L2 block${BigInt(count) === 1n ? "" : "s"}`}</span>
           </div>
           <div className={styles.batchSettlement}>
             <span className={styles.batchRange}>{range ? <>L2 <ExplorerLink value={BigInt(range.first).toString()} type="block" chain="l2" label={`#${quantity(range.first)}`} />
               {BigInt(range.last) !== BigInt(range.first) && <> – <ExplorerLink value={BigInt(range.last).toString()} type="block" chain="l2" label={`#${quantity(range.last)}`} /></>}</> : count === 0 ? "No L2 blocks" : "L2 range pending"}</span>
-            <span className={canonical === false ? styles.failed : styles.muted}>{canonical === false ? "Noncanonical" : count === undefined ? "Awaiting settlement" : finalized ? "Finalized" : "Indexed"}</span>
+            <span className={canonical === false ? styles.failed : styles.muted}>{canonical === false ? "Noncanonical" : count === undefined ? batch.settlement === null ? "Awaiting settlement" : "Not loaded" : finalized ? "Finalized" : "Indexed"}</span>
           </div>
           <div className={styles.batchMeta}><ExplorerLink value={batch.transactionHash} type="tx" chain="l1" label={short(batch.transactionHash)} />
-            <span>{batch.rollupIds ? `Rollups ${String(batch.rollupIds)}` : "BatchPosted"}</span><span title={summary?.error}>{!summary ? live ? "Loading entries…" : "Entry loading paused" : summary.state === "Unavailable" ? "Inspection unavailable" : `${summary.entries} ${summary.entries === 1 ? "entry" : "entries"} · ${summary.failures} reverted txs · ${summary.skipped} skipped`}</span></div>
+            <span>{batch.rollupIds ? `Rollups ${String(batch.rollupIds)}` : "BatchPosted"}</span><span title={summary?.error}>{!summary ? live && allEntries ? "Loading entries…" : "Entries not loaded" : summary.state === "Unavailable" ? "Inspection unavailable" : `${summary.entries} ${summary.entries === 1 ? "entry" : "entries"} · ${summary.failures} reverted txs · ${summary.skipped} skipped`}</span></div>
         </div>;
       })}</div>{history?.batches.length && !filteredBatches?.length ? <p className={styles.muted}>No batches match these filters.{coverage < (history?.batches.length ?? 0) && " Execution results update as entry details load."}</p> : null}</>}
       {history && !history.batches.length && <p className={styles.muted}>{history.before ? "No posts in the scanned blocks yet; continuing to search earlier history." : "No posted batches found."}</p>}

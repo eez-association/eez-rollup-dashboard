@@ -13,6 +13,16 @@ async function fixture(browser, injected) {
   const page = await context.newPage();
   await page.clock.install();
   const errors = [], requests = [];
+  const controls = { holdBalances: null, held: 0, maxBalanceReadsInFlight: 0 };
+  const inFlightBalances = new Set();
+  page.on('request', request => {
+    if (request.method() === 'POST' && request.postDataJSON()?.method === 'eth_getBalance') {
+      inFlightBalances.add(request);
+      controls.maxBalanceReadsInFlight = Math.max(controls.maxBalanceReadsInFlight, inFlightBalances.size);
+    }
+  });
+  page.on('requestfinished', request => inFlightBalances.delete(request));
+  page.on('requestfailed', request => inFlightBalances.delete(request));
   let releaseConfig;
   const configGate = injected ? new Promise(resolve => { releaseConfig = resolve; }) : Promise.resolve();
   let configRequested = false;
@@ -59,8 +69,9 @@ async function fixture(browser, injected) {
     const result = payload.method === 'eth_getBlockByNumber'
       ? { number: '0x10', timestamp: '0x65000000', gasUsed: '0x0', gasLimit: '0x1036640', transactions: [] }
       : payload.method === 'eth_chainId' ? (path.endsWith('l1') ? '0x27d8' : '0x1892')
-      : payload.method === 'eth_getBalance' ? '0xde0b6b3a7640000'
+      : payload.method === 'eth_getBalance' ? (payload.params[0].toLowerCase() === account ? '0xde0b6b3a7640000' : '0x1bc16d674ec80000')
       : payload.method === 'eth_getLogs' ? [] : '0x1';
+    if (payload.method === 'eth_getBalance' && controls.holdBalances) { controls.held++; await controls.holdBalances; }
     return route.fulfill({ json: { jsonrpc: '2.0', id: payload.id, result } });
   });
   await page.goto(origin + '/', { waitUntil: 'domcontentloaded' });
@@ -69,7 +80,7 @@ async function fixture(browser, injected) {
   assert.ok(configRequested, 'runtime configuration was requested');
   // The app intentionally waits for config before mounting the header.
   if (!injected) await page.locator('header').waitFor();
-  return { page, errors, requests, releaseConfig,
+  return { page, errors, requests, releaseConfig, controls,
     async close() {
       assert.equal(requests.filter(r => r.path.startsWith('/shared/') || r.path === '/health').length, 0);
       assert.deepEqual(errors, []);
@@ -111,7 +122,36 @@ async function fixture(browser, injected) {
     await savedWallet.page.getByRole('button', { name: 'Connect Wallet', exact: true }).first().waitFor();
     assert.equal(await savedWallet.page.evaluate(() => localStorage.getItem('walletConnected')), null);
     await savedWallet.close();
+
+    const balances = await fixture(browser, true);
+    balances.releaseConfig();
+    await balances.page.locator('#header-balance-l1').filter({ hasText: '1.0000' }).waitFor();
+    await balances.page.locator('#header-balance-l2').filter({ hasText: '1.0000' }).waitFor();
+    const reads = () => balances.requests.filter(r => r.method === 'eth_getBalance');
+    assert.equal(reads().length, 2, 'Bridge must share the header native balances');
+    await balances.page.evaluate(() => { location.hash = '#/visualizer'; });
+    await balances.page.getByRole('heading', { name: 'Latest Posted Batches', exact: true }).waitFor();
+    let releaseBalances;
+    balances.controls.holdBalances = new Promise(resolve => { releaseBalances = resolve; });
+    await balances.page.clock.runFor(11_000);
+    const deadline = Date.now() + 5000;
+    while (balances.controls.held < 2 && Date.now() < deadline) await balances.page.waitForTimeout(20);
+    assert.equal(balances.controls.held, 2);
+    await balances.page.clock.runFor(31_000);
+    assert.ok(reads().length <= 6, 'only bounded timeout retries should occur behind another view');
+    assert.equal(balances.controls.maxBalanceReadsInFlight, 2, 'at most one read per chain is in flight');
+    balances.controls.holdBalances = null;
+    await balances.page.evaluate(address => window.walletListeners.accountsChanged([address]), nextAccount);
+    await balances.page.locator('#header-balance-l1').filter({ hasText: '2.0000' }).waitFor();
+    await balances.page.locator('#header-balance-l2').filter({ hasText: '2.0000' }).waitFor();
+    releaseBalances();
+    await balances.page.waitForTimeout(100);
+    assert.match(await balances.page.locator('#header-balance-l1').innerText(), /2\.0000/);
+    await balances.page.evaluate(() => window.walletListeners.accountsChanged([]));
+    await balances.page.getByRole('button', { name: 'Connect Wallet', exact: true }).first().waitFor();
+    await balances.close();
     console.log(JSON.stringify({ passed: true, ignoredLegacySigner: true, noFaucet: true,
-      savedWalletReconnect: true, accountChanges: true, existingHistoryPreserved: true, transactionsSent: 0 }));
+      savedWalletReconnect: true, accountChanges: true, sharedBalances: true, slowReadsBounded: true,
+      staleAccountReadIgnored: true, existingHistoryPreserved: true, transactionsSent: 0 }));
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });
