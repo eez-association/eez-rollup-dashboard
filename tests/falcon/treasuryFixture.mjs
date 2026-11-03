@@ -1,8 +1,14 @@
 import { keccak256, toHex } from 'viem';
 import { reloadFixture } from '../fixtures/treasury-reload.mjs';
 import { setupIdentity } from '../../src/lib/treasury/mainnetSetup.ts';
+import { ETHEREUM_USDC } from '../../src/lib/treasury/mainnet.ts';
 export function treasuryFixture(d, origin) {
  const f=reloadFixture(origin), {network,state,config}=f;
+ if(d.l1.chainId===1){
+  config.code.find(binding=>binding.chain==='l1'&&binding.address===config.payments.tokenL1).address=ETHEREUM_USDC;
+  config.payments.tokenL1=ETHEREUM_USDC;config.payments.assetLabel='USDC';
+  delete network.testnet;
+ }
  network.registry=d.l1.registry;network.manager=d.l2.manager;
  network.chains.l1.chainId=d.l1.chainId;network.chains.l2.chainId=d.l2.chainId;
  network.discovered={kind:'erc20',symbol:config.payments.assetLabel};
