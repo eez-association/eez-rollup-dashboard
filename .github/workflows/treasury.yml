@@ -109,6 +109,10 @@ jobs:
           node tests/bridge-token-picker.cjs
           node tests/bridge-test-token-browser.mjs
           node tests/bridge-gas-fees.cjs
+          node tests/cross-chain-fees.cjs
+          node tests/wallet-startup.cjs
+          node tests/visualizer-view.cjs
+          node tests/visualizer-query-performance.cjs
           node tests/bridge-transfer-lifecycle.cjs
           node tests/bridge-approvals.cjs
           node tests/cow-demo.cjs

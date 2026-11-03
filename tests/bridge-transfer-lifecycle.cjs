@@ -54,7 +54,8 @@ const fees = f => f.page.getByRole('region',{name:'Quoted bridge fees'});
       await f.page.getByRole('button',{name:'Done',exact:true}).click();
       assert.equal(await f.page.getByLabel('Bridge amount',{exact:true}).inputValue(),'0.001','Approval confirmation preserves the transfer amount');
       await f.page.clock.runFor(900);
-      await until(()=>estimates(f)>0 && quotes(f)>0,'Confirmed approval must start the transfer estimate and quote');
+      await until(()=>quotes(f)>0,'Confirmed approval must start the transfer quote');
+      assert.equal(estimates(f),0,'The compact quote resolves transfer gas after approval');
       assert.deepEqual(f.errors,[]);await f.context.close();scenarios++;
     }
     for(const reverse of [false,true]) for(const decimals of [6,18]) {

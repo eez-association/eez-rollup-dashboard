@@ -38,6 +38,8 @@ async function displayedFees(f, price, priority) {
       assert.equal(sent.tx.type, multipleWallets ? '0x2' : '0x0');
       const quotes = f.rpcRequests.filter(r => r.transaction);
       assert.equal(quotes.length, 2, 'preview and final submission each obtain a quote');
+      assert.equal(f.rpcRequests.filter(r => r.method === 'eth_estimateGas').length, 0, 'compact quotes resolve gas without a separate estimate');
+      assert.ok(quotes.every(r => r.intent.gas === undefined), 'automatic preview gas must not become an explicit final-send limit');
       assert.ok(quotes.every(quote => quote.path === (reverse ? '/composer/l2' : '/composer/l1')));
       assert.equal(sent.tx.chainId, reverse ? '0x1892' : '0x27d8');
       for (const [field, value] of Object.entries(quotes.at(-1).transaction)) assert.equal(sent.tx[field], value);
@@ -80,11 +82,36 @@ async function displayedFees(f, price, priority) {
     }
     for (const reverse of [false, true]) for (const options of [{ quoteFailure: true }, { feeCeiling: '1' }]) {
       const f = await fixture(browser, { reverse, feesEnabled: true, ...options });
-      await f.button.click();
-      await f.page.getByRole('dialog').getByRole('alert').filter({ hasText: options.quoteFailure ? 'quote_unavailable' : 'app limit' }).waitFor();
+      assert.equal(await f.button.isEnabled(), false, 'a rejected preview must not enable sending');
+      await feePanel(f).getByRole('status').filter({ hasText: options.quoteFailure ? 'quote_unavailable' : 'app limit' }).waitFor();
       assert.equal(await f.page.evaluate(() => window.walletRequests.length), 0);
       assert.deepEqual(f.errors, []);
       await f.context.close(); scenarios++;
+    }
+    for (const reverse of [false, true]) for (const failure of ['quote', 'cap']) {
+      const f = await fixture(browser, { reverse, feesEnabled: true });
+      if (failure === 'quote') f.feeQuote.failure = true;
+      else f.feeQuote.gasPrice = '1000000000000000000';
+      await f.button.click();
+      await f.page.getByRole('dialog').getByRole('alert').filter({ hasText: failure === 'quote' ? 'quote_unavailable' : 'app limit' }).waitFor();
+      assert.equal(await f.page.evaluate(() => window.walletRequests.length), 0);
+      assert.deepEqual(f.errors, []);
+      await f.context.close(); scenarios++;
+    }
+    for (const reverse of [false, true]) for (const multipleWallets of [false, true]) for (const explicit of [false, true]) {
+      const f = await fixture(browser, { reverse, feesEnabled: true, multipleWallets });
+      if (explicit) {
+        await f.page.getByLabel('Gas limit', { exact: true }).fill('500000');
+        await until(() => f.rpcRequests.some(r => r.intent?.gas === '0x7a120'), 'explicit preview gas was not preserved');
+        await until(() => f.button.isEnabled(), 'explicit gas quote did not finish');
+      }
+      f.feeQuote.gas = RAW_GAS + 123n;
+      await f.button.click();
+      await until(() => f.page.evaluate(() => window.walletRequests.length === 1), 'fresh gas quote did not reach wallet');
+      const sent = await f.page.evaluate(() => window.walletRequests[0]);
+      assert.equal(BigInt(sent.gas), explicit ? 500000n : RAW_GAS + 123n);
+      assert.equal(f.rpcRequests.filter(r => r.method === 'eth_estimateGas').length, 0);
+      assert.deepEqual(f.errors, []); await f.context.close(); scenarios++;
     }
     for (const reverse of [false, true]) for (const walletNonce of [1, '0x01']) {
       const f = await fixture(browser, { reverse, feesEnabled: true, multipleWallets: true, walletNonce });

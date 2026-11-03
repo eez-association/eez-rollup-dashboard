@@ -105,7 +105,7 @@ export function BridgePanel({
       asset === "erc20" && (tokenNeedsApproval === null || sourceBalanceRaw === null) ? "Checking token balance and approval…" :
       insufficientBalance ? `Insufficient ${asset === "eth" ? nativeSymbol : tokenMeta?.symbol || "token"} balance on ${direction === "l1-to-l2" ? "L1" : "L2"}.` :
       needsApproval ? `Approve ${tokenMeta?.symbol || "the token"} before bridging.` :
-      gas.status === "idle" || gas.status === "estimating" ? "Waiting for a Composer gas estimate…" : null : null;
+      gas.status === "idle" || gas.status === "estimating" ? feesEnabled ? "Waiting for a Composer fee quote…" : "Waiting for a Composer gas estimate…" : null : null;
 
   const actionLabel = asset === "eth" ? `Bridge ${nativeSymbol}` : `Bridge ${tokenMeta?.symbol || "Tokens"}`;
   const sourceSide = direction === "l1-to-l2" ? "l1" : "l2";
@@ -200,11 +200,11 @@ export function BridgePanel({
       {/* Gas settings are already collapsed; keep estimation errors visible. */}
       {gas.status === "unsupported" && gas.errorMessage && <div className={styles.validationHint} role="status">{gas.errorMessage}</div>}
       {!needsApproval && phase !== "confirmed" && gas.status === "error" && gas.errorMessage && (
-        <div className={styles.errorBar} role="alert">Gas estimation failed: {gas.errorMessage}</div>
+        <div className={styles.errorBar} role="alert">{feesEnabled ? "Fee quote failed" : "Gas estimation failed"}: {gas.errorMessage}</div>
       )}
       {feesEnabled && phase !== "confirmed" && !needsApproval && amount && rawAmount > 0n && sourceBridgeReady && (
         <BridgeFeeQuote fees={state.fees} sentToWallet={phase === "sending" || phase === "tx-pending"}
-          disabled={busy || gas.status !== "estimated" && !state.gasOverrideHex || needsApproval}
+          disabled={busy || needsApproval}
           onRefresh={onRefreshFees} />
       )}
       {amount && rawAmount > 0n && sourceBridgeReady && (

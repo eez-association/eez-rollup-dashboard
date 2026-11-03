@@ -36,6 +36,8 @@ export interface WalletState {
   chainId: string | null;
   l1Balance: string | null;
   l2Balance: string | null;
+  l1BalanceRaw: bigint | null;
+  l2BalanceRaw: bigint | null;
   isConnected: boolean;
 }
 
