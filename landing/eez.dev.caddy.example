@@ -1,0 +1,23 @@
+# Add this site to the mainnet gateway's existing Caddyfile. Keep its separate
+# rollupx.eez.dev site. ChiadoX DNS and HTTPS must work before apex cutover.
+# This example assumes Caddy can reach the Docker host's loopback interface.
+eez.dev {
+	encode zstd gzip
+	header {
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "same-origin"
+	}
+
+	@landing path / /network-assets/*
+	handle @landing {
+		reverse_proxy 127.0.0.1:8090
+	}
+
+	# Preserve legacy RPCs and deep links on Chiado. Keep the original path,
+	# method, body and WebSocket upgrades; never forward them to mainnet.
+	handle {
+		reverse_proxy https://chiadox.eez.dev {
+			header_up Host chiadox.eez.dev
+		}
+	}
+}
