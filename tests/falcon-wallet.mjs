@@ -236,7 +236,7 @@ try {
     await page.goto(origin + '/');
     await page.getByRole('button', { name: 'Connect Wallet', exact: true }).click();
     await page.getByRole('button', { name, exact: true }).click();
-    await f.toggle(); await f.tab.click(); await page.locator('#generate').waitFor();
+    await f.tab.click(); await page.locator('#generate').waitFor();
     assert.equal(await page.getByText(/Gas wallet ·/).count(), 0, 'gas wallet stays in the dashboard header');
     const status = text => page.waitForFunction(text => document.querySelector('#safe-status')?.textContent.includes(text), text);
     const setup = page.getByRole('group', { name: `${d.l2.chainName} wallet connection`, exact: true });

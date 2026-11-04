@@ -2,8 +2,6 @@
 const assert = require('node:assert/strict');
 const { chromium } = require('playwright');
 const origin = (process.env.EEZ_UI_URL || 'http://127.0.0.1:8083/dashboard').replace(/\/$/, '');
-const visibilityKey = 'eez:treasury-demo:visible';
-const shortcut = 'Control+Alt+Shift+KeyT';
 
 async function fixture(browser, blockedStorage = false) {
   const context = await browser.newContext({ viewport: { width: 1440, height: 1100 } });
@@ -34,38 +32,29 @@ async function fixture(browser, blockedStorage = false) {
   });
   const treasury = page.getByRole('region', { name: 'Treasury network readiness', exact: true });
   const tab = page.getByRole('navigation', { name: 'Dashboard sections' }).getByRole('button', { name: 'Treasury Demo', exact: true });
-  const toggle = async (keys = shortcut) => { await page.locator('body').click({ position: { x: 1, y: 1 } }); await page.keyboard.press(keys); };
-  const hidden = async () => {
-    assert.equal(await tab.count(), 0);
-    assert.equal(await treasury.count(), 0);
-  };
   const close = async () => {
     assert.deepEqual(errors, []);
     assert.ok(methods.every(method => !/send|sign/i.test(method)), 'preview never sends or signs a transaction');
     await context.close();
   };
-  return { page, context, treasury, tab, toggle, hidden, close, chunks };
+  return { page, context, treasury, tab, close, chunks };
 }
 
 (async () => {
   const browser = await chromium.launch({ headless: true, chromiumSandbox: true });
   try {
     const f = await fixture(browser);
-    await f.page.goto(origin + '/#/treasury-demo');
+    await f.page.goto(origin + '/');
     await f.page.getByRole('navigation', { name: 'Dashboard sections' }).waitFor();
-    await f.hidden();
-    assert.equal(f.chunks.length, 0, 'hidden example is not loaded by a direct link');
+    await f.tab.waitFor();
+    assert.equal(f.chunks.length, 0, 'visible navigation does not load Treasury until selected');
     await f.page.evaluate(() => { location.hash = '#/counter-demo'; });
     await f.page.getByRole('region', { name: 'Counter demo', exact: true }).waitFor();
     await f.page.evaluate(() => { location.hash = '#/treasury-demo'; });
-    await f.page.getByRole('region', { name: 'Bridge transfers' }).waitFor();
-    await f.hidden();
-    await f.toggle();
     await f.treasury.waitFor();
     assert.equal(await f.tab.getAttribute('aria-current'), 'page');
     assert.ok(f.chunks.length > 0);
-    assert.equal(await f.page.evaluate(key => sessionStorage.getItem(key), visibilityKey), '1');
-    assert.equal(await f.page.evaluate(key => localStorage.getItem(key), visibilityKey), null);
+    assert.deepEqual(await f.page.evaluate(() => Object.keys(sessionStorage)), []);
     assert.equal(await f.page.getByRole('region', { name: 'Transaction history', exact: true }).count(), 0);
     assert.equal(await f.page.getByRole('button', { name: 'Simulation', exact: true }).count(), 0);
     assert.equal(await f.page.getByRole('button', { name: 'Get Test USDC', exact: true }).count(), 0);
@@ -74,36 +63,31 @@ async function fixture(browser, blockedStorage = false) {
       await f.page.setViewportSize({width,height:1100});
       assert(await f.page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
     }
-    await f.toggle();
-    await f.page.getByRole('region', { name: 'Counter demo', exact: true }).waitFor();
-    await f.hidden();
-    assert.equal(await f.page.evaluate(key => sessionStorage.getItem(key), visibilityKey), null);
     await f.page.goBack();
-    await f.page.getByRole('region', { name: 'Bridge transfers' }).waitFor();
-    await f.hidden();
-    await f.toggle('Meta+Alt+Shift+KeyT');
+    await f.page.getByRole('region', { name: 'Counter demo', exact: true }).waitFor();
+    await f.page.goForward();
     await f.treasury.waitFor();
+    await f.page.keyboard.press('Meta+Alt+Shift+KeyT');
+    assert(await f.treasury.isVisible(), 'the former shortcut cannot hide Treasury');
 
     const fresh = await fixture(browser);
     await fresh.page.goto(origin + '/#/treasury-demo');
     await fresh.page.getByRole('navigation', { name: 'Dashboard sections' }).waitFor();
-    await fresh.hidden();
-    assert.equal(fresh.chunks.length, 0, 'another browser session stays hidden');
+    await fresh.treasury.waitFor();
+    assert(await fresh.tab.isVisible(), 'direct links work in a fresh session');
     await fresh.close();
     await f.close();
 
     const blocked = await fixture(browser, true);
     await blocked.page.goto(origin + '/#/treasury-demo');
     await blocked.page.getByRole('navigation', { name: 'Dashboard sections' }).waitFor();
-    await blocked.hidden();
-    await blocked.toggle();
     await blocked.treasury.waitFor();
     await blocked.page.reload();
     await blocked.page.getByRole('navigation', { name: 'Dashboard sections' }).waitFor();
-    await blocked.hidden();
+    await blocked.treasury.waitFor();
     await blocked.close();
-    console.log(JSON.stringify({ passed: true, hiddenByDefault: true, guardedDeepLinks: true, sessionVisibility: true,
-      shortcutFiltering: true, blockedStorage: true, simulationRemoved: true, faucetHiddenOutsideChiado: true,
+    console.log(JSON.stringify({ passed: true, visibleByDefault: true, directLinks: true, reloadAndHistory: true,
+      blockedStorage: true, simulationRemoved: true, faucetHiddenOutsideChiado: true,
       responsiveWidths: 3, transactionsSent: 0 }));
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

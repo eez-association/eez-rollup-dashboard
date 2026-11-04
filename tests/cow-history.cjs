@@ -8,7 +8,7 @@ const { fixture, origin } = require('./cow-demo.cjs');
     ['settled','submitted','failed','expired'].forEach((state,index)=>f.submitted.push({id:`history-${index}`,signer:'0x'+'88'.repeat(20),receivedAt:1793272675-index*60,status:state,
       order:{sellAmount:'1000000000000000',buyAmount:'97000000000000000',receiver:'0x'+'88'.repeat(20)},quote:{tokenSymbol:'ctUSD',tokenDecimals:18},
       solverDebug:{state,...(index===0?{settlement:'0x'+'cc'.repeat(32),l1Tx:'0x'+'dd'.repeat(32),settlementBlock:78540,l1Block:23745591}:{}),...(state==='failed'?{error:'Pool quote could not be executed.'}:{})}}));
-    await f.page.goto(origin+'/');await f.nav.waitFor();await f.toggle();await f.cow.click();
+    await f.page.goto(origin+'/');await f.nav.waitFor();await f.cow.click();
     await f.page.getByRole('region',{name:'Swap form'}).getByRole('button',{name:'Connect wallet'}).click();
     const history=f.page.getByRole('region',{name:'Swap activity'});
     await history.getByText('4 swaps',{exact:true}).waitFor();
@@ -31,7 +31,7 @@ const { fixture, origin } = require('./cow-demo.cjs');
     assert.deepEqual(f.errors,[]);await f.context.close();
 
     const main=await fixture(browser,{mainnet:true});
-    await main.page.goto(origin+'/');await main.nav.waitFor();await main.toggle();await main.cow.click();
+    await main.page.goto(origin+'/');await main.nav.waitFor();await main.cow.click();
     await main.page.getByRole('region',{name:'Swap form'}).getByText('Bridged WETH',{exact:true}).waitFor();
     assert.equal(await main.page.getByText('Wrap native ETH',{exact:true}).count(),0);
     assert.equal(await main.page.getByRole('region',{name:'Get test tokens'}).count(),0);

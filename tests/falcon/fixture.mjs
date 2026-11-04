@@ -3,8 +3,6 @@ import { toHex } from 'viem';
 import { crossChainDeployment as defaultDeployment } from '../../src/lib/falcon/crossChainDeployment.ts';
 
 export const origin = (process.env.EEZ_UI_URL || 'http://127.0.0.1:8083/dashboard').replace(/\/$/, '');
-export const shortcut = 'Control+Alt+Shift+KeyT';
-export const visibilityKey = 'eez:treasury-demo:visible';
 
 /** Only static dashboard assets reach the preview server; all network data is isolated. */
 export async function fixture(browser, { mismatch = false, feesEnabled = true, config = {}, quote, rpc, deployment = defaultDeployment } = {}) {
@@ -51,19 +49,11 @@ export async function fixture(browser, { mismatch = false, feesEnabled = true, c
   const page = await context.newPage();
   const nav = page.getByRole('navigation', { name: 'Dashboard sections' });
   const tab = nav.getByRole('button', { name: 'Falcon Safe Demo', exact: true });
-  const toggle = async () => {
-    await page.locator('body').click({ position: { x: 1, y: 1 } });
-    await page.keyboard.press(shortcut);
-  };
   const open = async (target = page) => {
     await target.goto(origin + '/#/falcon-demo');
     await target.getByRole('navigation', { name: 'Dashboard sections' }).waitFor();
-    if (await target.evaluate(key => sessionStorage.getItem(key) !== '1', visibilityKey)) {
-      await target.keyboard.press(shortcut);
-      await target.getByRole('button', { name: 'Falcon Safe Demo', exact: true }).click();
-    }
     await target.locator('#generate').waitFor();
   };
   const close = async () => { assert.deepEqual(errors, []); await context.close(); };
-  return { context, page, nav, tab, toggle, open, close, requests, errors };
+  return { context, page, nav, tab, open, close, requests, errors };
 }

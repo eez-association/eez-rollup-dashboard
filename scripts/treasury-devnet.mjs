@@ -76,7 +76,7 @@ try {
   writeFileSync(resolve(directory, 'public-test-wallets.json'), JSON.stringify([A, B, C].map((owner, i) => ({
     label: `Owner ${'ABC'[i]}`, address: owner.address, publicTestPrivateKey: toHex([0xa11cen, 0xb0bn, 0xc0cn][i], { size: 32 }),
   })), null, 2) + '\n');
-  console.log(`Treasury UI ready: ${session.url}\nReveal with Ctrl+Alt+Shift+T (Cmd+Option+Shift+T on macOS).`);
+  console.log(`Treasury UI ready: ${session.url}`);
   if (process.env.TREASURY_UI_MODE === 'serve') {
     while (!existsSync(session.stopFile)) await new Promise(resolve => setTimeout(resolve, 1000));
     // The common native harness still checks final safe-prefix convergence and

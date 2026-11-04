@@ -90,7 +90,7 @@ jobs:
           node tests/integration/treasury-paired-setup.mjs --browser
           node tests/treasury-verification-browser.mjs
           node tests/trace-details.cjs
-      - name: Hidden demo dashboard regressions
+      - name: Demo dashboard regressions
         env:
           CHROME_DEVEL_SANDBOX: /usr/local/sbin/eez-chromium-sandbox
           EEZ_UI_URL: http://127.0.0.1:8083/dashboard

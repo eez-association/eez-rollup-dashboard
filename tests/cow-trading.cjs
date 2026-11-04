@@ -5,7 +5,7 @@ const { decodeFunctionData, erc20Abi } = require('viem');
 
 async function open(browser, options = {}) {
   const f = await fixture(browser, { wallet: true, ...options });
-  await f.page.goto(origin + '/'); await f.nav.waitFor(); await f.toggle(); await f.cow.click();
+  await f.page.goto(origin + '/'); await f.nav.waitFor(); await f.cow.click();
   const form = f.page.getByRole('region', { name: 'Swap form' });
   await form.getByRole('button', { name: 'Connect wallet' }).click();
   await form.getByRole('button', { name: 'Get quote' }).waitFor();
@@ -30,7 +30,7 @@ async function open(browser, options = {}) {
       await f.page.goto(origin + '/'); await f.nav.waitFor();
       await f.page.getByRole('button', { name: 'Connect Wallet', exact: true }).click();
       await f.page.getByRole('button', { name: 'MetaMask', exact: true }).click();
-      await f.toggle(); await f.cow.click();
+      await f.cow.click();
       await f.page.getByText('CoW Light is not available for this network yet.', { exact: true }).waitFor();
       const prompt = f.page.getByRole('group', { name: 'EEZ test wallet connection', exact: true });
       await prompt.getByRole('button', { name: 'Switch to EEZ test', exact: true }).click();
@@ -41,7 +41,7 @@ async function open(browser, options = {}) {
     }
     for (const missingNetwork of [false, true]) {
       const setup = await fixture(browser, { wallet: true, wrongNetwork: true, missingNetwork });
-      await setup.page.goto(origin + '/'); await setup.nav.waitFor(); await setup.toggle(); await setup.cow.click();
+      await setup.page.goto(origin + '/'); await setup.nav.waitFor(); await setup.cow.click();
       await setup.page.getByRole('region', { name: 'Swap form' }).getByRole('button', { name: 'Connect wallet', exact: true }).click();
       const prompt = setup.page.getByRole('group', { name: 'EEZ test wallet connection', exact: true });
       const connect = prompt.getByRole('button');
@@ -108,7 +108,7 @@ async function open(browser, options = {}) {
 
     for (const options of [{ rejectSwitch: true }, { reverted: true }]) {
       const f = await fixture(browser, { wallet: true, ...options });
-      await f.page.goto(origin + '/'); await f.nav.waitFor(); await f.toggle(); await f.cow.click();
+      await f.page.goto(origin + '/'); await f.nav.waitFor(); await f.cow.click();
       const form = f.page.getByRole('region', { name: 'Swap form' });
       await form.getByRole('button', { name: 'Connect wallet' }).click();
       await form.getByRole('button', { name: 'Get quote' }).click();

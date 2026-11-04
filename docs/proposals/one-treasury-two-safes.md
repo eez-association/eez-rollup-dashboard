@@ -778,12 +778,9 @@ Owner changes take effect according to execution order. An owner removed before 
 
 The application lives in this repository as a **Treasury Demo** tab beside
 **Counter Demo**, reusing the dashboard's layout, theme and wallet integration.
-During development it is hidden from normal navigation. **Ctrl+Alt+Shift+T**
-(**Cmd+Option+Shift+T** on macOS), pressed outside an editable field, reveals and
-opens it; the same shortcut hides it again. Visibility is scoped to the browser
-tab's session and survives reloads. A fresh session starts hidden, and a direct
-`#/treasury-demo` URL does not enable it. This keeps the unfinished example out
-of ordinary browsing; it is not authentication or a confidentiality guarantee.
+It is visible in normal navigation and opens directly at `#/treasury-demo`,
+including in a fresh browser session. Its code loads only when the tab is selected;
+network and deployment checks still determine which actions are available.
 
 Build one treasury screen around the question “How much can we pay, and where should the recipient receive it?” The user enters one payment and obtains the required owner signatures. Bridging introduces no additional owner approvals per leg. The interactive concept establishes the layout and walkthrough; its simulated data and signature buttons are not an implemented wallet or settlement integration.
 
@@ -1395,7 +1392,7 @@ Use isolated resources and only the rehearsal's own wallets and state. Advancing
 | R7 | A later required failure leaves no committed payment effects | Settlement trace reaching earlier legs, complete before/after assertions, Safe and allowance nonce checks, follower reconciliation |
 | R8 | Reset windows agree | Transactions on both sides of an epoch boundary; matching effective L1, L2 and policy epochs and limits |
 | R9 | The supported signer profile is preserved | Successful exact mixed read/write paths through production validation; unsupported callback/revert shapes rejected, with no permissive verifier substituted |
-| R10 | The user completes the payment flow through the dashboard example | Hidden by default; shortcut reveals/hides it; direct links respect visibility; actual wallet quorum, fresh approvals after editing signed fields, both destinations in the same form, owner-administration handoff and the complete demo walkthrough |
+| R10 | The user completes the payment flow through the dashboard example | Visible in normal navigation; direct links work in a fresh session; actual wallet quorum, fresh approvals after editing signed fields, both destinations in the same form, owner-administration handoff and the complete demo walkthrough |
 | R11 | UI balances, budgets and history reflect the established outcome | Separate holdings and spending capacity; canonical actual contributions; preparation rejection, settled failure and uncertainty distinguished; no premature settled debit; epoch/freshness handling; reload reconciliation without duplicate payment; simulated data visibly separated |
 
 Use three levels of validation: focused Solidity tests for contract behavior, process tests through the actual runtime roles, and a full rehearsal of the chosen environment. Mocked success or a mined posting receipt is not a substitute for semantic assertions and independent replay.

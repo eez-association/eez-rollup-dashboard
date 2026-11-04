@@ -1,8 +1,8 @@
 # ROG rollup 4 deployment
 
 Observed on 2026-10-29. The public dashboard is
-<https://eez.asuscomm.com/dashboard/>. Press **Ctrl+Alt+Shift+T** to reveal
-Treasury and CoW Light, then select **CoW Light Demo**.
+<https://eez.asuscomm.com/dashboard/>. In the current dashboard, select
+**CoW Light Demo** in the normal navigation.
 
 The browser test sold **0.001 ctWETH** and received
 **0.099699701498895209 ctUSD**, using the official existing EEZ bridges.

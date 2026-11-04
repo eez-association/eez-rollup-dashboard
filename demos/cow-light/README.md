@@ -157,9 +157,8 @@ and reject mismatches; they do not choose the active network.
 The verified EEZ-X deployment and restore instructions are documented in
 [`deployment/EEZ-dev-r2.md`](deployment/EEZ-dev-r2.md).
 
-The dashboard provides a native React swap form in its hidden **CoW Light Demo** tab. Press
-**Ctrl+Alt+Shift+T** (**Cmd+Option+Shift+T** on macOS) outside a text field to
-reveal both Treasury and CoW Light tabs; press again to hide them. Configure
+The dashboard provides a native React swap form in its **CoW Light Demo** tab.
+Select it in the normal navigation or open `#/cow-demo` directly. Configure
 the dashboard's `EEZ_UI_COW_UPSTREAM` to reach this API. Its chain IDs must match
 the dashboard before trading opens. The tab reuses the dashboard's selected
 wallet, network configuration, design tokens, explorer links and execution

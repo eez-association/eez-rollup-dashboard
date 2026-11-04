@@ -25,14 +25,13 @@ try {
   await page.goto(session.url, { waitUntil: 'domcontentloaded' });
   await page.getByRole('navigation', { name: 'Dashboard sections' }).waitFor();
   const treasury = page.getByRole('region', { name: 'Connected treasury demo', exact: true });
-  assert.equal(await treasury.count(), 0, 'fresh browser must keep the demo hidden');
-  await page.keyboard.press('Control+Alt+Shift+KeyT');
+  await page.getByRole('navigation', { name: 'Dashboard sections' }).getByRole('button', { name: 'Treasury Demo', exact: true }).click();
   await treasury.waitFor();
   await treasury.getByText('2 of 2 owners required', { exact: false }).waitFor();
   assert.equal(await treasury.getByRole('link', { name: 'Open L1 Safe', exact: true }).getAttribute('href'), c.safeAppUrl);
   assert.equal(await treasury.getByTestId('global-spent').innerText(), '0');
   await page.screenshot({ path: resolve(directory, 'dashboard-ready.png'), fullPage: true });
-  record.checks.push('hidden dashboard, real owner quorum, zero budget and exact L1 Safe link');
+  record.checks.push('public demo navigation, real owner quorum, zero budget and exact L1 Safe link');
   console.log('Dashboard handoff checked');
 
   const safe = await browser.newPage({ viewport: { width: 1440, height: 1000 } });

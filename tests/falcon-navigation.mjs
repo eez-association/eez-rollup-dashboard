@@ -1,18 +1,15 @@
 import assert from 'node:assert/strict';
 import { chromium } from 'playwright';
-import { fixture, origin, shortcut, visibilityKey } from './falcon/fixture.mjs';
+import { fixture, origin } from './falcon/fixture.mjs';
 
 const browser = await chromium.launch({ headless: true, chromiumSandbox: process.env.TREASURY_BROWSER_SANDBOX !== '0' });
 try {
   const f = await fixture(browser);
-  await f.page.goto(origin + '/#/falcon-demo');
+  await f.page.goto(origin + '/');
   await f.nav.waitFor();
-  assert.equal(await f.tab.count(), 0);
-  const chunks = () => f.requests.filter(r => /FalconDemo-.*\.js/.test(r.url));
-  assert.equal(chunks().length, 0, 'hidden deep link must not load the Falcon cryptography');
-  await f.toggle();
   await f.tab.waitFor();
-  assert.equal(chunks().length, 0, 'revealing navigation does not load the Falcon tab');
+  const chunks = () => f.requests.filter(r => /FalconDemo-.*\.js/.test(r.url));
+  assert.equal(chunks().length, 0, 'visible navigation does not load Falcon cryptography until selected');
   assert.deepEqual(await f.nav.getByRole('button').allTextContents(), ['Bridge & Calls', 'Counter Demo', 'Treasury Demo', 'CoW Light Demo', 'Falcon Safe Demo']);
   await f.tab.click();
   await f.page.locator('#generate').waitFor();
@@ -22,10 +19,9 @@ try {
   assert.equal(chunks().length, 1);
   await f.page.locator('#generate').click();
   await f.page.waitForFunction(() => document.querySelector('#key-status').textContent.includes('Key generated'));
-  await f.page.locator('#signature-playground > summary').click();
-  await f.page.getByTestId('message').focus();
-  await f.page.keyboard.press(shortcut);
-  assert(await f.page.getByTestId('public-key-hash').isVisible(), 'typing cannot hide the demo');
+  await f.page.locator('body').click({ position: { x: 1, y: 1 } });
+  await f.page.keyboard.press('Control+Alt+Shift+KeyT');
+  assert(await f.page.getByTestId('public-key-hash').isVisible(), 'the former shortcut cannot hide the demo');
   await f.nav.getByRole('button', { name: 'CoW Light Demo', exact: true }).click();
   await f.page.getByText(/CoW Light needs a verified deployment/).waitFor();
   await f.page.goBack();
@@ -33,12 +29,7 @@ try {
   assert.equal(await f.page.getByTestId('public-key-hash').count(), 0, 'leaving the tab clears the plaintext key');
   await f.page.reload();
   await f.page.locator('#generate').waitFor();
-  assert.equal(await f.page.evaluate(key => sessionStorage.getItem(key), visibilityKey), '1');
-  await f.toggle();
-  assert.equal(await f.tab.count(), 0);
-  await f.page.goBack();
-  assert.equal(await f.tab.count(), 0, 'history cannot reveal a hidden demo');
-  assert.equal(await f.page.locator('#generate').count(), 0);
+  assert.deepEqual(await f.page.evaluate(() => Object.keys(sessionStorage)), []);
   for (const width of [320, 390, 1440]) {
     await f.page.setViewportSize({ width, height: 950 });
     await f.open();
@@ -47,9 +38,8 @@ try {
   await f.close();
 
   const fresh = await fixture(browser, { mismatch: true });
-  await fresh.page.goto(origin + '/#/falcon-demo'); await fresh.nav.waitFor();
-  assert.equal(await fresh.tab.count(), 0, 'another session starts hidden');
   await fresh.open();
+  assert(await fresh.tab.isVisible(), 'direct links work in a fresh session');
   await fresh.page.getByText(/On-chain demo requires RollupX/).waitFor();
   assert.equal(await fresh.page.locator('#safe-load, #send-l2').count(), 0, 'mismatched networks cannot initiate contract actions');
   await fresh.page.locator('#generate').click();
@@ -69,5 +59,5 @@ try {
   await fresh.page.locator('#verify').click();
   await fresh.page.waitForFunction(() => document.querySelector('#signature-status').dataset.result === 'valid');
   await fresh.close();
-  console.log('Falcon hidden navigation, lazy loading, network gating, unmount and responsive checks passed.');
+  console.log('Falcon public navigation, lazy loading, network gating, unmount and responsive checks passed.');
 } finally { await browser.close(); }

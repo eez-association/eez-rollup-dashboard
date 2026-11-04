@@ -142,7 +142,7 @@ it is not the presenter’s owner-management UI.
 
 ## Connected treasury UI
 
-The hidden Treasury Demo defaults to **Payments** with the isolated launcher's
+The Treasury Demo defaults to **Payments** with the isolated launcher's
 runtime manifest. Without a manifest, supported dashboard networks show the
 Safe chooser; other networks show a configuration prompt. **Owner demo** executes
 `TreasuryOwnerAction.setValue` through the fixture's EEZ-X Safe.
@@ -167,8 +167,8 @@ npm run dev:treasury -- --runtime /path/to/rollupX --cargo-target-dir /path/to/r
 ```
 
 The launcher creates a fresh run directory under `.runtime/treasury-integration`
-and prints its dashboard URL. Reveal Treasury Demo with **Ctrl+Alt+Shift+T**
-(**Cmd+Option+Shift+T** on macOS). Each invocation has its own data, ports and
+and prints its dashboard URL, which opens Treasury Demo directly.
+Each invocation has its own data, ports and
 runtime configuration; it does not change `.env`, `.runtime/config.json` or the
 normal dashboard deployment. `EEZ_UI_RUNTIME_CONFIG` selects the generated Vite
 configuration for this process only. The UI fixture uses L1 chain ID **1337** and
@@ -283,7 +283,7 @@ npx playwright install chromium
 npm run test:treasury:ui -- --runtime /path/to/rollupX --cargo-target-dir /path/to/rollupX/target
 ```
 
-This starts the same private devnet and UI, drives hidden navigation, owner
+This starts the same private devnet and UI, drives demo navigation, owner
 reads, network selection, EIP-712 approval and submission, then checks canonical
 state and independent follower replay. It exercises owner addition/removal,
 stale and duplicate approvals, incomplete quorum, wallet signature rejection,

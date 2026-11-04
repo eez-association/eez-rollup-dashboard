@@ -18,7 +18,7 @@ const { fixture, origin } = require('./cow-demo.cjs');
       return unavailable && token==='0x'+'55'.repeat(20)
         ? route.fulfill({status:503,json:{error:'RPC unavailable'}}) : route.fallback();
     });
-    await f.page.goto(origin+'/');await f.nav.waitFor();await f.toggle();await f.cow.click();
+    await f.page.goto(origin+'/');await f.nav.waitFor();await f.cow.click();
     const catalog=f.page.getByRole('region',{name:'Available tokens'});
     const first=catalog.getByRole('listitem').filter({has:f.page.getByRole('button',{name:'Select ctUSD',exact:true})});
     const second=catalog.getByRole('listitem').filter({has:f.page.getByRole('button',{name:'Select TEST',exact:true})});
