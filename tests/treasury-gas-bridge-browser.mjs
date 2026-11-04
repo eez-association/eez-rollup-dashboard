@@ -99,6 +99,15 @@ try {
     await page.getByRole('button', { name: 'Change recipient', exact: true }).click();
     await page.getByLabel('Recipient address', { exact: true }).fill(toHex(99n, { size: 20 }));
     await page.getByLabel('Bridge amount', { exact: true }).fill('0.5');
+    if (network.chains.l1.chainId === 1) {
+      const limitError = page.getByRole('alert').filter({ hasText: 'Only 0.1 ETH or less is allowed.' });
+      await limitError.waitFor();
+      assert(await page.getByRole('button', { name: 'Bridge ETH', exact: true }).isDisabled(), 'over-limit mainnet ETH cannot be submitted');
+      assert.equal(await page.getByText('Gas settings', { exact: true }).count(), 0);
+      // Keep the draft-reset scenario valid while also checking the inclusive mainnet limit.
+      await page.getByLabel('Bridge amount', { exact: true }).fill('0.1');
+      await limitError.waitFor({ state: 'hidden' });
+    }
     await page.getByText('Gas settings', { exact: true }).click();
     await page.getByLabel('Gas limit', { exact: true }).fill('500000');
     await page.getByRole('button', { name: 'Treasury Demo', exact: true }).click();
