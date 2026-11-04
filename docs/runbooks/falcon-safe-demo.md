@@ -135,7 +135,14 @@ against the new factory; UI bytecode checks do not claim explorer verification.
 5. L2 inclusion and L1 execution are checked automatically. A source receipt
    alone is not proof of canonical L1 execution: the UI also checks settlement,
    Safe ownership and, for transfers, the exact operation, success event and
-   consumed nonce. Transient read failures retry without resending. Use **See in
+   consumed nonce. Settlements submitted through a forwarding contract must carry
+   a `BatchPosted` event emitted by the configured EEZ registry that includes the
+   configured rollup ID; direct registry calls retain support for earlier event
+   versions. The L2 transaction link appears after submission. The L1 settlement
+   link appears when Composer correlates the canonical L2 block, with an explicit
+   unverified-execution label until all L1 checks pass. Correlation alone never
+   enables another send or marks the transfer confirmed. Transient read failures
+   retry without resending. Use **See in
    trace decoder** to inspect the submitted transaction; manual receipt and
    replay-diagnostic buttons are omitted.
 6. The gas wallet stays in the dashboard header. **Fund Safe** sends a

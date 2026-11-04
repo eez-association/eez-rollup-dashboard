@@ -1,0 +1,49 @@
+{
+  "date": "2026-11-04",
+  "dashboardBase": "299837f6f820d9ef29434cbcb2c68afd4e011891",
+  "protocolGitlink": "855fe0602484750861b4c31502a1a91355d33ed6",
+  "l2ChainId": 696991,
+  "l1ChainId": 1,
+  "rollupId": 2,
+  "controllerVerification": {
+    "address": "0x80D8eC79b73645FC8ddfeFc4d6De153B6e171459",
+    "factory": "0x38a2767eAA74c2B0978F0fD6B86d1500bF7038BB",
+    "creationHash": "0x39a6cec8dfa2ba8c4db5d65fb81d7c742c323339d022850a2ef991ee4de7aabc",
+    "creationBlock": "224589",
+    "creationBlockHash": "0x864fe84037a7ab5b96c6096730c8116a644c548e6dff82dde9147dacdd8a066c",
+    "compiler": "v0.8.34+commit.80d5c536",
+    "runtimeCodeHash": "0xb25f0edb187abafc217026742b98874f8c3915402dc5c163b07785134be42d6c",
+    "creationCodeHash": "0xbce3ada07909dd433ac03d0156ab18dccdb14a82d5faf7bd230f204d7fe56eca",
+    "constructorArguments": "0x0000000000000000000000009008864a079ae0eb3239729d10b9721759d261bf0000000000000000000000004b2760f84b83d6b3829e30a7573b0172b6d6402c0000000000000000000000000000000000000000000000000000000000000001e1cec8191216ce4fb27747ef5ec9ce9a6df25856cbaf9741b6d41f1f066110eb",
+    "standardInputSha256": "24684e511f757d5866667902995251ac96c04409d70e05520376a107aa5ff4a7",
+    "isVerified": true,
+    "isFullyVerified": true,
+    "isPartiallyVerified": false,
+    "sourcesMatch": true,
+    "abiMatches": true,
+    "constructorMatches": true,
+    "creationAndRuntimeMatch": true
+  },
+  "transfers": [
+    {
+      "l2Hash": "0xba7b962de058a98ea4f54b0cfefdbe17caf83ba1fc1d31f208ffba1a34048514",
+      "l1Hash": "0x85ce1807353d11b8dc902c46fee38ada1ae8c75ed60b67c39892963f7cf64119",
+      "safe": "0x1a38210B3330aa0B41267D605f14C699A7189b60",
+      "safeTxHash": "0x9f67c74e1ec2a6fdbf7aa4da5972366db2a86368200ad036f3bf93592af5b0d6",
+      "safeNonce": "7",
+      "nonceAfter": "8",
+      "before": "rejected top-level recipient",
+      "after": "canonical L1 Safe execution verified"
+    },
+    {
+      "l2Hash": "0x095fa6892d33b6bf7c2d5545309de7f9f19d5961e8d7526e8c07544e23b34ea0",
+      "l1Hash": "0x59e3e8f6c2c720fd50eb3af21080493cdb226fd86fa4f6b77ca5d38a2a85ebf0",
+      "safe": "0x1a38210B3330aa0B41267D605f14C699A7189b60",
+      "safeTxHash": "0xece39c069dbfa6323e155c120582c685d8f775fce6ccb48017d0342fcfea6e45",
+      "safeNonce": "6",
+      "nonceAfter": "7",
+      "before": "rejected top-level recipient",
+      "after": "canonical L1 Safe execution verified"
+    }
+  ]
+}

@@ -72,7 +72,8 @@ export function FalconSafe({ signer, wallet, deployment, fees, onNeedSafeFactory
   const activeSubmission = recoveryScope !== null && submitted?.scope === recoveryScope && wallet.address
     && sameAddress(submitted.account, wallet.address) && submitted.publicKey.slice(2) === signer.publicKeyHex ? submitted : null;
   const confirming = activeSubmission?.kind === 'call' && activeSubmission.hash !== confirmedHash;
-  const [l1Hash, setL1Hash] = useState<Hex | null>(null);
+  const [l1Settlement, setL1Settlement] = useState<{ sourceHash: Hex; hash: Hex; verified: boolean } | null>(null);
+  const activeSettlement = activeSubmission?.kind === 'call' && l1Settlement?.sourceHash === activeSubmission.hash ? l1Settlement : null;
   const [costs, setCosts] = useState<SafeCostEvidence | null>(null);
   const [checkingCosts, setCheckingCosts] = useState(false);
   const [notice, setNotice] = useState<Notice>(initial);
@@ -415,7 +416,7 @@ export function FalconSafe({ signer, wallet, deployment, fees, onNeedSafeFactory
       hash = tracked.hash;
       if (!mounted.current) throw new Error('Safe setup was closed.');
       setSubmitted({ scope: recoveryScope, kind: 'controller', hash, account: session.account, publicKey: key.publicKey });
-      setL1Hash(null); setCosts(null);
+      setL1Settlement(null); setCosts(null);
       const reads = await controllerClient(falconReadProvider(config.l2ProxyRpc, signal, deployment.l2.chainName), deployment, signal);
       await checkRecoveryTransaction(reads, attempt, hash);
       const receipt = await canonicalReceipt(reads, hash, signal);
@@ -708,7 +709,7 @@ export function FalconSafe({ signer, wallet, deployment, fees, onNeedSafeFactory
     if (!hash) throw new Error('Could not obtain a current fee quote. Try estimating again.');
     if (!mounted.current) return;
     const tx: Submitted = { scope: recoveryScope, kind: 'call', hash, account: session.account, publicKey: prepared.signed.publicKey, prepared };
-    setSubmitted(tx); setPrepared(null); setL1Hash(null); setCosts(null);
+    setSubmitted(tx); setPrepared(null); setL1Settlement(null); setCosts(null);
     setNotice({ kind: 'pending', text: 'Submitted through EEZ. Waiting for the L2 call result…' });
   }
 
@@ -718,13 +719,22 @@ export function FalconSafe({ signer, wallet, deployment, fees, onNeedSafeFactory
       const { session } = await sourceSession(signal);
       const hash = await recoverFeeTransaction(session.provider, recoveryHash.trim(), uncertain.intent);
       const tx: Submitted = { scope: recoveryScope, kind: 'call', hash, account: uncertain.intent.from, publicKey: uncertain.prepared.signed.publicKey, prepared: uncertain.prepared };
-      setSubmitted(tx); setL1Hash(null); setCosts(null); setUncertain(null); setRecoveryHash('');
+      setSubmitted(tx); setL1Settlement(null); setCosts(null); setUncertain(null); setRecoveryHash('');
     });
   }
 
   async function confirmL1(tx: Extract<Submitted, { kind: 'call' }>, source: NonNullable<Awaited<ReturnType<typeof sourceReceipt>>>, signal: AbortSignal) {
     const value = await source.provider.request({ method: 'eez_getSettlementByL2Block', params: [source.receipt.blockHash] });
-    const settlement = parseSettlement(value, source.receipt);
+    signal.throwIfAborted();
+    let settlement;
+    try { settlement = parseSettlement(value, source.receipt); }
+    catch (error) {
+      setL1Settlement(previous => previous?.sourceHash === tx.hash ? null : previous);
+      throw error;
+    }
+    // Correlation makes the transaction inspectable while execution checks run;
+    // it does not establish Safe success or unlock another send.
+    setL1Settlement({ sourceHash: tx.hash, hash: settlement.l1TransactionHash, verified: false });
     setNotice({ kind: 'pending', text: `Checking canonical execution on ${deployment.l1.chainName}…` });
     const client = l1ReadClient(signal);
     const { remote: target, receipt } = await verifySafeL1Execution(client, deployment, source.controller, tx.prepared.operation, source.result, settlement, signal);
@@ -749,8 +759,9 @@ export function FalconSafe({ signer, wallet, deployment, fees, onNeedSafeFactory
         if (keptOtherSelection) setAttachmentRevision(value => value + 1);
       }
     }
+    signal.throwIfAborted();
     if (!mounted.current) return;
-    setL1Hash(settlement.l1TransactionHash);
+    setL1Settlement({ sourceHash: tx.hash, hash: settlement.l1TransactionHash, verified: true });
     if (sameKey(tx.publicKey)) {
       // With another selection kept, discovery reloads that Safe instead of showing the new one.
       if (!keptOtherSelection) { setRemote(target); setSafeLoadError(null); }
@@ -783,7 +794,7 @@ export function FalconSafe({ signer, wallet, deployment, fees, onNeedSafeFactory
   }
   function selectSafe() {
     selectionRevision.current++;
-    setPrepared(null); setFee(null); setCosts(null); setL1Hash(null);
+    setPrepared(null); setFee(null); setCosts(null); setL1Settlement(null);
     setSubmitted(null); setConfirmedHash(null); setRevertedSourceHash(null);
     setRecipient(''); setAmount('0.000001'); setData(''); setCopyNotice('');
     setFundedHash(null); setFunding(null); setFundingNotice(null);
@@ -983,9 +994,11 @@ export function FalconSafe({ signer, wallet, deployment, fees, onNeedSafeFactory
     </div>}
     {activeSubmission && <div className={styles.transaction}>
       <div className={styles.transactionHashes}>
-        <a id="safe-source-tx" className={styles.contractDetails} href={`${deployment.l2.explorer}/tx/${activeSubmission.hash}`} title={activeSubmission.hash} target="_blank" rel="noreferrer">L2 · {activeSubmission.hash.slice(0, 10)}…{activeSubmission.hash.slice(-8)}</a>
-        {l1Hash && <a id="safe-settlement-tx" className={styles.contractDetails} href={`${deployment.l1.explorer}/tx/${l1Hash}`} title={l1Hash} target="_blank" rel="noreferrer">L1 · {l1Hash.slice(0, 10)}…{l1Hash.slice(-8)}</a>}
+        <a id="safe-source-tx" className={styles.contractDetails} href={`${deployment.l2.explorer}/tx/${activeSubmission.hash}`} title={activeSubmission.hash} target="_blank" rel="noreferrer">L2 transaction · {activeSubmission.hash.slice(0, 10)}…{activeSubmission.hash.slice(-8)}</a>
+        {activeSettlement ? <a id="safe-settlement-tx" className={styles.contractDetails} href={`${deployment.l1.explorer}/tx/${activeSettlement.hash}`} title={activeSettlement.hash} target="_blank" rel="noreferrer">L1 settlement · {activeSettlement.hash.slice(0, 10)}…{activeSettlement.hash.slice(-8)}</a>
+          : activeSubmission.kind === 'call' && revertedSourceHash !== activeSubmission.hash && <span id="safe-settlement-pending" className={styles.hint}>L1 settlement pending</span>}
       </div>
+      {activeSettlement && !activeSettlement.verified && <p id="safe-settlement-checking" className={styles.hint}>L1 settlement found · execution not yet verified</p>}
       <a id="safe-trace" className={`btn btn-outline ${styles.action} ${styles.traceAction}`} href={`#/visualizer?mode=trace&chain=l2&tx=${activeSubmission.hash}`} target="_blank" rel="noreferrer">See in trace decoder</a>
     </div>}
     {compareCosts && costs && activeSubmission?.hash === costs.sourceHash && <SafeCostComparison evidence={costs} l1ChainId={deployment.l1.chainId} l1Name={deployment.l1.chainName} l1Symbol={symbol} l2Symbol={fees.nativeSymbol}

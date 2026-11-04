@@ -9,6 +9,7 @@ export const managerAbi = parseAbi([
   'function ROLLUP_ID() view returns (uint64)', 'function USE_GAS_LEFT() view returns (bool)',
   'function computeCrossChainProxyAddress(address originalAddress,uint64 originalRollupId) view returns (address)',
   'function authorizedProxies(address proxy) view returns (bool isProxy,address originalAddress,uint64 originalRollupId)',
+  'event BatchPosted(bytes32 sharedPublicInput,uint64[] rollupIds)',
 ]);
 export type ControllerState = { controller: Address; nonce: bigint; timestamp: bigint };
 export type Settlement = { l1BlockNumber: bigint; l1BlockHash: Hex; l1TransactionHash: Hex };
