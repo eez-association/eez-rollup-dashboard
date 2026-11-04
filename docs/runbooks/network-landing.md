@@ -35,11 +35,45 @@ beside the local assets.
 
 ## Configure the domains before switching eez.dev
 
+The commands below also cover the existing `rollupx-gateway` repository
+(`compose.yaml`, `compose.validate.yaml`, `caddy/Caddyfile`). Its gateway uses
+Linux host networking, so it can reach the landing container on host loopback.
+Run gateway commands from that repository's root on the indicated server.
+Before editing either gateway, preserve its private configuration outside the
+checkout:
+
+```bash
+gateway_backup=$(mktemp -d "$HOME/rollupx-gateway-backup.XXXXXX")
+cp -a caddy "$gateway_backup/caddy"
+cp -p .env "$gateway_backup/.env"
+```
+
 1. Add `chiadox.eez.dev` DNS records pointing to the current Chiado server, and
    enable that hostname with a valid HTTPS certificate in its existing gateway.
    Keep its current `eez.dev` hostname working during DNS propagation. Update
    Chiado's public URL settings where necessary, preserving its existing chain
    identity, contracts, runtime data and operator settings.
+
+   For `rollupx-gateway` on **the Chiado server**, set `PUBLIC_DOMAIN` in its
+   existing `.env` to `chiadox.eez.dev`. Temporarily change the existing site
+   block's opening line in `caddy/Caddyfile` from `{$PUBLIC_DOMAIN} {` to:
+
+   ```caddy
+   {$PUBLIC_DOMAIN}, eez.dev {
+   ```
+
+   This keeps both hostnames on the same Chiado routes during propagation.
+   Validate before recreating only the gateway to load its changed environment:
+
+   ```bash
+   docker compose config --quiet
+   docker compose -f compose.validate.yaml run --rm --no-deps validate
+   docker compose up -d --no-deps --force-recreate gateway
+   ```
+
+   Preserve the existing Compose project, certificate volumes, upstreams and
+   `.env.auth`. A reload alone cannot apply `.env` changes; recreating the
+   gateway interrupts its existing WebSocket connections.
 2. Check `https://chiadox.eez.dev/dashboard/`, its configuration, explorer and
    Composer endpoints directly. It must serve the same Chiado deployment that
    `eez.dev` currently serves. Do not switch the apex while this hostname fails.
@@ -54,9 +88,36 @@ beside the local assets.
    gateway's existing request-size limits, timeouts and other operator settings.
    A gateway on a Docker bridge needs an upstream address it can actually reach;
    its own `127.0.0.1` is not the Docker host.
-5. Validate the full gateway with `caddy validate --config /etc/caddy/Caddyfile`
-   in its actual deployment and reload only that gateway. If the certificate is
-   already available, preview before DNS cutover using the mainnet server's IP;
+
+   For `rollupx-gateway` on **the mainnet server**, keep
+   `PUBLIC_DOMAIN=rollupx.eez.dev` and `UI_UPSTREAM` unchanged. Add the new
+   `eez.dev` block at the **top level** of `caddy/Caddyfile`, after the existing
+   block. Do not put it in `caddy/sites/`: those files are imported *inside*
+   the RollupX site and accept path directives, not hostname blocks.
+
+   With the landing checkout at `$HOME/eez-network-landing`, append the example
+   once from the gateway checkout. If an `eez.dev` block already exists, edit
+   that block instead of adding a duplicate:
+
+   ```bash
+   cat "$HOME/eez-network-landing/landing/eez.dev.caddy.example" >> caddy/Caddyfile
+   ```
+
+   These are local operator changes; preserve them when updating the gateway
+   checkout. Do not replace its Caddyfile or existing enabled route files with
+   examples from another deployment.
+5. Validate the full gateway in its actual deployment and reload only that
+   gateway. For `rollupx-gateway` on the mainnet server, no environment change is
+   needed, so a reload applies the new site:
+
+   ```bash
+   docker compose config --quiet
+   docker compose -f compose.validate.yaml run --rm --no-deps validate
+   docker compose exec -T gateway caddy reload --config /etc/caddy/Caddyfile
+   ```
+
+   If the certificate is already available, preview before DNS cutover using
+   the mainnet server's IP;
    otherwise these HTTPS checks follow DNS cutover and certificate issuance:
 
    ```bash
@@ -74,6 +135,11 @@ beside the local assets.
    supports apex alias flattening, an alias to `rollupx.eez.dev` is another option.
    Do not leave an AAAA record pointing to the former server. Keep ChiadoX
    pointing to its separate machine. Test again after DNS propagation.
+7. Once propagation is complete, remove the temporary `eez.dev` alias from the
+   **Chiado server's** site header, restoring `{$PUBLIC_DOMAIN} {`. Keep
+   `PUBLIC_DOMAIN=chiadox.eez.dev` in that server's `.env`. Validate and reload
+   its gateway using the commands in step 5. The mainnet gateway continues to
+   forward legacy apex paths to ChiadoX.
 
 The previous homepage responds with a permanent redirect to `/dashboard/`.
 Use `curl` to verify the new root without a browser's cached redirect; a browser
