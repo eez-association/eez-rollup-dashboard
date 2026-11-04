@@ -26,6 +26,22 @@ test('restart archives the complete paired setup and source requests before sele
  const archive=JSON.parse(f.map.get(`${f.key}:archive:${f.state.salt}`));assert.deepEqual(archive.state,f.state);assert.deepEqual(archive.manifest,f.manifest);assert.deepEqual(archive.sourceRequests,f.state.sourceRequests);
  assert.equal(f.map.get('unrelated'),'preserved');assert(f.map.has(f.key+':manifest'));
 });
+test('an existing treasury connection reloads and archives without deployment receipts',()=>{
+ const f=fixture(),p=f.manifest.payments;
+ f.state={...f.state,version:4,sourceRequests:[],completed:[],addresses:{safeL1:f.manifest.safeL1,safeL2:f.manifest.safeL2,
+  adapter:f.manifest.adapter,singletonL1:a(20),singletonL2:a(21),policy:p.policy,policyL1:p.pair.policyL1,
+  moduleL1:p.moduleL1,moduleL2:p.moduleL2,alias:p.alias,safeL2Alias:p.safeL2Alias}};
+ f.map.set(f.key,JSON.stringify(f.state));
+ assert.deepEqual(loadMainnetManifest(f.storage,network),f.manifest);
+ assert.deepEqual(pairedSetupTransactions(f.storage,network),[]);
+ const snapshot=pairedSetupSnapshot(f.storage,network);
+ f.map.set(`eez:treasury:submission:${f.manifest.instance}`,'pending');
+ assert.throws(()=>restartPairedSetup(f.storage,network,snapshot),/payment is pending/);
+ f.map.delete(`eez:treasury:submission:${f.manifest.instance}`);
+ restartPairedSetup(f.storage,network,snapshot);
+ assert.equal(loadMainnetManifest(f.storage,network),null);
+ assert.deepEqual(JSON.parse(f.map.get(`${f.key}:archive:${f.state.salt}`)).state,f.state);
+});
 test('pending payments, owner changes and either faucet destination block restart',()=>{
  for(const keyOf of [c=>`eez:treasury:submission:${c.instance}`,c=>`eez:treasury:owners:${c.instance}`,c=>safeFaucetKey(c,'l1'),c=>safeFaucetKey(c,'l2')]){
   const f=fixture(),before=f.map.get(f.key),snapshot=pairedSetupSnapshot(f.storage,network),key=keyOf(f.manifest);

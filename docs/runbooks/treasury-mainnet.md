@@ -82,6 +82,32 @@ The current wallet flow collects EOA approvals; a quorum that needs contract-own
 signatures is not supported. Safe administration and direct spending remain under the owners'
 control; this shared budget applies only to policy payments.
 
+### Reopen an existing treasury
+
+Choose **Use an existing Safe**, enter the L1 Safe, and choose **Connect an
+existing mirror** with its L2 address. **Open treasury** discovers the installed
+policies and opens the controls after checking their code, peer connections,
+activation and allowances. It uses read-only calls and needs no deployment or
+signature. Reloading reuses the saved connection; normal treasury validation
+still runs before spending.
+
+Both Safe addresses alone do not establish a configured treasury. If no supported
+policies are found, the chooser offers a separate **Set up treasury policies**
+action. RPC failures, changed permissions, ambiguous policies and incomplete
+discovery never silently start a new deployment. Automatic discovery supports
+the current reviewed policy release and scans at most 50 enabled L2 modules and
+50 allowance delegates in total; exceeding those bounds requires restoring the
+original saved selection. Existing deployment journals still resume their
+recorded steps rather than being replaced by a connection.
+
+Connections use local journal version 4 with no deployment receipts; deployment
+journals remain version 3 and manifests retain their existing format. No contract,
+protocol, `.env` or on-chain migration is needed. Older dashboards reject version
+4, so a UI rollback must preserve the connection record until this version is
+restored; do not rewrite it into a deployment journal. Restart archives either
+kind of selection under the existing lock and retains pending-payment and
+owner-change protections.
+
 Both Safe signing domains, both initiation directions, both payment destinations,
 custom splits remain available. Limits stay at 100 USDC per
 Safe and 150 shared per ten minutes. No automatic funding, mint or faucet is added

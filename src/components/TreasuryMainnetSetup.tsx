@@ -5,7 +5,8 @@ import { getAddress, isAddress } from "viem";
 import type { Address, Hex } from "viem";
 import type { TreasuryWallet } from "./TreasuryConnected";
 import type { TreasuryConfig } from "../lib/treasury/client";
-import { MainnetSetup, setupIdentity, mainnetSetupStepsFor, pairedSetupAvailable, readMainnetSetup } from "../lib/treasury/mainnetSetup";
+import { MainnetSetup, setupIdentity, mainnetSetupStepsFor, pairedSetupAvailable, readMainnetSetup, loadMainnetManifest } from "../lib/treasury/mainnetSetup";
+import { TreasurySetupRequired } from "../lib/treasury/existingTreasury";
 import type { MainnetSetupState, MainnetTarget, SetupNetwork } from "../lib/treasury/mainnetSetup";
 import defaultNetwork from "../lib/treasury/mainnet-network.json";
 import styles from "./TreasuryDemo.module.css";
@@ -20,6 +21,8 @@ export function TreasuryMainnetSetup({ wallet, target, onComplete, onBridgeGas, 
   const [state, setState] = useState<MainnetSetupState | null>(null), [engine, setEngine] = useState<MainnetSetup | null>(null);
   const [safeL1, setSafeL1] = useState(""), [safeL2, setSafeL2] = useState(""), [existingMirror, setExistingMirror] = useState(false);
   const [createBoth, setCreateBoth] = useState(true);
+  const [setupRequired, setSetupRequired] = useState(false);
+  useEffect(() => { setSetupRequired(false); }, [createBoth, existingMirror, safeL1, safeL2]);
   const steps = mainnetSetupStepsFor(state).map(step => ({ ...step, label: step.label.split("Ethereum").join(l1Name), details: step.details.map(text => text.split("Ethereum").join(l1Name).split("USDC").join(network.discovered?.symbol ?? "USDC")) }));
   const pairedReady = !!engine && pairedSetupAvailable(engine.artifacts);
   const [busy, setBusy] = useState(false), [error, setError] = useState("");
@@ -67,7 +70,7 @@ export function TreasuryMainnetSetup({ wallet, target, onComplete, onBridgeGas, 
     return () => window.removeEventListener("storage", changed);
   }, [mainnetSetupKey, network]);
   useEffect(() => {
-    if (!engine || !wallet.address || state?.completed.length === steps.length) { setBalances(null); return; }
+    if (!engine || !wallet.address || state?.completed.length === steps.length || !state && !createBoth && existingMirror) { setBalances(null); return; }
     let alive = true, timer: ReturnType<typeof setTimeout>;
     const address = getAddress(wallet.address);
     const poll = async () => {
@@ -78,7 +81,7 @@ export function TreasuryMainnetSetup({ wallet, target, onComplete, onBridgeGas, 
       finally { if (alive) timer = setTimeout(poll, 5000); }
     };
     void poll(); return () => { alive = false; clearTimeout(timer); };
-  }, [engine, wallet.address, state?.completed.length, steps.length]);
+  }, [engine, wallet.address, state?.completed.length, steps.length, createBoth, existingMirror]);
   const run = async (fn: (s: MainnetSetupState | null, assertActive: () => void) => Promise<void>, background = false) => {
     if (active.current) return; active.current = true;
     const scope = generation.current;
@@ -109,7 +112,7 @@ export function TreasuryMainnetSetup({ wallet, target, onComplete, onBridgeGas, 
       if (!alive) return;
       const saved = readMainnetSetup(localStorage.getItem(mainnetSetupKey), network);
       if (!saved || saved.salt !== state.salt) throw new Error("Setup changed during verification");
-      const c = await engine.manifest(saved);
+      const c = (saved.version === 4 ? loadMainnetManifest(localStorage, network) : null) ?? await engine.manifest(saved);
       if (!alive) return;
       if (localStorage.getItem(mainnetSetupKey) !== JSON.stringify(saved)) throw new Error("Setup changed during verification");
       localStorage.setItem(mainnetManifestKey, JSON.stringify(c)); done.current(c);
@@ -167,6 +170,34 @@ export function TreasuryMainnetSetup({ wallet, target, onComplete, onBridgeGas, 
   const connect = <div className={styles.owners}>{wallet.walletOptions.map((option, index) => <button className={`btn ${index === 0 ? "btn-solid" : "btn-outline"}`} key={option.id}
     onClick={() => void run(async () => { await selectedWallet.current.connect(option.id); })}>Connect {option.name}</button>)}
     {!wallet.walletOptions.length && <p>Open this dashboard in a browser with your wallet extension.</p>}</div>;
+  const openExisting = !createBoth && existingMirror;
+  const start = (prepareExisting = false) => void run(async (saved, assertActive) => {
+    if (saved) throw new Error("A treasury setup is already in progress");
+    if (!pairedReady) throw new Error("Treasury setup is awaiting an updated contract release");
+    const selected = selectedWallet.current;
+    if (!selected.address) throw new Error("Connect your wallet");
+    const progress = (message: string) => { assertActive(); setStatus(message); };
+    setSetupRequired(false);
+    try {
+      const next = openExisting && !prepareExisting
+        ? await engine!.connect(getAddress(selected.address), getAddress(safeL1.trim()), getAddress(safeL2.trim()), progress)
+        : await engine!.configure(getAddress(selected.address), createBoth ? undefined : getAddress(safeL1.trim()), openExisting ? getAddress(safeL2.trim()) : undefined, progress, { matching: createBoth });
+      assertActive();
+      const manifest = next.version === 4 ? await engine!.manifest(next) : null;
+      assertActive();
+      if (selectedWallet.current.provider !== selected.provider || !same(selectedWallet.current.address, selected.address)) throw new Error("Wallet changed during setup. Review your selection again.");
+      // Publish a connection only after full policy validation. Its journal has
+      // no deployment steps, and the usual completed-setup effect can resume it.
+      if (manifest) localStorage.setItem(mainnetManifestKey, JSON.stringify(manifest));
+      persist(next);
+      setStatus(manifest ? "Opening your treasury…" : "Setup reviewed. Approve each named transaction when ready.");
+      if (manifest) done.current(manifest);
+    } catch (e) {
+      assertActive();
+      if (e instanceof TreasurySetupRequired) setSetupRequired(true);
+      throw e;
+    }
+  });
   return <section className={styles.treasury} aria-label={`${l1Name} treasury setup`}>
     <div className={styles.heading}><div><p className="eez-eyebrow">[ {l1Name.toUpperCase()} + EEZ-X ]</p>
       <h2 ref={heading} tabIndex={-1}>{state?.completed.length === steps.length ? "Verify your treasury" : "Set up your shared treasury"}</h2>
@@ -188,20 +219,12 @@ export function TreasuryMainnetSetup({ wallet, target, onComplete, onBridgeGas, 
         <div className={styles.fields}><label className={styles.chainLabel} data-chain="l2" htmlFor="mainnet-mirror-choice">EEZ-X Safe</label>
           <select id="mainnet-mirror-choice" value={existingMirror ? "existing" : "new"} disabled={busy} onChange={e => setExistingMirror(e.target.value === "existing")}><option value="new">Deploy a mirror Safe</option><option value="existing">Connect an existing mirror</option></select>
           {existingMirror && <><label htmlFor="mainnet-mirror">Mirror Safe address</label><input id="mainnet-mirror" aria-describedby="mainnet-mirror-hint" value={safeL2} onChange={e => setSafeL2(e.target.value)} placeholder="0x…" disabled={busy}/></>}
-          <p id="mainnet-mirror-hint" className={styles.hint}>{existingMirror ? `Choose a mirror already connected to this ${l1Name} Safe.` : `The new mirror uses your ${l1Name} Safe’s live owners through its owner adapter.`}</p>
+          <p id="mainnet-mirror-hint" className={styles.hint}>{existingMirror ? 'Open a configured treasury without deploying contracts or signing a transaction.' : `The new mirror uses your ${l1Name} Safe’s live owners through its owner adapter.`}</p>
         </div>
       </div>}
-      {wallet.address ? <button className={`btn btn-solid btn-lg ${styles.startSetup}`} disabled={!pairedReady || busy || !createBoth && (!isAddress(safeL1.trim()) || existingMirror && !isAddress(safeL2.trim()))} onClick={() => void run(async (saved, assertActive) => {
-        if (saved) throw new Error("A treasury setup is already in progress");
-        if (!pairedReady) throw new Error("Treasury setup is awaiting an updated contract release");
-        const selected = selectedWallet.current;
-        if (!selected.address) throw new Error("Connect your deployment wallet");
-        const next = await engine!.configure(getAddress(selected.address), createBoth ? undefined : getAddress(safeL1.trim()), !createBoth && existingMirror ? getAddress(safeL2.trim()) : undefined,
-          message => { assertActive(); setStatus(message); }, { matching: createBoth });
-        assertActive();
-        if (selectedWallet.current.provider !== selected.provider || !same(selectedWallet.current.address, selected.address)) throw new Error("Wallet changed during setup. Review your selection again.");
-        persist(next); setStatus("Setup reviewed. Approve each named transaction when ready.");
-      })}>{busy ? "Checking your Safes…" : "Start setup"}</button> : connect}
+      {wallet.address ? <button className={`btn btn-solid btn-lg ${styles.startSetup}`} disabled={!pairedReady || busy || !createBoth && (!isAddress(safeL1.trim()) || existingMirror && !isAddress(safeL2.trim()))}
+        onClick={() => start()}>{busy ? "Checking your Safes…" : openExisting ? "Open treasury" : "Start setup"}</button> : connect}
+      {setupRequired && openExisting && <button className="btn btn-outline" disabled={busy || !wallet.address} onClick={() => start(true)}>Set up treasury policies</button>}
       {engine && !pairedReady && <p role="status">Treasury setup is awaiting an updated contract release.</p>}
     </section> : step ? <section className={styles.card} aria-busy={busy}>
       <div className={styles.setupProgress}><h3 className={styles.stepCount}>Deployment {state.completed.length} / {steps.length}</h3>

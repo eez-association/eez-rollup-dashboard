@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {mkdirSync} from 'node:fs';
 import {createServer} from 'vite';import react from '@vitejs/plugin-react';import {chromium} from 'playwright';
 import {sharedDeploymentKey,sharedManifestKey} from '../src/lib/treasury/deployment.ts';
+import {mainnetSetupKey,mainnetManifestKey} from '../src/lib/treasury/mainnetSetup.ts';
 const server=await createServer({configFile:false,envFile:false,plugins:[react()],server:{host:'127.0.0.1',port:0,watch:null},base:'/'});await server.listen();
 const origin=`http://127.0.0.1:${server.httpServer.address().port}`,browser=await chromium.launch({headless:true,chromiumSandbox: true});
 const page=await browser.newPage({viewport:{width:1440,height:1000}}),errors=[];page.on('pageerror',e=>errors.push(e.message));
@@ -18,7 +19,8 @@ try{
  await page.getByLabel('Ethereum Safe address',{exact:true}).fill('0x0000000000000000000000000000000000000064');
  await page.getByLabel('EEZ-X Safe',{exact:true}).selectOption('existing');
  await page.getByLabel('Mirror Safe address',{exact:true}).fill('0x0000000000000000000000000000000000000065');
- await page.getByRole('button',{name:'Start setup',exact:true}).click();
+ assert.equal(await page.getByRole('button',{name:'Open treasury',exact:true}).count(),1,'existing L1/L2 Safes should offer connection, not a deployment wizard');
+ await page.getByRole('button',{name:'Open treasury',exact:true}).click();
  await page.getByRole('alert').getByText('Fixture stopped before network validation',{exact:true}).waitFor();
  const selected=await page.evaluate(()=>window.selection);assert.equal(selected.safeL1.toLowerCase(),'0x0000000000000000000000000000000000000064');assert.equal(selected.safeL2.toLowerCase(),'0x0000000000000000000000000000000000000065');assert.notEqual(selected.deployer.toLowerCase(),selected.safeL1.toLowerCase());
  assert.deepEqual(await page.evaluate(keys=>keys.map(k=>localStorage.getItem(k)),[sharedDeploymentKey,sharedManifestKey]),['retained Chiado state','retained Chiado state']);
@@ -40,5 +42,38 @@ try{
  const buttons=page.getByRole('group',{name:'Safe setup options'}),first=await buttons.getByRole('button',{name:'Create new Safes',exact:true}).boundingBox(),second=await buttons.getByRole('button',{name:'Use an existing Safe',exact:true}).boundingBox();
  assert(first.height>=44&&second.height>=44);assert(second.x>=first.x+first.width+10);assert(Math.abs(first.width-second.width)<2);
  assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
- assert.deepEqual(errors,[]);console.log('Mainnet chooser: selected Ethereum/mirror addresses, connected deployment wallet, no faucet, Chiado journals preserved.');
+ for(const [mode,message] of [['missing','Treasury setup is still required.'],['error','RPC unavailable'],['invalid','Paired Safe allowance configuration changed']]) {
+  await page.evaluate(mode=>{window.connection.mode=mode;window.selection=null;},mode);
+  await page.getByRole('button',{name:'Open treasury',exact:true}).click();
+  await page.getByRole('alert').getByText(message,{exact:true}).waitFor();
+  assert.equal(await page.getByRole('button',{name:'Approve next deployment step',exact:true}).count(),0);
+  assert.equal(await page.getByRole('button',{name:'Set up treasury policies',exact:true}).count(),mode==='missing'?1:0);
+  assert.equal(await page.evaluate(key=>localStorage.getItem(key),mainnetSetupKey),null,'a failed connection must not save an unverified selection');
+  if(mode==='missing'){
+   assert.equal((await page.evaluate(()=>window.selection)).connect,true,'missing setup never falls through into configure');
+   await page.getByRole('button',{name:'Set up treasury policies',exact:true}).click();
+   await page.getByRole('alert').getByText('Fixture stopped before network validation',{exact:true}).waitFor();
+   assert.equal((await page.evaluate(()=>window.selection)).connect,undefined,'policy setup requires a separate click');
+  }
+ }
+ await page.evaluate(()=>{window.connection.mode='deferred';});
+ await page.getByRole('button',{name:'Open treasury',exact:true}).click();
+ await page.waitForFunction(()=>!!window.connection.release);
+ await page.evaluate(()=>{window.connection.select('0x00000000000000000000000000000000000000C9');});
+ await page.waitForFunction(()=>window.connection.address==='0x00000000000000000000000000000000000000C9');
+ await page.evaluate(()=>window.connection.release());
+ await page.getByRole('alert').getByText('Wallet changed during setup. Review your selection again.',{exact:true}).waitFor();
+ assert.equal(await page.evaluate(key=>localStorage.getItem(key),mainnetSetupKey),null);
+ await page.evaluate(()=>{window.connection.mode='connected';});
+ await page.getByRole('button',{name:'Open treasury',exact:true}).click();
+ await page.getByRole('heading',{name:'Treasury controls',exact:true}).waitFor();
+ assert.equal(await page.evaluate(()=>window.connection.walletCalls),0);
+ const connected=await page.evaluate(key=>JSON.parse(localStorage.getItem(key)),mainnetSetupKey);
+ assert.equal(connected.version,4);assert.deepEqual(connected.completed,[]);
+ assert(await page.evaluate(key=>!!localStorage.getItem(key),mainnetManifestKey));
+ await page.reload();await page.evaluate(async()=>{const m=await import('/tests/fixtures/treasury-mainnet-setup.tsx');m.mount();});
+ await page.getByRole('heading',{name:'Treasury controls',exact:true}).waitFor();
+ assert.equal(await page.evaluate(()=>window.connection.connects),0,'reload reuses the saved connection');
+ assert.equal(await page.evaluate(()=>window.connection.walletCalls),0);
+ assert.deepEqual(errors,[]);console.log('Mainnet chooser: existing treasury opens without wallet requests, survives reload, rejects failed checks and wallet changes; new setup remains explicit.');
 }finally{await page.unrouteAll({behavior:'wait'});await browser.close();await server.close();}

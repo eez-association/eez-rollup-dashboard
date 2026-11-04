@@ -1,4 +1,5 @@
 import { discoverSafeInfrastructure } from "./safeInfrastructure.ts";
+import { existingTreasury } from "./existingTreasury.ts";
 import { matchingDeployer, matchingDeployerHash, matchingSafePlan } from "./matchingSafes.ts";
 import type { MatchingSafePlan } from "./matchingSafes.ts";
 import { appendSourceRequest } from "./sourceVerification.ts";
@@ -48,6 +49,7 @@ export const mainnetSetupSteps = [
   { label: "Approve EEZ-X setup", chain: "l1", details: ["Connect the Ethereum peer policy", "Grant the EEZ-X policy 100 USDC per ten minutes", "Validate and activate both policies in this batch"] },
 ] as const;
 export function mainnetSetupStepsFor(state?: { version: number; creation?: "create-both"; matching?: MatchingSafePlan } | null) {
+  if (state?.version === 4) return [];
   if (state && state.version !== 3) throw new Error("Legacy treasury setup is retired. Start a new paired setup.");
   if (state?.creation === "create-both") return mainnetSetupSteps.map((step, index) => index === 0
     ? { ...step, label: "Create your Ethereum Safe", details: ["Create a Safe owned by your connected wallet (1 of 1)", state.matching ? "Prepare identical Safe infrastructure on both chains" : "Reuse verified Safe deployment contracts", state.matching ? "Use the reserved matching Safe address" : "Deploy the local treasury policy"] }
@@ -67,7 +69,7 @@ export function pairedReleaseVersion(artifacts: DeploymentArtifacts): 1 | 2 {
 type Output = { key: string; address: Address; artifact?: string; hash?: Hex };
 type Review = { step: number; chain: Chain; nonce: string; owners: Address[]; threshold: number; fingerprint: string; hash: Hex; approvals: Approval[]; moduleEnabled?: boolean };
 type Pending = DeploymentPending & { outputs: Output[]; actionsHash?: Hex; executor?: Address; sequence?: string; closed?: boolean; safe?: Address; safeChain?: Chain; l2StartBlock?: Hex };
-export type MainnetSetupState = { build?: string; sourceRequests?: SourceRequest[]; version: 3; creation?: "create-both"; matching?: MatchingSafePlan; identity: Hex; salt: Hex; deployer: Address; addresses: Record<string, Address>; code: TreasuryConfig["code"];
+export type MainnetSetupState = { build?: string; sourceRequests?: SourceRequest[]; version: 3 | 4; creation?: "create-both"; matching?: MatchingSafePlan; identity: Hex; salt: Hex; deployer: Address; addresses: Record<string, Address>; code: TreasuryConfig["code"];
   completed: { hash: Hex; chain: Chain; number: Hex; blockHash: Hex }[]; pending?: Pending; review?: Review };
 export type MainnetTarget = DeploymentTarget & { l1: DeploymentTarget["l1"] & { explorer: string }; l2: DeploymentTarget["l2"] & { explorer: string } };
 const mainnetNetworks: SetupNetwork[] = [network, rollupxNetwork as SetupNetwork];
@@ -82,12 +84,17 @@ export function isMainnetSetupTarget(...args: Parameters<typeof selectMainnetSet
 export function readMainnetSetup(raw: string | null, selected: SetupNetwork = network): MainnetSetupState | null {
   if (!raw) return null;
   const s = JSON.parse(raw) as MainnetSetupState;
-  check(s.version === 3 && (s.creation === undefined || s.creation === "create-both") && (s.build === undefined || /^[a-f\d]{64}$/.test(s.build)) && s.identity === setupIdentity(selected) && digest(s.salt) && isAddress(s.deployer) && s.addresses
+  check((s.version === 3 || s.version === 4) && (s.creation === undefined || s.creation === "create-both") && (s.build === undefined || /^[a-f\d]{64}$/.test(s.build)) && s.identity === setupIdentity(selected) && digest(s.salt) && isAddress(s.deployer) && s.addresses
     && (isAddress(s.addresses.safeL1!) || s.creation === "create-both" && s.completed?.length === 0 && s.addresses.safeL1 === undefined)
     && Object.values(s.addresses).every(a => isAddress(a)) && Array.isArray(s.completed) && s.completed.length <= mainnetSetupSteps.length
     && s.completed.every(x => digest(x.hash) && digest(x.blockHash) && /^0x[\da-f]+$/i.test(x.number) && ["l1", "l2"].includes(x.chain))
     && typeof s.build === "string"
     && Array.isArray(s.code) && s.code.every(x => isAddress(x.address) && digest(x.hash) && ["l1", "l2"].includes(x.chain)), "Invalid Ethereum setup record; preserve it for recovery");
+  // Connections have no deployment receipts. A separate version makes older
+  // dashboards reject them instead of treating them as unstarted deployments.
+  if (s.version === 4) check(!s.creation && !s.matching && !s.pending && !s.review && !s.completed.length && !s.sourceRequests?.length
+    && ['safeL1', 'safeL2', 'singletonL1', 'singletonL2', 'adapter', 'policyL1', 'policy', 'moduleL1', 'moduleL2', 'alias', 'safeL2Alias'].every(key =>
+      isAddress(s.addresses[key] ?? '') && BigInt(s.addresses[key]!) > 1n), 'Invalid existing treasury connection; preserve it for recovery');
   if (s.pending) check(s.pending.id === String(s.completed.length) && s.pending.chain === mainnetSetupSteps[s.completed.length]?.chain
     && isAddress(s.pending.sender) && /^0x[\da-f]+$/i.test(s.pending.nonce) && /^0x(?:[\da-f]{2})+$/i.test(s.pending.data)
     && (!s.pending.hash || digest(s.pending.hash)) && (!s.pending.to || isAddress(s.pending.to)) && Array.isArray(s.pending.outputs)
@@ -103,10 +110,10 @@ export function readMainnetSetup(raw: string | null, selected: SetupNetwork = ne
 export function loadMainnetManifest(storage: Pick<Storage, "getItem">, selected: SetupNetwork = network) {
   const key = `eez:treasury:paired-setup:${setupIdentity(selected)}`;
   const state = readMainnetSetup(storage.getItem(key), selected);
-  if (!state || state.completed.length !== mainnetSetupSteps.length || state.pending) return null;
+  if (!state || state.completed.length !== mainnetSetupStepsFor(state).length || state.pending) return null;
   const raw = storage.getItem(`${key}:manifest`); if (!raw) return null;
   const manifest = parseTreasuryConfig(JSON.parse(raw));
-  check(!!manifest.payments?.pair === (state.version === 3), "Treasury manifest does not match its saved setup plan");
+  check(!!manifest.payments?.pair, "Treasury manifest does not match its saved setup plan");
   return manifest.instance === keccak256(toHex(`${state.salt}:${state.addresses.safeL1}:${state.addresses.safeL2}`)) ? manifest : null;
 }
 
@@ -243,8 +250,19 @@ export class MainnetSetup {
     }
     return { ...(this.artifacts.build ? { build: this.artifacts.build } : {}), ...(!safeL1 ? { creation: "create-both" as const } : {}), ...(matching ? { matching } : {}), version: 3, identity: setupIdentity(this.network), salt, deployer: getAddress(deployer), addresses, code, completed: [] };
   }
+  /** Read an existing pair without creating a deployment plan. Validate its
+   * manifest before publishing the returned connection as the active treasury. */
+  async connect(account: Address, safeL1: Address, safeL2: Address, progress: (message: string) => void = () => {}): Promise<MainnetSetupState> {
+    check(pairedSetupAvailable(this.artifacts) && [account, safeL1, safeL2].every(address => isAddress(address) && BigInt(address) > 1n), 'Choose both existing Safes and connect your wallet.');
+    progress('Checking your existing Safes and treasury policies…');
+    const [, l1, l2] = await Promise.all([this.validate(), inspectSafe(this.io, 'l1', safeL1), inspectSafe(this.io, 'l2', safeL2)]);
+    const { addresses, code } = await existingTreasury(this.io, this.network, l1, l2);
+    const identity = setupIdentity(this.network);
+    const salt = keccak256(toHex(`existing:${identity}:${addresses.safeL1}:${addresses.safeL2}:${addresses.policyL1}:${addresses.policy}`));
+    return { version: 4, build: this.artifacts.build, identity, salt, deployer: account, addresses, code, completed: [] };
+  }
   async unchanged(s: MainnetSetupState) {
-    check(s.version === 3 && s.build === this.artifacts.build && pairedSetupAvailable(this.artifacts), "Legacy treasury setup is retired; start a new paired setup");
+    check((s.version === 3 || s.version === 4) && s.build === this.artifacts.build && pairedSetupAvailable(this.artifacts), "Legacy treasury setup is retired; start a new paired setup");
     // These are independent reads. All must pass before the snapshot is used;
     // canonical block checks still run inside each Safe inspection.
     const [, , , safe] = await Promise.all([
@@ -513,10 +531,10 @@ export class MainnetSetup {
     return { ...s, ...(s.build ? { sourceRequests: appendSourceRequest(s.sourceRequests, s.build, this.network.chains[p.chain].chainId, p.hash) } : {}), addresses, code, completed: [...s.completed, { hash: p.hash, chain: p.chain, number: receipt.blockNumber, blockHash: receipt.blockHash }], pending: undefined, review: undefined };
   }
   async manifest(s: MainnetSetupState) {
-    check(s.completed.length === 6 && !s.pending, "Complete setup before opening the treasury"); await this.unchanged(s);
+    check(s.completed.length === mainnetSetupStepsFor(s).length && !s.pending, "Complete setup before opening the treasury"); await this.unchanged(s);
     const a = s.addresses, code = [...s.code];
     let pair: { version: 1 | 2; policyL1: Address; peerProxyL2: Address } | undefined;
-    if (s.version === 3) {
+    if (s.version === 3 || s.version === 4) {
       const peerProxyL2 = await this.io.read<Address>("l2", a.policy!, "PairedTreasuryPolicy", "peer");
       const bytes = await this.io.rpc<Hex>("l2", "eth_getCode", [peerProxyL2, "latest"]);
       check(bytes !== "0x", "Peer connection is not deployed");

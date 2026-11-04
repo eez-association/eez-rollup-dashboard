@@ -186,6 +186,16 @@ try {
     assert.equal(manifest.environment,'dashboard-testnet'); assert.equal(manifest.payments.pair.policyL1,a.policyL1);
     assert.equal(manifest.payments.pair.version,2);assert.equal(manifest.payments.bridgeExecutorL1,undefined); assert(manifest.safeAppUrl.includes('safe=chiado:'));
     evidence.manifest = manifest;
+    const beforeConnect = await rpc('eth_blockNumber');
+    const connected = await engine.connect(A.address, a.safeL1, a.safeL2);
+    assert.equal(connected.version, 4);
+    assert.deepEqual(connected.completed, [], 'connecting must not invent deployment receipts');
+    assert.deepEqual(readMainnetSetup(JSON.stringify(connected), network), connected);
+    const restored = await engine.manifest(connected);
+    assert.deepEqual(restored.payments, manifest.payments);
+    assert.equal(restored.safeL1, manifest.safeL1); assert.equal(restored.safeL2, manifest.safeL2);
+    assert.equal(await rpc('eth_blockNumber'), beforeConnect, 'reconnecting uses only reads');
+    evidence.connection = { instance: restored.instance, safeL1: restored.safeL1, safeL2: restored.safeL2, readOnly: true };
   } finally { TreasuryClient.prototype.validate = originalValidate; }
   await call('l1',tokenL1,'TestUSDC','claim',[a.safeL1]); await call('l1',tokenL1,'TestUSDC','claimOnL2',[a.safeL2]);
   const recipient = '0x0000000000000000000000000000000000001234';
