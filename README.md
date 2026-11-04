@@ -417,6 +417,11 @@ the Docker host.
 
 ## Independent deployment behind a gateway
 
+For an `eez.dev` homepage that links to the separate ChiadoX and RollupX
+deployments, see the [optional network landing page](docs/runbooks/network-landing.md).
+It runs independently on the mainnet server and includes routing guidance for
+keeping legacy Chiado URLs working during the domain move.
+
 The default Compose file publishes the UI on `127.0.0.1:8080`, keeping it
 reachable only through the Docker host. Configure `EEZ_UI_BIND` and
 `EEZ_UI_PORT` in `.env` if needed. No shared Docker network or override file

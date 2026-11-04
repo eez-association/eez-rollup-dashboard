@@ -131,8 +131,11 @@ jobs:
           npm run build
           docker compose --env-file /dev/null config --quiet
           docker compose --env-file /dev/null -f docker-compose.yml -f docker-compose.host-rpc.yml config --quiet
+          docker compose --env-file /dev/null -f docker-compose.landing.yml config --quiet
           docker build --target verification -t treasury-verification:check .
           docker build -t treasury-ui:check .
+          docker build -f landing/Dockerfile -t eez-network-landing:check .
+          docker run --rm --read-only --tmpfs /tmp:rw,size=16m,mode=1777 --cap-drop ALL --security-opt no-new-privileges:true --pids-limit 64 eez-network-landing:check -t
           docker build -t eez-trace-decoder:check trace-decoder
           node tests/trace-services.mjs
           git diff --exit-code
