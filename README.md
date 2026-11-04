@@ -151,14 +151,11 @@ the selected wallet, and the shared collapsed gas controls and transaction popup
 Missing source proxies can be created from the demo; existing proxies are
 verified before use. Cross-chain history records the actual call direction.
 
-The experimental **Treasury Demo**, **CoW Light Demo** and **Falcon Safe Demo** are hidden from the normal dashboard. Press
-**Ctrl+Alt+Shift+T** (or **Cmd+Option+Shift+T** on macOS), outside an editable field,
-to reveal the tabs beside Counter Demo and open Treasury. Falcon follows CoW Light. Press the same shortcut again
-to hide all three; any open hidden demo returns to Counter Demo. Visibility is kept in
-`sessionStorage` for this browser tab's session and survives reloads. A fresh
-session starts hidden; `#/treasury-demo`, `#/cow-demo` and `#/falcon-demo` do not enable the tabs. This is a
-navigation preference, not access control: anyone who knows the shortcut can
-open the example, and its code ships with the application.
+**Treasury Demo**, **CoW Light Demo** and **Falcon Safe Demo** appear beside
+**Counter Demo** in the normal dashboard navigation. Direct links
+`#/treasury-demo`, `#/cow-demo` and `#/falcon-demo` open the corresponding demo,
+including in a fresh browser session. Each demo loads only when selected;
+its network and deployment requirements still apply.
 
 [Falcon Safe](docs/runbooks/falcon-safe-demo.md) integrates browser Falcon-512 signing,
 encrypted key backups/storage, L2 verification and L1 Safe control. It reuses the
@@ -774,8 +771,8 @@ With Playwright installed and a production preview running, run
 `node tests/treasury-demo.cjs` for mocked
 wallet/RPC coverage. They default to `http://127.0.0.1:8083/dashboard`; override
 that URL with `EEZ_UI_URL`. These checks do not broadcast real transactions.
-The treasury check covers hidden navigation and direct URLs, shortcut/session
-behavior, simulated approvals and budget arithmetic, and responsive layout.
+The treasury navigation check covers visible tabs, direct URLs, reloads, browser
+history, blocked session storage and responsive layout.
 
 Transaction result pop-ups include **Follow this call** links to the native trace
 detail view. Its **Blocks & settlement** link opens the existing execution

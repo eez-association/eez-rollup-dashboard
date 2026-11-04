@@ -3,7 +3,6 @@ const assert = require('node:assert/strict');
 const { chromium } = require('playwright');
 const { encodeEventTopics, encodeAbiParameters, parseAbi, encodeFunctionResult, keccak256, stringToHex } = require('viem');
 const origin = (process.env.EEZ_UI_URL || 'http://127.0.0.1:8083/dashboard').replace(/\/$/, '');
-const shortcut = 'Control+Alt+Shift+KeyT';
 
 async function fixture(browser, { mismatch = false, unavailable = false, stale = false, wallet = false, changeDuringSign = false, lostResponse = false, rejectSwitch = false, reverted = false, faucetDelayed = false, mainnet = false, composer = 'detected', wrongNetwork = false, missingNetwork = false, missingL1Network = false, faucetFeeFailure = false, bundledCatalog = false } = {}) {
   const context = await browser.newContext();
@@ -143,9 +142,7 @@ async function fixture(browser, { mismatch = false, unavailable = false, stale =
   const nav = page.getByRole('navigation', { name: 'Dashboard sections' });
   const cow = nav.getByRole('button', { name: 'CoW Light Demo', exact: true });
   const treasury = nav.getByRole('button', { name: 'Treasury Demo', exact: true });
-  const toggle = async () => { await page.locator('body').click({ position: { x: 1, y: 1 } }); await page.keyboard.press(shortcut); };
-  const hidden = async () => { assert.equal(await cow.count(), 0); assert.equal(await treasury.count(), 0); };
-  return { context, page, nav, cow, treasury, requests, errors, toggle, hidden, signed, transactions, submitted, walletRequests };
+  return { context, page, nav, cow, treasury, requests, errors, signed, transactions, submitted, walletRequests };
 }
 
 module.exports = { fixture, origin };
@@ -153,33 +150,29 @@ if (require.main === module) (async () => {
   const browser = await chromium.launch({ headless: true, chromiumSandbox: true });
   try {
     const f = await fixture(browser);
-    await f.page.goto(origin + '/#/cow-demo');
-    await f.nav.waitFor(); await f.hidden();
-    assert.deepEqual(f.requests, [], 'hidden deep link does not load demo code or API');
-    await f.toggle(); await f.treasury.waitFor(); await f.cow.waitFor();
+    await f.page.goto(origin + '/');
+    await f.nav.waitFor(); await f.treasury.waitFor(); await f.cow.waitFor();
+    assert.deepEqual(f.requests, [], 'visible navigation does not load CoW code or API until selected');
     await f.cow.click();
     await f.page.getByRole('region', { name: 'Swap form' }).waitFor();
     assert.equal(await f.page.locator('iframe').count(), 0);
     assert.equal(await f.page.getByRole('region', { name: 'Transaction history', exact: true }).count(), 0);
     await f.page.reload();
     await f.page.getByRole('region', { name: 'Swap form' }).waitFor();
-    await f.page.getByLabel(/You sell/).focus();
-    await f.page.keyboard.press(shortcut);
-    await f.cow.waitFor(); // Shortcut must not toggle while entering text.
-    await f.page.getByRole('heading', { name: 'CoW Light', exact: true }).click();
-    await f.page.keyboard.press(shortcut);
+    await f.nav.getByRole('button', { name: 'Counter Demo', exact: true }).click();
     await f.page.getByRole('region', { name: 'Counter demo', exact: true }).waitFor();
-    await f.hidden();
+    await f.page.goBack();
+    await f.page.getByRole('region', { name: 'Swap form' }).waitFor();
+    await f.page.goForward();
+    await f.page.getByRole('region', { name: 'Counter demo', exact: true }).waitFor();
     await f.page.evaluate(() => { location.hash = '#/cow-demo'; });
-    await f.page.getByRole('region', { name: 'Bridge transfers' }).waitFor();
-    await f.hidden();
+    await f.page.getByRole('region', { name: 'Swap form' }).waitFor();
     assert.deepEqual(f.errors, []);
     await f.context.close();
 
     for (const options of [{ mismatch: true }, { unavailable: true }, { stale: true }]) {
       const f = await fixture(browser, options);
-      await f.page.goto(origin + '/#/cow-demo'); await f.nav.waitFor(); await f.hidden();
-      await f.toggle(); await f.cow.click();
+      await f.page.goto(origin + '/#/cow-demo'); await f.nav.waitFor(); await f.cow.waitFor();
       await f.page.getByText(options.mismatch
         ? 'CoW Light is configured for a different network. It cannot be opened on this dashboard.'
         : options.stale ? 'CoW Light needs a verified deployment for the current network. Trading is disabled.'
@@ -188,7 +181,7 @@ if (require.main === module) (async () => {
       assert.deepEqual(f.errors, []);
       await f.context.close();
     }
-    console.log(JSON.stringify({ passed: true, hiddenTogether: true, guardedDeepLinks: true,
-      sessionReload: true, nativeUI: true, wrongNetworkBlocked: true, unavailableHandled: true }));
+    console.log(JSON.stringify({ passed: true, visibleByDefault: true, directLinks: true,
+      reloadAndHistory: true, nativeUI: true, wrongNetworkBlocked: true, unavailableHandled: true }));
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

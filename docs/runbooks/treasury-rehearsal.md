@@ -76,8 +76,8 @@ application never receives those keys or signs on the user’s behalf. Keep the
 same dashboard tab open while switching accounts so collected approvals remain
 available.
 
-Open the URL in `ui-session.json`. Reveal **Treasury Demo** with
-**Ctrl+Alt+Shift+T** (macOS: **Cmd+Option+Shift+T**) and choose **Payments**.
+Open the URL in `ui-session.json`. It opens **Treasury Demo** directly;
+choose **Payments**.
 Enter amounts and destinations with the ordinary payment controls; there are no
 scenario shortcuts.
 Use its existing wallet selector. **Switch to treasury devnet** configures the

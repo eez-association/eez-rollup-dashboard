@@ -1,10 +1,8 @@
 # Falcon Safe demo
 
 Falcon Safe is a native, lazy-loaded dashboard tab immediately after CoW Light.
-Use the existing **Ctrl+Alt+Shift+T** shortcut (**Cmd+Option+Shift+T** on macOS)
-outside an editable field, then select **Falcon Safe Demo**. The shared hidden-demo
-preference is per browser session. `#/falcon-demo` alone never enables it.
-Hiding is a navigation preference, not an authorization boundary.
+Select **Falcon Safe Demo** in the dashboard navigation or open `#/falcon-demo`
+directly. No keyboard shortcut or saved visibility preference is needed.
 
 ## Network and wallet
 
@@ -278,7 +276,7 @@ EEZ_UI_URL=http://127.0.0.1:8083/dashboard npm run test:falcon:browser
 ```
 
 CI runs these browser checks alongside the existing CoW regressions. They cover
-hidden navigation/deep links, bundle loading, network gating, unmount cleanup,
+public navigation/deep links, bundle loading, network gating, unmount cleanup,
 320/390px layouts, encrypted storage/restore, cancellation and both injected
 wallet formats. Wallet tests verify actual browser signatures independently
 in Node, exercise account/chain changes during reads, reject per-option quote

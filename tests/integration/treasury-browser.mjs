@@ -106,8 +106,7 @@ export async function browserScenario(f, session, directory) {
   try {
     await page.goto(session.url);
     await page.getByRole('navigation', { name: 'Dashboard sections' }).waitFor();
-    assert.equal(await ui.count(), 0, 'devnet configuration does not bypass hidden navigation');
-    await page.keyboard.press('Control+Alt+Shift+KeyT');
+    await page.getByRole('navigation', { name: 'Dashboard sections' }).getByRole('button', { name: 'Treasury Demo', exact: true }).click();
     await ui.waitFor();
     await page.getByRole('button', { name: 'Owner demo', exact: true }).click();
     await waitText('action-value', '0');
@@ -220,7 +219,7 @@ export async function browserScenario(f, session, directory) {
     // Controlled invoice attempts use the fixture submitter outside the wallet.
     assert.equal(calls.filter(c => c.method === 'eth_sendTransaction').length, 7, 'exactly one wallet send per reviewed action');
     assert(!calls.some(c => c.method === 'eth_estimateGas'), 'no ordinary estimateGas for cross-chain Safe signature checks');
-    f.evidence.browserChecks = ['hidden navigation', 'live owners and threshold', 'network switch', 'non-owner blocked', 'wallet signature rejection',
+    f.evidence.browserChecks = ['public demo navigation', 'live owners and threshold', 'network switch', 'non-owner blocked', 'wallet signature rejection',
       'duplicate approval blocked', 'incomplete quorum blocked', 'edit clears signatures', 'owner addition clears stale review', 'removal clears stale review',
       'EIP-712 approvals', 'one submission per action', 'wallet submission cancellation', 'reload reconciliation', 'lost-response recovery', 'canonical Safe success', 'independent follower', 'mobile layout'];
     f.evidence.wallet = 'Test EIP-1193 provider; genuine fixture-key signatures and real RPC submission. No wallet extension automation.';

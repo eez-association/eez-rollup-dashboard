@@ -32,16 +32,8 @@ const TreasuryDemo = lazy(() => import("./components/TreasuryDemo").then(module 
 const CowLightDemo = lazy(() => import("./components/CowLightDemo").then(module => ({ default: module.CowLightDemo })));
 const FalconDemo = lazy(() => import("./components/FalconDemo").then(module => ({ default: module.FalconDemo })));
 
-const TREASURY_VISIBILITY_KEY = "eez:treasury-demo:visible";
-
-function treasuryVisibleForSession(): boolean {
-  try { return sessionStorage.getItem(TREASURY_VISIBILITY_KEY) === "1"; }
-  catch { return false; }
-}
-
 // Flash-loan and aggregator views are retained but are not enabled on this network.
 type DashboardTab = "dashboard" | "counter-demo" | "treasury-demo" | "cow-demo" | "falcon-demo";
-const isHiddenDemo = (tab: DashboardTab) => tab === "treasury-demo" || tab === "cow-demo" || tab === "falcon-demo";
 
 /** Dashboard sub-tabs that can be deep-linked via hash */
 const HASH_TO_TAB: Record<string, DashboardTab> = {
@@ -63,11 +55,10 @@ function getInitialView(): string {
   return "dashboard";
 }
 
-function getInitialTab(treasuryVisible: boolean): DashboardTab {
+function getInitialTab(): DashboardTab {
   const raw = window.location.hash.replace("#/", "").replace("#", "");
   const hash = raw.split("?")[0] || "";
-  const tab = HASH_TO_TAB[hash] ?? "dashboard";
-  return isHiddenDemo(tab) && !treasuryVisible ? "dashboard" : tab;
+  return HASH_TO_TAB[hash] ?? "dashboard";
 }
 
 /** Parse ?key=value from the hash fragment (e.g. #/?target=0x...) */
@@ -90,8 +81,7 @@ const DASHBOARD_TABS: { id: DashboardTab; label: string }[] = [
 export function App() {
   const configLoaded = useConfigLoader();
   const [view, setView] = useState(getInitialView);
-  const [treasuryVisible, setTreasuryVisible] = useState(treasuryVisibleForSession);
-  const [dashboardTab, setDashboardTab] = useState<DashboardTab>(() => getInitialTab(treasuryVisible));
+  const [dashboardTab, setDashboardTab] = useState<DashboardTab>(getInitialTab);
   const bridgeActive = view === "dashboard" && dashboardTab === "dashboard";
   const counterActive = view === "dashboard" && dashboardTab === "counter-demo";
 
@@ -210,32 +200,6 @@ export function App() {
     if (v === "dashboard") setDashboardTab("dashboard");
   }, []);
 
-  // This is a per-tab navigation preference, not authorization. A direct URL
-  // must not reveal the unfinished example before the shortcut is used.
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      const target = event.target;
-      if (event.defaultPrevented || event.repeat || event.isComposing
-          || !(event.ctrlKey || event.metaKey) || !event.altKey || !event.shiftKey || event.code !== "KeyT"
-          || (target instanceof HTMLElement && (target.isContentEditable || target.closest("input, textarea, select, [role='textbox']")))) return;
-      event.preventDefault();
-      const visible = !treasuryVisible;
-      setTreasuryVisible(visible);
-      try {
-        if (visible) sessionStorage.setItem(TREASURY_VISIBILITY_KEY, "1");
-        else sessionStorage.removeItem(TREASURY_VISIBILITY_KEY);
-      } catch { /* Storage can be unavailable; the shortcut still works until reload. */ }
-      if (visible) {
-        navigate("dashboard");
-        switchTab("treasury-demo");
-      } else if (isHiddenDemo(dashboardTab)) {
-        switchTab("counter-demo");
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [treasuryVisible, dashboardTab, navigate, switchTab]);
-
   // Listen for browser back/forward
   useEffect(() => {
     const onHashChange = () => {
@@ -245,7 +209,7 @@ export function App() {
       if (target) setGenericTargetAddr(target);
       // Deep link to dashboard sub-tabs (e.g. #/counter-demo, #/bridge)
       const tab = raw ? HASH_TO_TAB[raw] : undefined;
-      setDashboardTab(tab && isHiddenDemo(tab) && !treasuryVisible ? "dashboard" : tab ?? "dashboard");
+      setDashboardTab(tab ?? "dashboard");
       setView(getInitialView());
       setVisualizerRoute(window.location.hash);
     };
@@ -255,7 +219,7 @@ export function App() {
       window.removeEventListener("hashchange", onHashChange);
       window.removeEventListener("popstate", onHashChange);
     };
-  }, [treasuryVisible]);
+  }, []);
 
   // Track counter demo cross-chain transactions in history
   const ccTxRef = useRef<string | null>(null);
@@ -481,7 +445,7 @@ export function App() {
           </section>
 
           <nav className={styles.tabs} aria-label="Dashboard sections">
-            {DASHBOARD_TABS.filter(tab => !isHiddenDemo(tab.id) || treasuryVisible).map((tab) => (
+            {DASHBOARD_TABS.map((tab) => (
               <button
                 key={tab.id}
                 className={`${styles.tab} ${dashboardTab === tab.id ? styles.tabActive : ""}`}
@@ -497,7 +461,7 @@ export function App() {
             {dashboardTab === "dashboard" && (
               <div className={styles.dashboardGrid}>
                 <section className={styles.bridgeColumn} aria-label="Bridge transfers">
-                  {returnToTreasury && treasuryVisible && <div className={styles.feeNotice} role="region" aria-label="Safe setup funding">
+                  {returnToTreasury && <div className={styles.feeNotice} role="region" aria-label="Safe setup funding">
                     <p>Your Safe setup is saved. Bridge native currency to your wallet, then return to continue.</p>
                     <button type="button" className="btn btn-outline btn-sm" onClick={() => {
                       setReturnToTreasury(false); switchTab("treasury-demo");
@@ -625,25 +589,25 @@ export function App() {
               </div>
             )}
 
-            {treasuryVisible && dashboardTab === "treasury-demo" && (
+            {dashboardTab === "treasury-demo" && (
               <Suspense fallback={<p role="status">Loading treasury preview…</p>}>
                 <TreasuryDemo wallet={wallet} ready={configLoaded} onBridgeGas={openTreasuryGasBridge} />
               </Suspense>
             )}
 
-            {treasuryVisible && dashboardTab === "cow-demo" && (
+            {dashboardTab === "cow-demo" && (
               <Suspense fallback={<p role="status">Loading CoW Light demo…</p>}>
                 <CowLightDemo ready={configLoaded} wallet={wallet} />
               </Suspense>
             )}
 
-            {treasuryVisible && dashboardTab === "falcon-demo" && (
+            {dashboardTab === "falcon-demo" && (
               <Suspense fallback={<p role="status">Loading Falcon Safe demo…</p>}>
                 <FalconDemo ready={configLoaded} wallet={wallet} />
               </Suspense>
             )}
 
-            {!isHiddenDemo(dashboardTab) && <TxHistoryPanel
+            {(dashboardTab === "dashboard" || dashboardTab === "counter-demo") && <TxHistoryPanel
               records={txHistory.records}
               onClear={txHistory.clearHistory}
               onInspect={(hash, chain) => { window.location.hash = `#/visualizer?mode=trace&chain=${chain}&tx=${hash}`; }}

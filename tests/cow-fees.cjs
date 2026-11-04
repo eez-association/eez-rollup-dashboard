@@ -11,7 +11,7 @@ const { fixture, origin } = require('./cow-demo.cjs');
       return fail && body.method === 'eth_gasPrice'
         ? route.fulfill({json:{jsonrpc:'2.0',id:body.id,error:{code:-32000,message:'Fee RPC unavailable'}}}) : route.fallback();
     });
-    await f.page.goto(origin+'/'); await f.nav.waitFor(); await f.toggle(); await f.cow.click();
+    await f.page.goto(origin+'/'); await f.nav.waitFor(); await f.cow.click();
     const form = f.page.getByRole('region',{name:'Swap form'});
     await form.getByRole('button',{name:'Connect wallet'}).click();
     assert.equal(await form.getByRole('status',{name:'Wallet transaction fees'}).count(),0);

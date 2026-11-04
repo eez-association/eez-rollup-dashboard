@@ -608,9 +608,8 @@ reports reuse; no fresh token or bridge is required for another treasury.
 
 ## Deploy through the dashboard
 
-Open [the local dashboard](http://127.0.0.1:8080/dashboard/), reveal the treasury
-with **Ctrl+Alt+Shift+T** (macOS: **Cmd+Option+Shift+T**), and use its existing
-**Connect Wallet** to select the deployment wallet. The hidden example shows **Set up your shared
+Open [the local dashboard](http://127.0.0.1:8080/dashboard/), select **Treasury Demo**,
+and use its existing **Connect Wallet** to select the deployment wallet. The demo shows **Set up your shared
 treasury** when the exact shared network is selected and no manifest is saved.
 It checks network references, protocol proxy and implementation code before
 allowing setup. Both network fee settings must be enabled. Use the dashboard's
@@ -938,8 +937,8 @@ dashboard's ordinary L1 owner administration does not require a Safe service.
 
 ## Owner and payment rehearsal after deployment
 
-Use the dashboard's existing **Connect Wallet**, and reveal the hidden treasury
-example with **Ctrl+Alt+Shift+T**. On the connected treasury:
+Use the dashboard's existing **Connect Wallet** and select **Treasury Demo**.
+On the connected treasury:
 
 1. For new Safes, verify the deployment wallet is the only L1 owner and threshold
    is 1. For reused Safes, verify the retained owner set and threshold. Complete

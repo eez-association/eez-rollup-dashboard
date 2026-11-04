@@ -104,7 +104,7 @@ async function setup(name, { partial = false, wrongCode = false, receiptError = 
   await f.page.goto(origin + '/');
   await f.page.getByRole('button', { name: 'Connect Wallet', exact: true }).click();
   await f.page.getByRole('button', { name, exact: true }).click();
-  await f.toggle(); await f.tab.click(); await f.page.locator('#generate').waitFor();
+  await f.tab.click(); await f.page.locator('#generate').waitFor();
   const next = label => f.page.getByRole('button', { name: `Deploy ${label}`, exact: true });
   return { ...f, deployed, transactions, next };
 }

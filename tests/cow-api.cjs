@@ -22,7 +22,7 @@ const { fixture, origin } = require('./cow-demo.cjs');
         status: 200, contentType: 'text/html', body: '<!DOCTYPE html><title>EEZ Dashboard</title>',
       }));
       await f.page.goto(origin + '/');
-      await f.nav.waitFor(); await f.toggle(); await f.cow.click();
+      await f.nav.waitFor(); await f.cow.click();
       await f.page.getByText('CoW Light service is unavailable for this dashboard. Please try again later.', { exact: true }).waitFor();
       assert.equal(await f.page.getByRole('region', { name: 'Swap form' }).count(), 0);
       await f.page.unroute(endpoint);
@@ -38,7 +38,7 @@ const { fixture, origin } = require('./cow-demo.cjs');
     }
     const bundled = await fixture(browser, { bundledCatalog: true });
     await bundled.page.goto(origin + '/');
-    await bundled.nav.waitFor(); await bundled.toggle(); await bundled.cow.click();
+    await bundled.nav.waitFor(); await bundled.cow.click();
     await bundled.page.getByRole('region', { name: 'Swap form' }).waitFor();
     assert.equal(bundled.requests.filter(path => path.endsWith('/cowdemo/api/tokens')).length, 0,
       'bundled availability must not repeat deployment validation for a separate catalog request');

@@ -104,8 +104,8 @@ try {
   await page.getByRole('navigation', { name: 'Dashboard sections' }).waitFor();
   const region = page.getByRole('region', { name: 'Shared treasury setup', exact: true });
   const setupHistory = page.getByRole('region', { name: 'Transaction history', exact: true });
-  assert.equal(await region.count(), 0); assert.equal(chunks.length, 0, 'direct URLs must not load the hidden treasury');
-  await page.keyboard.press('Control+Alt+Shift+KeyT'); await region.waitFor();
+  await region.waitFor();
+  assert(chunks.length > 0, 'direct URLs load Treasury without a visibility preference');
   await region.getByRole('heading', { name: 'Choose your Safes', exact: true }).waitFor();
   await region.getByRole('status').waitFor({ state: 'detached' });
   assert.equal(await journal(), null, 'opening setup must not choose a deployer');
@@ -317,7 +317,6 @@ try {
   const secondTab = await context.newPage();
   await secondTab.goto(`${origin}/#/treasury-demo`);
   await secondTab.getByRole('navigation', { name: 'Dashboard sections' }).waitFor();
-  await secondTab.keyboard.press('Control+Alt+Shift+KeyT');
   const otherSetup = secondTab.getByRole('region', { name: 'Shared treasury setup', exact: true });
   await otherSetup.getByRole('heading', { name: 'Deployment 1 / 6', exact: true }).waitFor();
   await secondTab.evaluate(key => { void navigator.locks.request(key, () => new Promise(resolve => { window.releaseTreasuryLock = resolve; })); }, sharedDeploymentKey);
@@ -449,7 +448,7 @@ try {
   await page.screenshot({ path: `${directory}/no-funding-mobile.png`, fullPage: true });
   await context.unroute('**/*', sharedRpc);
   const result = { checkedAt: new Date().toISOString(), accounts, url: origin, chains: [10200, 906969], steps: 5, existingL1SafeRequired: true, ownersPreserved: true, noFundingInSetup: true, noImplicitMintOrClaim: true, removingFundingPreservesSetup: true,
-    sharedInfrastructureReused: true, sharedReuseUsesMockedReadonlyRpc: true, hiddenUntilShortcut: true, realNetworkChecks: true, wallet: 'read-only injected provider; no extension or private key',
+    sharedInfrastructureReused: true, sharedReuseUsesMockedReadonlyRpc: true, directDemoNavigation: true, realNetworkChecks: true, wallet: 'read-only injected provider; no extension or private key',
     selectedWallet: true, immutableSelectionAfterReview: true, choicesOnBothChains: true, invalidImportRejected: true,
     zeroGasStopsSubmission: true, noSubmission: true, reload: true, sameWalletRestart: true, restartOpensSafeChooser: true, noArchiveControls: true, selectionStorageFailurePreservedSetup: true, pendingRestartBlocked: true, crossTabLock: true, otherTabFollowedRestart: true, completedTreasuryRestart: true, paymentAndOwnerRestartBlocked: true, previousManifestIgnoredAfterReload: true, keyboardFocus: focusStyle, badgeStyle, chainColors, reducedMotion: true, contextualSetupDetails: true, connectionAndBudgetSteps: true, confirmedJournalPreserved: true, pendingJournalUnchanged: true, automaticPendingStatus: true, chainExplorerLinks: true, orderedSetupHistory: true, historyInclusionFinalityAndFailure: true, historyDowngradesUnavailableRPC: true, manualRecoveryRemoved: true, discoveredHashPersisted: true, discoveryUsesMockedReadonlyRpc: true, mobileWidth: widths,
     methods: [...new Set(methods)], walletMethods: [...new Set(walletCalls)] };

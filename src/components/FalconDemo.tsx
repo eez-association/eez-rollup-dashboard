@@ -6,7 +6,7 @@ import { falconDashboardConfig } from '../lib/falcon/dashboardConfig.ts';
 import { FalconPanel } from './falcon/FalconPanel';
 import styles from './FalconDemo.module.css';
 
-/** Mounted only when the shared hidden-demo preference and active tab both allow it. */
+/** Mounted only while the Falcon tab is active; unmounting clears the unlocked key. */
 export function FalconDemo({ ready, wallet }: { ready: boolean; wallet: ReturnType<typeof useWallet> }) {
   const falconWallet = useFalconWallet(wallet);
   const binding = useMemo(() => ready ? falconDashboardConfig({

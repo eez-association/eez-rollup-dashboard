@@ -4,7 +4,7 @@ const { fixture, origin } = require('./cow-demo.cjs');
 
 async function open(browser) {
   const f = await fixture(browser, { wallet: true, wrongNetwork: true });
-  await f.page.goto(origin + '/'); await f.nav.waitFor(); await f.toggle(); await f.cow.click();
+  await f.page.goto(origin + '/'); await f.nav.waitFor(); await f.cow.click();
   await f.page.getByRole('region', { name: 'Swap form' }).getByRole('button', { name: 'Connect wallet', exact: true }).click();
   const prompt = f.page.getByRole('group', { name: 'EEZ test wallet connection', exact: true });
   await prompt.waitFor();

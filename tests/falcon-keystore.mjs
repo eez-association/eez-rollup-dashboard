@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { mkdir } from 'node:fs/promises';
-import { fixture, origin, visibilityKey } from './falcon/fixture.mjs';
+import { fixture, origin } from './falcon/fixture.mjs';
 import { chromium } from 'playwright';
 import { decryptKeystore } from '../src/lib/falcon/keystore.ts';
 import { toHex } from '../src/lib/falcon/falcon.ts';
@@ -187,7 +187,7 @@ try {
   await page.keyboard.press('Shift+Tab');
   assert.equal(await page.evaluate(() => document.activeElement.id), 'generate');
   assert.equal(await page.locator('#generate').evaluate(element => getComputedStyle(element).outlineStyle), 'solid');
-  assert.deepEqual(await page.evaluate(() => [localStorage.length, sessionStorage.length]), [0, 1]);
+  assert.deepEqual(await page.evaluate(() => [localStorage.length, sessionStorage.length]), [0, 0]);
 
   // Import remembers the encrypted file by default, without changing its password or key.
   await page.reload();
@@ -344,7 +344,7 @@ try {
     assert.equal(rememberedText.includes(password), false);
   } finally { remembered.secretKey.fill(0); }
   assert.deepEqual(await page.evaluate(() => Object.keys(localStorage)), [BROWSER_KEYSTORE_KEY]);
-  assert.deepEqual(await page.evaluate(() => Object.keys(sessionStorage)), [visibilityKey]);
+  assert.deepEqual(await page.evaluate(() => Object.keys(sessionStorage)), []);
   await page.reload();
   await page.locator('#signature-playground > summary').click();
   await page.locator('#unlock-saved').waitFor();

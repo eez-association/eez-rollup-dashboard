@@ -47,7 +47,6 @@ try {
     await page.addInitScript(({ account, key, state, chain, selectionKey, network }) => {
       localStorage.setItem(key, JSON.stringify(state)); localStorage.setItem('walletConnected', 'true'); localStorage.setItem('walletProvider', 'legacy:0');
       if (selectionKey) localStorage.setItem(selectionKey, JSON.stringify(network));
-      sessionStorage.setItem('eez:treasury-demo:visible', '1');
       window.gasBridgeTest = { l2Gas: '0x0', walletOps: [] };
       window.ethereum = { isMetaMask: true, chain, on() {}, removeListener() {}, async request({ method, params }) {
         if (method === 'eth_accounts') return [account];

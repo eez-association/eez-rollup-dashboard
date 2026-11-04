@@ -8,7 +8,7 @@ const { fixture, origin } = require('./cow-demo.cjs');
     await f.page.route('**/cowdemo/api/wrapper?*', route => route.fulfill({ status: 400, json: { error: 'Wrapper prediction unavailable' } }));
     await f.page.route('**/cowdemo/api/balances?*', route => route.fulfill({ status: 400, json: { error: 'Buy balance unavailable' } }));
     await f.page.route('**/cowdemo/api/allowance?*', route => route.fulfill({ json: { balance: '10000000000000000', allowance: '0' } }));
-    await f.page.goto(origin + '/'); await f.nav.waitFor(); await f.toggle(); await f.cow.click();
+    await f.page.goto(origin + '/'); await f.nav.waitFor(); await f.cow.click();
     const form = f.page.getByRole('region', { name: 'Swap form' });
     await form.getByRole('button', { name: 'Connect wallet' }).click();
     await form.getByText('Balance: 0.01', { exact: true }).waitFor();
