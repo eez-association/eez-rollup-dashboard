@@ -1031,7 +1031,7 @@
       const p = parentMap();
       M.nodes.forEach((n, id) => {
         if (n.protocol && !opt.protocol) return;
-        const hay = [n.contract, n.impl?.contract, n.fn, n.address, n.impl?.address, ...n.args.map(a => JSON.stringify(a.value)), returnText(n)].join(' ').toLowerCase();
+        const hay = [n.contract, n.proxyContract, n.impl?.contract, n.fn, n.address, n.impl?.address, ...n.args.map(a => JSON.stringify(a.value)), returnText(n)].join(' ').toLowerCase();
         if (hay.includes(q)) {
           matches.push(id);
           for (let a = p.get(id); a != null; a = p.get(a)) expanded.add(a);

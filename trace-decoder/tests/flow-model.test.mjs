@@ -549,6 +549,9 @@ test('transparent proxy labels use only one named implementation observed in the
     const node = model.nodes.find(node => node.frameId === target.id);
     assert.equal(node.contract, 'Bridge (Transparent Proxy)');
     assert.equal(node.proxyContract, 'TransparentUpgradeableProxy');
+    for (const search of ['Bridge', 'Transparent Proxy', 'TransparentUpgradeableProxy']) {
+      assert.ok(traceRows(model, { search }).some(row => row.node.frameId === target.id), `${mode}: ${search}`);
+    }
     assert.equal(node.address, target.to);
     assert.equal(node.failed, !!target.error);
     assert.equal(node.reverted, !!target.reverted);
