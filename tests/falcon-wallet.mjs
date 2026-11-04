@@ -29,6 +29,7 @@ try {
     const code = deploymentCode(d);
     let publicKey, publicKeyHashForReads, consumed = 0n, safeNonce = 0n, sent;
     let holdSettlement = d.l2.chainId === 699169 && name === 'MetaMask' && !missingNetwork;
+    let heldL1Receipt = null;
     const needsController = d.l2.chainId === 699169 && missingNetwork;
     let controllerReady = !needsController;
     const controllerSends = [];
@@ -113,7 +114,17 @@ try {
         chainId: toHex(d.l2.chainId), blockHash, blockNumber: toHex(blockNumber), type: '0x0', nonce: controllerSends[0].nonce, gas: controllerSends[0].gas, gasPrice: '0x4', transactionIndex: '0x0', v: '0x1b', r: toHex(1n,{size:32}), s: toHex(1n,{size:32}) };
       if (method === 'eth_getTransactionReceipt' && params[0] === controllerTxHash) return { transactionHash: controllerTxHash, blockHash, blockNumber: toHex(blockNumber), transactionIndex: '0x0', from: account, to: d.l2.factory.address, status: '0x1', type, gasUsed: '0x7530', effectiveGasPrice: '0x4', cumulativeGasUsed: '0x7530', logs: [] };
       if (method === 'eth_getTransactionReceipt' && [settlementHash, fundingHash].includes(params[0])) {
+        if (params[0] === settlementHash && heldL1Receipt) {
+          heldL1Receipt.started();
+          await heldL1Receipt.wait;
+        }
         const logs = [];
+        if (params[0] === settlementHash && d.l1.chainId === 1) {
+          logs.push({ address: d.l1.registry, blockHash: l1BlockHash, blockNumber: toHex(blockNumber), transactionHash: settlementHash,
+            transactionIndex: '0x0', logIndex: '0x0', removed: false,
+            topics: encodeEventTopics({ abi: managerAbi, eventName: 'BatchPosted' }),
+            data: encodeAbiParameters([{type:'bytes32'},{type:'uint64[]'}], [blockHash,[d.l2.rollupId]]) });
+        }
         if (params[0] === settlementHash && sent && same(sent.action.target, safe)) {
           const { args } = decodeFunctionData({ abi: safeAbi, data: sent.action.data });
           const transaction = buildSafeTransaction({ chainId: BigInt(d.l1.chainId), safe, to: args[0], data: args[2], nonce: safeNonce - 1n });
@@ -125,7 +136,7 @@ try {
               [...args, encodeAbiParameters([{type:'uint256'}, {type:'address'}, {type:'uint256'}], [safeNonce - 1n, owner, 1n])]) });
         }
         if (params[0] === fundingHash) safeBalance = BigInt(fundingSends[0].value);
-        return { transactionHash: params[0], blockHash: l1BlockHash, blockNumber: toHex(blockNumber), transactionIndex: '0x0', from: account, to: params[0] === fundingHash ? safe : d.l1.registry, status: '0x1', type: '0x0', gasUsed: '0x7530', effectiveGasPrice: '0x3b9aca00', cumulativeGasUsed: '0x7530', logs };
+        return { transactionHash: params[0], blockHash: l1BlockHash, blockNumber: toHex(blockNumber), transactionIndex: '0x0', from: account, to: params[0] === fundingHash ? safe : d.l1.chainId === 1 ? '0x'+'44'.repeat(20) : d.l1.registry, status: '0x1', type: '0x0', gasUsed: '0x7530', effectiveGasPrice: '0x3b9aca00', cumulativeGasUsed: '0x7530', logs };
       }
       if (method === 'eth_getTransactionReceipt' && params[0] === revertedCreationHash) return {
         transactionHash: revertedCreationHash, blockHash, blockNumber: toHex(blockNumber), transactionIndex: '0x0',
@@ -538,9 +549,24 @@ try {
       assert.equal(await page.locator('#safe-amount').inputValue(), '0');
       assert.equal(await page.locator('#safe-data').inputValue(), '0xdeadbeef');
       assert.equal(await page.locator('#safe-balance').textContent(), beforeSendBalance, 'last confirmed balance remains visible');
+      assert.equal(await page.locator('#safe-settlement-tx').count(), 0, 'a missing correlation never displays an earlier transaction\'s L1 link');
+      assert(await page.locator('#safe-settlement-pending').isVisible());
       await page.screenshot({path:'/tmp/falcon-pending-transaction.png',fullPage:true});
+      let releaseL1Receipt, l1ReceiptStarted;
+      const started = new Promise(resolve => { l1ReceiptStarted = resolve; });
+      heldL1Receipt = { started: l1ReceiptStarted, wait: new Promise(resolve => { releaseL1Receipt = resolve; }) };
       holdSettlement = false;
+      await started;
+      await page.locator('#safe-settlement-tx').waitFor();
+      assert.equal(await page.locator('#safe-settlement-tx').getAttribute('href'), `${d.l1.explorer}/tx/${settlementHash}`);
+      assert.equal(await page.locator('#safe-source-tx').getAttribute('href'), `${d.l2.explorer}/tx/${transferTxHash}`);
+      assert(await page.locator('#safe-settlement-checking').isVisible(), 'a correlated link does not claim verified execution');
+      assert(await page.locator('#safe-send').isDisabled(), 'correlation alone does not unlock another send');
+      assert.equal(await page.getByTestId('cost-without-eez').textContent(), 'Waiting for L1 settlement…');
+      heldL1Receipt = null; releaseL1Receipt();
       await status('Transfer confirmed on');
+      assert.equal(await page.locator('#safe-settlement-checking').count(), 0);
+      assert(await page.locator('#safe-settlement-tx').isVisible());
       await page.waitForFunction(() => document.querySelector('[data-testid="cost-without-eez"]')?.textContent === '0.55¢');
       assert.equal(await page.getByTestId('cost-without-eez').getAttribute('data-estimated'), 'true', 'same-gas comparison uses the verified settlement price');
       assert.equal(await page.getByTestId('cost-actual').textContent(), '2.20e-9¢');
@@ -549,6 +575,7 @@ try {
         await page.evaluate(account => { const w = window.falconWalletTest; w.account = account; w.emit('accountsChanged', [account]); }, gasWallet);
         await page.waitForFunction(expected => !!document.querySelector('#safe-cost-comparison') === expected, gasWallet === account);
         assert.equal(await page.locator('#safe-cost-comparison').count(), gasWallet === account ? 1 : 0, 'transfer costs follow their wallet and key');
+        assert.equal(await page.locator('#safe-settlement-tx').count(), gasWallet === account ? 1 : 0, 'L1 links follow their source transaction scope');
       }
       assert.match(await page.getByTestId('cost-actual').textContent(), /¢/);
       await page.waitForFunction(() => document.querySelector('[data-testid="cost-without-eez"]')?.textContent === '0.55¢');

@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { readFileSync } from 'node:fs';
-import { encodeAbiParameters, encodeEventTopics, decodeFunctionData, keccak256, pad, toHex, zeroHash, type Address, type Hex } from 'viem';
+import { encodeAbiParameters, encodeEventTopics, decodeFunctionData, keccak256, pad, parseAbi, toHex, zeroHash, type Address, type Hex, type TransactionReceipt } from 'viem';
 import { inspectSafeSelection, prepareOwnerAddition, ownerTransaction, readAttachment, saveAttachment, selectFactorySafe, SafeSelectionConflict, attachmentKey, verifyOwnerAddition } from '../../src/lib/falcon/existingSafe.ts';
-import { safeAbi, loadRemoteSafe, prepareSafeTransfer, hasSafeExecution, inspectExistingSafe } from '../../src/lib/falcon/safe.ts';
+import { safeAbi, loadRemoteSafe, prepareSafeTransfer, hasSafeExecution, inspectExistingSafe, verifySafeL1Execution } from '../../src/lib/falcon/safe.ts';
 import { safeTransactionHash, encodeSafeExecution } from '../../src/lib/treasury/safeTransactions.ts';
 import { loadTreasuryArtifacts } from '../../src/lib/treasury/release.ts';
 import { crossChainDeployment as d } from '../../src/lib/falcon/crossChainDeployment.ts';
@@ -191,6 +191,44 @@ test('another tab cannot silently replace a confirmed Safe attachment', () => {
  assert.throws(()=>saveAttachment(storage,'safe',{target:other,walletOwner:account}),/Another Safe was selected/);
  assert.throws(()=>saveAttachment(storage,'safe',{target,walletOwner:other}),/Another Safe was selected/);
  assert.deepEqual(JSON.parse(saved!),first);
+});
+
+test('forwarded L1 settlement requires the configured registry, rollup and exact Safe execution', async () => {
+ const {state,client}=fixture();
+ state.owners=[account,owner];state.ownerCode[owner.toLowerCase()]='0x6000';state.registered=true;
+ const hash=toHex(1n,{size:32}),safeTxHash=toHex(2n,{size:32});
+ const batchAbi=parseAbi(['event BatchPosted(bytes32 sharedPublicInput,uint64[] rollupIds)']);
+ const batch={address:d.l1.registry,removed:false,topics:encodeEventTopics({abi:batchAbi,eventName:'BatchPosted'}),
+  data:encodeAbiParameters([{type:'bytes32'},{type:'uint64[]'}],[zeroHash,[d.l2.rollupId]])};
+ const execution={address:target,topics:encodeEventTopics({abi:safeAbi,eventName:'ExecutionSuccess',args:{txHash:safeTxHash}}),
+  data:encodeAbiParameters([{type:'uint256'}],[0n])};
+ const receipt={transactionHash:hash,to:other,status:'success',blockNumber:100n,blockHash:zeroHash,logs:[batch,execution]} as unknown as TransactionReceipt;
+ let observed=receipt;
+ Object.assign(client,{getTransactionReceipt:async()=>observed});
+ const op={kind:'transfer' as const,attachment:{target},target,owner,recipient:account,value:0n,safeNonce:6n,safeTxHash};
+ const settlement={l1TransactionHash:hash,l1BlockNumber:100n,l1BlockHash:zeroHash};
+ const check=()=>verifySafeL1Execution(client,d,controller,op,pad('0x01'),settlement,signal);
+ assert.equal((await check()).remote.target,target,'the top-level recipient may be a forwarding contract');
+ for(const logs of [
+  [execution], [{...batch,address:other},execution], [{...batch,removed:true},execution],
+  [{...batch,data:'0x'},execution],
+  [{...batch,data:encodeAbiParameters([{type:'bytes32'},{type:'uint64[]'}],[zeroHash,[d.l2.rollupId+1n]])},execution],
+ ]) {
+  observed={...receipt,logs} as unknown as TransactionReceipt;
+  await assert.rejects(check(),/expected settlement/);
+ }
+ for(const patch of [{blockNumber:101n},{blockHash:hash},{transactionHash:zeroHash}]) {
+  observed={...receipt,...patch};await assert.rejects(check());
+ }
+ observed={...receipt,logs:[batch]} as unknown as TransactionReceipt;
+ await assert.rejects(check(),/matching successful Safe transaction/);
+ observed=receipt;state.nonce=6n;
+ await assert.rejects(check(),/matching successful Safe transaction/);
+ state.nonce=7n;state.registered=false;
+ await assert.rejects(check(),/proxy binding/);
+ state.registered=true;
+ observed={...receipt,to:d.l1.registry,logs:[execution]} as unknown as TransactionReceipt;
+ assert.equal((await check()).remote.target,target,'direct registry calls retain existing settlement support');
 });
 
 test('a Safe already controlled by Falcon needs no wallet-owner authorization', async () => {

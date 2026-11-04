@@ -174,7 +174,18 @@ export function hasSafeExecution(receipt: TransactionReceipt, op: Extract<SafeOp
 export async function verifySafeL1Execution(client: EezClient, d: CrossChainDeployment, controller: Address, op: SafeOperation, result: Hex, settlement: Settlement, signal: AbortSignal) {
   await checkChain(client, d.l1);
   const receipt = await canonicalReceipt(client, settlement.l1TransactionHash, signal);
-  if (!sameAddress(receipt.to ?? '', d.l1.registry) || receipt.blockHash !== settlement.l1BlockHash || receipt.blockNumber !== settlement.l1BlockNumber) throw new Error('L1 receipt does not match the expected settlement.');
+  // A posting contract can forward the batch to EEZ. Authenticate that route by
+  // the registry's own BatchPosted event for this rollup, never by the forwarder's
+  // address. Direct registry calls retain support for older event versions.
+  const registrySettlement = sameAddress(receipt.to ?? '', d.l1.registry) || receipt.logs.some(log => {
+    if (log.removed || !sameAddress(log.address, d.l1.registry)) return false;
+    try {
+      const { args } = decodeEventLog({ abi: managerAbi, eventName: 'BatchPosted', data: log.data, topics: log.topics, strict: true });
+      return args.rollupIds.includes(d.l2.rollupId);
+    } catch { return false; }
+  });
+  if (!registrySettlement || receipt.transactionHash !== settlement.l1TransactionHash || receipt.blockHash !== settlement.l1BlockHash
+    || receipt.blockNumber !== settlement.l1BlockNumber) throw new Error('L1 receipt does not match the expected settlement.');
   const decoded = safeCallResult(op, result);
   const remote = await loadRemoteSafe(client, d, controller, signal, receipt.blockNumber, op.kind === 'transfer' ? op.attachment : undefined);
   if (!remote.target) throw new Error('Safe not found at the L1 settlement block.');
