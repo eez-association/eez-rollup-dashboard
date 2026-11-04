@@ -144,7 +144,7 @@ export function useConfigLoader() {
         const identity = l1Identity(l1ChainId);
         L1_CHAIN.nativeCurrency = nativeCurrency(l1ChainId);
         L2_CHAIN.nativeCurrency = nativeCurrency(l1ChainId);
-        setConfig({ l1NetworkName: l1NameOverride || identity.name, l1NetworkLogo: identity.logo });
+        setConfig({ l1NetworkName: l1NameOverride || identity.name, l1NetworkLogo: identity.logo, l1IsEthereumMainnet: BigInt(l1ChainId) === 1n });
       } catch {
         /* keep defaults */
       }

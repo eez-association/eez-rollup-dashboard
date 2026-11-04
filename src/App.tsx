@@ -15,6 +15,7 @@ import { useRecentAddresses } from "./hooks/useRecentAddresses";
 import { NetworkMonitorView } from "./monitor/NetworkMonitorView";
 import { Header } from "./components/Header";
 import { ComposerStatus } from "./components/ComposerStatus";
+import { NetworkNotice } from "./components/NetworkNotice";
 import { CounterPanel } from "./components/CounterPanel";
 import { CrossChainPanel } from "./components/CrossChainPanel";
 import { ProxyDeploySection } from "./components/ProxyDeploySection";
@@ -428,6 +429,8 @@ export function App() {
         connectingComposer={wallet.connectingComposer}
         composerSetupMessage={wallet.composerSetupMessage}
       />
+
+      <NetworkNotice />
 
       {wallet.isConnected && <ComposerStatus connection={wallet.composerConnection}
         requiredChainId={bridgeActive ? bridgeSourceChain.chainId : undefined}
