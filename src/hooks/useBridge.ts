@@ -4,6 +4,7 @@ import { config, ESTIMATION_SENDER, L1_CHAIN, L2_CHAIN } from "../config";
 import { rpcCall } from "../rpc";
 import { estimateGas, estimateBridgeGas, GasEstimateError, gasToHex, getEip1559Fees } from "../lib/gasEstimation";
 import { prepareNativeBridgeMax } from "../lib/bridgeMax";
+import { bridgeAmountError, nativeBridgeLimit } from "../lib/bridgeLimits";
 import { readBridgeManager } from "../lib/bridgeManager";
 import { loadBridgeTokens, readBridgeToken, saveBridgeToken } from "../lib/bridgeTokens";
 import type { CrossChainFeeQuote } from "../lib/fees/payment.mjs";
@@ -149,6 +150,8 @@ function parseAmount(amount: string, decimals: number): bigint | null {
 /** Build the same sender, calldata and value for estimation and submission. */
 function bridgeTransaction(state: BridgeState, from: string): { from: string; to: string; data: string; value: string } {
   const { direction, asset, amount, tokenAddress, tokenMeta, destinationAddress } = state;
+  const amountError = bridgeAmountError(L1_CHAIN.chainId, asset, amount);
+  if (amountError) throw new Error(amountError);
   const rollupId = encodeUint256(direction === "l2-to-l1" ? 0n : BigInt(config.rollupId));
   const destination = destinationAddress || from;
   const rawAmount = parseAmount(amount, asset === "eth" ? 18 : tokenMeta?.decimals ?? 18)!;
@@ -433,7 +436,7 @@ export function useBridge(
         !(direction === "l1-to-l2" ? config.l1Bridge : config.l2Bridge) ||
         destinationAddress && !/^0x[0-9a-fA-F]{40}$/.test(destinationAddress)) return null;
     const rawAmount = parseAmount(amount, asset === "eth" ? 18 : tokenMeta?.decimals ?? 18);
-    if (!rawAmount || rawAmount <= 0n) return null;
+    if (!rawAmount || rawAmount <= 0n || bridgeAmountError(L1_CHAIN.chainId, asset, amount)) return null;
     if (asset === "erc20" && (!tokenMeta || tokenMeta.predicted || !/^0x[0-9a-fA-F]{40}$/.test(tokenAddress) ||
         state.tokenNeedsApproval === null || state.tokenNeedsApproval && (state.allowance === null || state.allowance < rawAmount))) return null;
     return bridgeTransaction(state, walletAddress);
@@ -578,6 +581,7 @@ export function useBridge(
         ? (config.l1FeesEnabled ? BigInt(config.l1FeeMaxTotalWei) : 0n)
         : (config.l2FeesEnabled ? BigInt(config.l2FeeMaxTotalWei) : 0n);
       const result = await prepareNativeBridgeMax({ balance, feeCap: BigInt(fees.maxFeePerGas!), gasOverride, minimumReserve,
+        maxAmount: nativeBridgeLimit(L1_CHAIN.chainId, snapshot.asset),
         estimate: async value => {
           if (!current()) throw new Error("Bridge parameters changed.");
           const transaction = bridgeTransaction({ ...snapshot, amount: formatUnits(value, 18) }, from);
@@ -676,6 +680,11 @@ export function useBridge(
     const ready = direction === "l1-to-l2" ? stateRef.current.l1BridgeReady : stateRef.current.l2BridgeReady;
     if (!bridgeAddr || !amount || ready !== true) return;
 
+    const amountError = bridgeAmountError(L1_CHAIN.chainId, asset, amount);
+    if (amountError) {
+      setState(s => ({ ...s, phase: "failed", error: amountError }));
+      return;
+    }
     const decimals = asset === "eth" ? 18 : (tokenMeta?.decimals ?? 18);
     const rawAmount = parseAmount(amount, decimals);
     if (!rawAmount || rawAmount === 0n) {

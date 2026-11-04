@@ -18,7 +18,7 @@ function page(html) {
   const els = {};
   const el = id => els[id] || (els[id] = { id, innerHTML: '', textContent: id === 'flow-data' ? data : id === 'flow-config' ? cfg : '', hidden: false, checked: false, value: '',
     style: { setProperty() {} }, dataset: {}, clientWidth: 1100, clientHeight: 700, scrollTop: 0, scrollLeft: 0, offsetTop: 0, offsetLeft: 0,
-    setAttribute() {}, getAttribute() {}, insertAdjacentHTML() {}, addEventListener() {}, querySelector() { return null; }, querySelectorAll() { return []; }, scrollTo() {} });
+    setAttribute() {}, getAttribute() {}, insertAdjacentHTML() {}, listeners: {}, addEventListener(type, handler) { this.listeners[type] = handler; }, querySelector() { return null; }, querySelectorAll() { return []; }, scrollTo() {} });
   const sandbox = {
     document: { getElementById: el, addEventListener() {}, querySelector() { return null; }, querySelectorAll: s => s === '.view-tab' ? tabs : [] },
     addEventListener() {}, matchMedia: () => ({ matches: false }), requestAnimationFrame: () => 0, cancelAnimationFrame() {},
@@ -374,4 +374,20 @@ test('per-chain gas totals and their breakdown stay fixed across visibility and 
   }
   p.el('mode-select').onchange({ target: { value: 'physical' } });
   assert.equal(p.el('gas-summary').innerHTML, before);
+});
+
+
+test('transparent proxy display labels preserve original-name search in the saved viewer', async () => {
+  for (const label of ['Bridge (Transparent Proxy)', 'TransparentUpgradeableProxy']) {
+    const model = structuredClone((await samples)[0].model);
+    const node = model.nodes[model.roots[0].node];
+    node.contract = label;
+    node.proxyContract = 'TransparentUpgradeableProxy';
+    node.impl = { contract: 'Bridge', address: address(999), frameId: 'observed-implementation' };
+    const p = page(renderFlowHtml([{ model }], { views: ['flow'] }));
+    assert.ok(p.el('graph').innerHTML.includes(label), 'the model label wins over the implementation-only name');
+    p.el('search').value = 'TransparentUpgradeableProxy';
+    p.el('search').listeners.input();
+    assert.equal(p.el('hits').textContent, '1 match');
+  }
 });

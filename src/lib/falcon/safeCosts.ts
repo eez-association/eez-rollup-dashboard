@@ -38,11 +38,12 @@ export function gasToken(symbol: string, l1ChainId: number): 'ETH' | 'xDAI' {
   return nativeCurrency(String(l1ChainId)).symbol === 'xDAI' ? 'xDAI' : 'ETH';
 }
 
-export function nativeFeeCents(wei: bigint, usdPerTokenE8: bigint): string {
+export function nativeFeeUsd(wei: bigint, usdPerTokenE8: bigint): string {
   if (wei < 0n || usdPerTokenE8 <= 0n) throw new Error('Invalid native-token cost inputs.');
-  const cents = Number(formatUnits(wei * usdPerTokenE8, 24));
-  if (cents > 0 && cents < 0.000001) return `${cents.toPrecision(3)}¢`;
-  return `${new Intl.NumberFormat('en-US', { maximumFractionDigits: cents < 1 ? 6 : 2 }).format(cents)}¢`;
+  const dollars = Number(formatUnits(wei * usdPerTokenE8, 26));
+  if (dollars > 0 && dollars < 0.000001) return `$${dollars.toExponential(2)}`;
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2,
+    maximumFractionDigits: dollars < 0.01 ? 6 : dollars < 1 ? 4 : 2 }).format(dollars);
 }
 
 /** Keep distinct positive fees visible below one millionth of a dollar. */

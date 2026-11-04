@@ -6,7 +6,7 @@ import { isPreparedResult } from '../src/prepared-result.mjs';
 export const FLOW_MODEL_VERSION = 1;
 
 // Roles the decoder assigns to EEZ plumbing. The diagram folds them by default.
-const PROTOCOL_ROLES = new Set(['manager', 'incoming-proxy', 'static-probe', 'outgoing-proxy', 'system-value-transfer']);
+const PROTOCOL_ROLES = new Set(['manager', 'incoming-proxy', 'static-probe', 'outgoing-proxy', 'system-value-transfer', 'settlement-forwarder']);
 // Public explorer websites by chain id, used for "verify" links.
 const EXPLORER_SITES = { 1: 'https://etherscan.io', 11155111: 'https://sepolia.etherscan.io', 17000: 'https://holesky.etherscan.io', 560048: 'https://hoodi.etherscan.io', 100: 'https://gnosisscan.io', 10200: 'https://gnosis-chiado.blockscout.com' };
 // Keeps only scheme, host and path, so an API key or credential can never reach the page.
@@ -113,9 +113,23 @@ export function buildFlowModel(trace, { label, explorers = {}, mode = 'combined'
   }
 
   const managers = trace.metadata?.managers || {};
+  const settlementForwarders = new Set();
   function describe(frame, ln) {
     const d = ln?.decoded || frame.decoded || {};
     let role = ln?.role || frame.role || 'application', contract = d.contractName || 'Unknown contract';
+    if (settlementForwarders.has(frame.id)) role = 'settlement-forwarder';
+    // Name transparent proxies from this call's observed implementation, never current storage.
+    const proxyContract = contract === 'TransparentUpgradeableProxy' ? contract : null;
+    if (proxyContract) {
+      const delegates = (frame.children || []).map(id => frames.get(id)).filter(child =>
+        child?.type === 'DELEGATECALL' && lower(child.input) === lower(frame.input));
+      const implementation = delegates.length === 1 ? delegates[0] : null;
+      const name = implementation?.decoded?.contractName;
+      if (implementation?.parentId === frame.id && implementation.chain === frame.chain &&
+          implementation.transactionHash === frame.transactionHash && implementation.to &&
+          lower(implementation.to) !== lower(frame.to) && typeof name === 'string' && name.trim() &&
+          name !== 'Unknown contract' && name !== proxyContract) contract = `${name} (Transparent Proxy)`;
+    }
     // Proxy deployment by a manager is delivery plumbing, like the proxies themselves.
     if (frame.type?.startsWith('CREATE') && lower(frame.from) === lower(managers[frame.chain])) role = 'proxy-creation';
     if (role === 'system-value-transfer') contract = 'L2 system';
@@ -126,7 +140,7 @@ export function buildFlowModel(trace, { label, explorers = {}, mode = 'combined'
       kind: 'call', frameId: frame.id, chain: frame.chain, role,
       tokenTransfers: [...(transfers.get(frame.id) || [])],
       protocol: PROTOCOL_ROLES.has(role) || role === 'proxy-creation', callType: frame.type || 'CALL',
-      contract, accountType: d.accountType, address: frame.to ?? null, from: frame.from ?? null,
+      contract, ...(proxyContract ? { proxyContract } : {}), accountType: d.accountType, address: frame.to ?? null, from: frame.from ?? null,
       fn: role === 'system-value-transfer' ? 'Value to L2 system' : functionName(d, frame), signature: d.signature || null, args: (d.arguments || []).map(argument),
       ret: returnInfo(d, frame), value: String(frame.value ?? '0'), isStatic: !!frame.isStatic,
       crossChainRead: !!frame.isStatic && (outgoingByFrame.has(frame.id) || incomingByFrame.has(frame.id) || incomingProxyFrames.has(frame.id) || outgoingManagerFrames.has(frame.id)),
@@ -207,6 +221,24 @@ export function buildFlowModel(trace, { label, explorers = {}, mode = 'combined'
     requested: `${tx.chain}:${tx.hash}` === originTx,
   }));
   const scope = classifyTransactions(trace, transactions, frames);
+  // Posting wrappers are plumbing only when their observed call reaches the
+  // configured manager's batch entry point in a settlement-only transaction.
+  // Keep actual application descendants; the existing protocol filter promotes them.
+  const settlementTransactions = new Set(transactions.filter(tx => tx.chain === 'L1' && tx.role === 'settlement').map(tx => tx.hash));
+  for (const entry of frames.values()) {
+    if (entry.chain !== 'L1' || entry.role !== 'manager' || entry.protocol?.name !== 'postAndVerifyBatch' ||
+        !settlementTransactions.has(entry.transactionHash)) continue;
+    const ancestors = new Set([entry.id]);
+    let child = entry;
+    for (let parent = frames.get(child.parentId); parent; parent = frames.get(child.parentId)) {
+      if (ancestors.has(parent.id) || parent.chain !== entry.chain || parent.transactionHash !== entry.transactionHash ||
+          !parent.children?.includes(child.id)) break;
+      ancestors.add(parent.id);
+      const decoded = logical.get(parent.id)?.decoded || parent.decoded;
+      if (parent.role === 'application' && decoded?.functionName === 'postAndVerifyBatch') settlementForwarders.add(parent.id);
+      child = parent;
+    }
+  }
   const gas = flowGas(trace, transactions, frames, scope.frames, exactLink);
   const isolated = physical && exactLink.l1Execution?.frameId && frames.has(exactLink.l1Execution.frameId) ? exactLink.l1Execution : null;
   const unisolatedL1 = physical && exactLink.sourceChain === 'L2' && !isolated;

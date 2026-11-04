@@ -125,25 +125,25 @@ test('Missing or inconsistent blob receipt data never becomes a zero-cost blob',
 
 
 test('simple comparison shows the entire paid L2 fee and the same gas at the L1 price', async () => {
-  const { simpleGasCosts, nativeFeeCents } = await import('../../src/lib/falcon/safeCosts.ts');
+  const { simpleGasCosts, nativeFeeUsd } = await import('../../src/lib/falcon/safeCosts.ts');
   const costs = simpleGasCosts(5_500_000n, 74_448_052n, 1_000_000_000n);
   assert.equal(costs.actualWei, 409_464_286_000_000n);
   assert.equal(costs.withoutEezWei, 5_500_000_000_000_000n);
   const ethUsdE8 = 2000n * 100_000_000n;
-  assert.equal(nativeFeeCents(409_464_287_571_573n, ethUsdE8), '81.89¢');
-  assert.equal(nativeFeeCents(costs.withoutEezWei!, ethUsdE8), '1,100¢');
+  assert.equal(nativeFeeUsd(409_464_287_571_573n, ethUsdE8), '$0.8189');
+  assert.equal(nativeFeeUsd(costs.withoutEezWei!, ethUsdE8), '$11.00');
   assert.equal(simpleGasCosts(5_500_000n, 4n, null).actualWei, 22_000_000n);
   assert.equal(simpleGasCosts(5_500_000n, 4n, null).withoutEezWei, null);
   assert.deepEqual(simpleGasCosts(5_447_193n, 75_164_488n, 1_000_000_007n), {
     actualWei: 409_435_472_882_184n, withoutEezWei: 5_447_193_038_130_351n,
   }, 'both sides use the exact same measured L2 gas count');
-  assert.throws(() => nativeFeeCents(1n, 0n), /Invalid/);
-  assert.throws(() => nativeFeeCents(-1n, ethUsdE8), /Invalid/);
+  assert.throws(() => nativeFeeUsd(1n, 0n), /Invalid/);
+  assert.throws(() => nativeFeeUsd(-1n, ethUsdE8), /Invalid/);
 });
 
 
 test('gas token conversion uses metadata, Chiado/Gnosis fallback, then ETH', async () => {
-  const { gasToken, nativeFeeCents } = await import('../../src/lib/falcon/safeCosts.ts');
+  const { gasToken, nativeFeeUsd } = await import('../../src/lib/falcon/safeCosts.ts');
   assert.equal(gasToken('xDAI', 10200), 'xDAI');
   assert.equal(gasToken('xdai', 699169), 'xDAI');
   assert.equal(gasToken('', 100), 'xDAI');
@@ -151,6 +151,6 @@ test('gas token conversion uses metadata, Chiado/Gnosis fallback, then ETH', asy
   assert.equal(gasToken('ETH', 10200), 'ETH', 'explicit base-token metadata wins');
   assert.equal(gasToken('', 1), 'ETH');
   assert.equal(gasToken('', 999999), 'ETH');
-  assert.equal(nativeFeeCents(409_435_472_882_184n, 100_000_000n), '0.040944¢');
-  assert.equal(nativeFeeCents(5_447_193_038_130_351n, 100_000_000n), '0.544719¢');
+  assert.equal(nativeFeeUsd(409_435_472_882_184n, 100_000_000n), '$0.000409');
+  assert.equal(nativeFeeUsd(5_447_193_038_130_351n, 100_000_000n), '$0.005447');
 });

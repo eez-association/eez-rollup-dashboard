@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { formatUnits } from 'viem';
-import { gasToken, nativeFeeCents, simpleGasCosts, type SafeCostEvidence } from '../../lib/falcon/safeCosts.ts';
+import { gasToken, nativeFeeUsd, simpleGasCosts, type SafeCostEvidence } from '../../lib/falcon/safeCosts.ts';
 import { fetchEthUsdPrice, type EthUsdPrice } from '../../lib/falcon/ethPrice.ts';
 import shared from './FalconPanel.module.css';
 import styles from './SafeCostComparison.module.css';
@@ -37,20 +37,20 @@ export function SafeCostComparison({ evidence, l1ChainId, l1Name, l1Symbol, l2Sy
   if (!fee) return null;
   const costs = simpleGasCosts(fee.gasUsed, fee.gasPrice, evidence.l1Verified ? fee.l1GasPrice : null);
   const native = (wei: bigint, token: 'ETH' | 'xDAI') => `${formatUnits(wei, 18)} ${token}`;
-  const cents = (wei: bigint, token: 'ETH' | 'xDAI') => token === 'xDAI' ? nativeFeeCents(wei, 100_000_000n)
-    : price ? nativeFeeCents(wei, price.usdPerEthE8) : native(wei, token);
+  const usd = (wei: bigint, token: 'ETH' | 'xDAI') => token === 'xDAI' ? nativeFeeUsd(wei, 100_000_000n)
+    : price ? nativeFeeUsd(wei, price.usdPerEthE8) : priceError ? 'USD unavailable' : 'Loading USD…';
   const batch = evidence.settlementFee;
   return <section id="safe-cost-comparison" className={styles.comparison} aria-label="Transaction cost" data-source-hash={evidence.sourceHash}>
     <div className={styles.heading}><h3>Transaction costs</h3></div>
     <div className={styles.totals}>
       <div className={`${styles.total} ${styles.actual}`}>
         <span className={shared.label}>Actual cost</span>
-        <strong data-testid="cost-actual">{cents(costs.actualWei, l2Token)}</strong>
+        <strong data-testid="cost-actual">{usd(costs.actualWei, l2Token)}</strong>
         <p className={shared.hint}>{native(costs.actualWei, l2Token)}.<br />Total L2 transaction fee, which includes EEZ settlement.</p>
       </div>
       <div className={styles.total}>
         <span className={shared.label}>Estimated cost without EEZ</span>
-        <strong data-testid="cost-without-eez" data-estimated="true">{costs.withoutEezWei === null ? 'Waiting for L1 settlement…' : cents(costs.withoutEezWei, l1Token)}</strong>
+        <strong data-testid="cost-without-eez" data-estimated="true">{costs.withoutEezWei === null ? 'Waiting for L1 settlement…' : usd(costs.withoutEezWei, l1Token)}</strong>
         <p className={shared.hint}>{costs.withoutEezWei !== null && <>{native(costs.withoutEezWei, l1Token)}.<br /></>}Same L2 gas used × the gas price paid for L1 settlement.</p>
       </div>
     </div>
@@ -59,7 +59,7 @@ export function SafeCostComparison({ evidence, l1ChainId, l1Name, l1Symbol, l2Sy
       <p className={shared.hint}>Actual cost is the gas your L2 transaction used multiplied by the gas price you paid.</p>
       <p className={shared.hint}>Without EEZ uses that same amount of gas at the effective gas price paid by the verified settlement transaction on {l1Name}. It estimates doing the work directly on L1.</p>
       <p className={shared.hint}>Your L2 fee includes EEZ’s charge for posting and settling on L1. We do not add that charge again.</p>
-      {needsEthPrice && priceError && <p className={shared.hint}>{price ? 'Dollar amounts use the last available price.' : 'Dollar estimates are temporarily unavailable; native fees are shown.'}</p>}
+      {needsEthPrice && priceError && <p className={shared.hint}>{price ? 'Dollar amounts use the last available price.' : 'Dollar estimates are temporarily unavailable; native fees are shown below each amount.'}</p>}
       {batch && <>
         <p className={shared.hint}>Recorded L1 batch costs: {native(batch.gasUsed * batch.gasPrice, l1Token)} for execution, plus {batch.blobGasUsed !== undefined && batch.blobGasPrice !== undefined ? native(batch.blobGasUsed * batch.blobGasPrice, l1Token) : 'an unavailable data fee'} for posting data. These cover the whole batch, which can include other transactions.</p>
       </>}

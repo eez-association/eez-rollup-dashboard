@@ -22,7 +22,7 @@ this remains a same-gas estimate rather than an actual direct-L1 transaction.
 
 ## Currency conversion
 
-Divide the computed wei by 10^18 to obtain native tokens, then convert to cents:
+Divide the computed wei by 10^18 to obtain native tokens, then convert to US dollars. Both headline amounts always use dollars ($), never cents, including amounts below $1:
 
 - **xDAI:** fixed **1 xDAI = $1**, with no ETH price lookup.
 - **ETH:** use the public Coinbase ETH/USD spot quote.
@@ -31,14 +31,14 @@ Divide the computed wei by 10^18 to obtain native tokens, then convert to cents:
   so its configured token symbol is used first and its parent L1 ID is the fallback.
 - Explicit ETH or xDAI metadata takes priority over the fallback.
 
-For example, 0.000409435472882184 xDAI is **0.040944 cents** under the fixed
-conversion. The same-gas L1 estimate of 0.005447193038130351 xDAI is **0.544719
-cents**. Chiado testnet tokens have no cash value; these are nominal testnet costs.
+For example, 0.000409435472882184 xDAI is **$0.000409** under the fixed
+conversion. The same-gas L1 estimate of 0.005447193038130351 xDAI is **$0.005447**. Chiado testnet tokens have no cash value; these are nominal testnet costs.
 
 For ETH-denominated costs, both cards use the same ETH/USD quote. The public
 price endpoint receives no wallet, signature or transaction data. Quotes refresh
-once per minute while visible, with stale/error handling. Without a quote, ETH
-amounts remain visible rather than inventing USD values. Price/source details are
+once per minute while visible, with stale/error handling. Without a quote, the headline shows a loading or unavailable USD state; ETH
+amounts remain visible underneath rather than inventing USD values. Small dollar
+amounts retain extra decimal places, with scientific notation below $0.000001. Price/source details are
 inside Details, not a banner. xDAI-only networks never request ETH/USD.
 
 ## Included fees

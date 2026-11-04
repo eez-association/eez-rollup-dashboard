@@ -526,3 +526,102 @@ test('gas totals preserve integer precision and never add nested remote calls to
   assert.equal(m.gas.L1.contributions.length, 1);
   assert.equal(m.gas.L2.contributions.length, 1);
 });
+
+
+test('transparent proxy labels use only one named implementation observed in the same call', async () => {
+  const { trace } = await decode();
+  const target = trace.frames.find(frame => frame.chain === trace.origin.chain && frame.transactionHash === trace.txHash && frame.path === '0');
+  const logical = trace.logicalNodes.find(node => node.id === target.id);
+  target.decoded = { ...target.decoded, contractName: 'TransparentUpgradeableProxy' };
+  logical.decoded = target.decoded;
+  const implementation = { ...target, id: `${target.id}.99`, path: `${target.path}.99`, parentId: target.id,
+    from: target.to, to: address(999), type: 'DELEGATECALL', children: [],
+    decoded: { ...target.decoded, contractName: 'Bridge' } };
+  target.children.push(implementation.id);
+  logical.children.push(implementation.id);
+  trace.frames.push(implementation);
+  trace.logicalNodes.push({ id: implementation.id, physicalFrameId: implementation.id, chain: implementation.chain,
+    role: 'application', children: [], decoded: implementation.decoded });
+  physicalLinks(trace);
+  const original = structuredClone(trace);
+  for (const mode of ['combined', 'physical']) {
+    const model = buildFlowModel(trace, { mode });
+    const node = model.nodes.find(node => node.frameId === target.id);
+    assert.equal(node.contract, 'Bridge (Transparent Proxy)');
+    assert.equal(node.proxyContract, 'TransparentUpgradeableProxy');
+    for (const search of ['Bridge', 'Transparent Proxy', 'TransparentUpgradeableProxy']) {
+      assert.ok(traceRows(model, { search }).some(row => row.node.frameId === target.id), `${mode}: ${search}`);
+    }
+    assert.equal(node.address, target.to);
+    assert.equal(node.failed, !!target.error);
+    assert.equal(node.reverted, !!target.reverted);
+    if (mode === 'combined') assert.equal(node.impl.address, implementation.to);
+  }
+  assert.deepEqual(trace, original, 'display labels do not rewrite decoded evidence');
+  for (const change of ['unknown', 'different-input', 'different-chain', 'different-transaction', 'wrong-parent', 'ambiguous', 'ordinary']) {
+    const copy = structuredClone(trace);
+    const proxy = copy.frames.find(frame => frame.id === target.id);
+    const impl = copy.frames.find(frame => frame.id === implementation.id);
+    if (change === 'unknown') impl.decoded.contractName = 'Unknown contract';
+    if (change === 'different-input') impl.input = '0xdeadbeef';
+    if (change === 'different-chain') impl.chain = impl.chain === 'L1' ? 'L2' : 'L1';
+    if (change === 'different-transaction') impl.transactionHash = '0x' + 'ff'.repeat(32);
+    if (change === 'wrong-parent') impl.parentId = null;
+    if (change === 'ambiguous') {
+      const other = { ...impl, id: `${target.id}.100`, to: address(998), decoded: { contractName: 'OtherBridge' } };
+      proxy.children.push(other.id); copy.frames.push(other);
+    }
+    if (change === 'ordinary') {
+      proxy.decoded.contractName = 'OrdinaryContract';
+      copy.logicalNodes.find(node => node.id === target.id).decoded.contractName = 'OrdinaryContract';
+    }
+    for (const mode of ['combined', 'physical']) {
+      const node = buildFlowModel(copy, { mode }).nodes.find(node => node.frameId === target.id);
+      assert.equal(node.contract, change === 'ordinary' ? 'OrdinaryContract' : 'TransparentUpgradeableProxy', change);
+    }
+  }
+});
+
+
+test('settlement forwarding wrappers follow the protocol toggle without hiding application calls', async () => {
+  const wrapper = address(555);
+  const { f, trace } = await decode({ direction: 'L2' }, fixture => {
+    const post = fixture.txs.L1.get(fixture.posting), manager = post.trace;
+    post.trace = frame(manager.from, wrapper, manager.input, [manager]);
+    manager.from = wrapper;
+    post.transaction.to = wrapper; post.receipt.to = wrapper;
+  });
+  const posting = trace.frames.find(frame => frame.chain === 'L1' && frame.transactionHash === f.posting && frame.path === '0');
+  posting.decoded = { ...posting.decoded, contractName: 'EEZPostBatcher', functionName: 'postAndVerifyBatch' };
+  trace.logicalNodes.find(node => node.id === posting.id).decoded = posting.decoded;
+  physicalLinks(trace);
+  const original = structuredClone(trace);
+  for (const mode of ['combined', 'physical']) {
+    const model = buildFlowModel(trace, { mode });
+    const batcher = model.nodes.find(node => node.frameId === posting.id);
+    assert.equal(batcher.role, 'settlement-forwarder');
+    assert.equal(batcher.protocol, true);
+    assert.equal(batcher.address, wrapper);
+    // The physical view has no isolated L1 entry in this fixture: inspect its full batch explicitly.
+    const selection = mode === 'physical' ? { transaction: `L1:${f.posting}` } : {};
+    const hidden = traceRows(model, { ...selection, protocol: false });
+    assert.ok(!hidden.some(row => row.node.id === batcher.id));
+    assert.ok(traceRows(model, { ...selection, protocol: true }).some(row => row.node.id === batcher.id));
+    assert.ok(hidden.some(row => row.node.address === f.target && row.node.chain === 'L1'), 'the real L1 target is preserved');
+    if (mode === 'combined') {
+      assert.ok(hidden.some(row => row.node.address === f.source && row.node.chain === 'L2'));
+      const target = hidden.find(row => row.node.address === f.target && row.node.chain === 'L1');
+      assert.equal(target.node.crossing.status, 'matched');
+    }
+  }
+  assert.deepEqual(trace, original, 'filter classification leaves decoded execution evidence intact');
+  // A name or selector alone is not enough to classify an application as plumbing.
+  const unproven = structuredClone(trace);
+  for (const frame of unproven.frames) if (frame.chain === 'L1' && frame.protocol?.name === 'postAndVerifyBatch') frame.protocol = null;
+  assert.equal(buildFlowModel(unproven).nodes.find(node => node.frameId === posting.id).protocol, false);
+  const application = structuredClone(trace);
+  const appFrame = application.frames.find(frame => frame.id === posting.id);
+  appFrame.decoded.functionName = 'run';
+  application.logicalNodes.find(node => node.id === posting.id).decoded.functionName = 'run';
+  assert.equal(buildFlowModel(application).nodes.find(node => node.frameId === posting.id).protocol, false, 'ordinary application callers stay visible');
+});

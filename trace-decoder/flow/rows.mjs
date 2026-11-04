@@ -89,7 +89,7 @@ export function traceRows(model, { transaction = "", protocol = false, localRead
     // Selecting a transaction explicitly restores its full recorded contents.
     if (!transaction && model.mode !== 'physical' && node.flowAttempt === 'other') continue;
     const inTransaction = !transaction || node.chain + ":" + node.tx === transaction;
-    const matches = !query || [node.contract, node.fn, node.address, node.tx, node.input].some(value => String(value || "").toLowerCase().includes(query));
+    const matches = !query || [node.contract, node.proxyContract, node.fn, node.address, node.tx, node.input].some(value => String(value || "").toLowerCase().includes(query));
     // Keep top-level reads and evidence; an explicit search also reveals matching local reads.
     const showRead = localReads || !!query || rootIds.has(node.id) || !isLocalRead(node);
     // A user transaction sent directly to a proxy is still the initiating call,

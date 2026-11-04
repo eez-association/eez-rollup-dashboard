@@ -53,3 +53,14 @@ test('invalid balances, fees, and gas limits are rejected',async()=>{
  for(const params of [{balance:0n,feeCap:1n},{balance:10n,feeCap:-1n}]) await assert.rejects(prepareNativeBridgeMax({...params,gasOverride:null,estimate:async()=>1n}));
  await assert.rejects(prepareNativeBridgeMax({balance,feeCap,gasOverride:0n,estimate:async()=>raw}),/valid gas limit/);
 });
+
+test('MAX caps the amount before estimation while preserving the gas reserve', async () => {
+ const cap = 100_000_000_000_000_000n;
+ const values = [];
+ const result = await prepareNativeBridgeMax({balance:10n*cap,feeCap:2n,gasOverride:null,minimumReserve:300n,maxAmount:cap,
+   estimate:async value=>{values.push(value);return 10n;}});
+ assert.deepEqual(values,[cap]);
+ assert.deepEqual(result,{amount:cap,reserve:300n});
+ const lowBalance = await prepareNativeBridgeMax({balance:cap,feeCap:2n,gasOverride:null,minimumReserve:300n,maxAmount:cap,estimate:async()=>10n});
+ assert.deepEqual(lowBalance,{amount:cap-300n,reserve:300n});
+});
