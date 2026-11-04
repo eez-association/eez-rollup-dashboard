@@ -8,6 +8,7 @@ interface Props {
   direction: BridgeDirection;
   asset: BridgeAsset;
   amount: string;
+  amountError?: string | null;
   received: string;
   symbol: string | null;
   tokens?: Partial<Record<"l1" | "l2", TokenMeta>>;
@@ -68,6 +69,7 @@ export function BridgeAssetSwap(props: Props) {
         </div>}
         <div className={styles.amountRow} data-long={(from ? props.amount : props.received).length > 14}>
           {from ? <input id="bridge-amount" aria-label="Bridge amount" inputMode="decimal" type="text"
+            aria-invalid={!!props.amountError} aria-describedby={props.amountError ? "bridge-amount-error" : undefined}
             spellCheck={false} autoComplete="off" className={styles.amount} value={props.amount}
             onChange={event => props.onAmountChange(event.target.value)} placeholder="0.0" disabled={props.disabled} /> :
             <output className={styles.received} aria-label="Destination amount" title="Calculated from the From amount">{props.received || "—"}</output>}

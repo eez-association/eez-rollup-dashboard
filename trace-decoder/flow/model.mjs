@@ -116,6 +116,18 @@ export function buildFlowModel(trace, { label, explorers = {}, mode = 'combined'
   function describe(frame, ln) {
     const d = ln?.decoded || frame.decoded || {};
     let role = ln?.role || frame.role || 'application', contract = d.contractName || 'Unknown contract';
+    // Name transparent proxies from this call's observed implementation, never current storage.
+    const proxyContract = contract === 'TransparentUpgradeableProxy' ? contract : null;
+    if (proxyContract) {
+      const delegates = (frame.children || []).map(id => frames.get(id)).filter(child =>
+        child?.type === 'DELEGATECALL' && lower(child.input) === lower(frame.input));
+      const implementation = delegates.length === 1 ? delegates[0] : null;
+      const name = implementation?.decoded?.contractName;
+      if (implementation?.parentId === frame.id && implementation.chain === frame.chain &&
+          implementation.transactionHash === frame.transactionHash && implementation.to &&
+          lower(implementation.to) !== lower(frame.to) && typeof name === 'string' && name.trim() &&
+          name !== 'Unknown contract' && name !== proxyContract) contract = `${name} (Transparent Proxy)`;
+    }
     // Proxy deployment by a manager is delivery plumbing, like the proxies themselves.
     if (frame.type?.startsWith('CREATE') && lower(frame.from) === lower(managers[frame.chain])) role = 'proxy-creation';
     if (role === 'system-value-transfer') contract = 'L2 system';
@@ -126,7 +138,7 @@ export function buildFlowModel(trace, { label, explorers = {}, mode = 'combined'
       kind: 'call', frameId: frame.id, chain: frame.chain, role,
       tokenTransfers: [...(transfers.get(frame.id) || [])],
       protocol: PROTOCOL_ROLES.has(role) || role === 'proxy-creation', callType: frame.type || 'CALL',
-      contract, accountType: d.accountType, address: frame.to ?? null, from: frame.from ?? null,
+      contract, ...(proxyContract ? { proxyContract } : {}), accountType: d.accountType, address: frame.to ?? null, from: frame.from ?? null,
       fn: role === 'system-value-transfer' ? 'Value to L2 system' : functionName(d, frame), signature: d.signature || null, args: (d.arguments || []).map(argument),
       ret: returnInfo(d, frame), value: String(frame.value ?? '0'), isStatic: !!frame.isStatic,
       crossChainRead: !!frame.isStatic && (outgoingByFrame.has(frame.id) || incomingByFrame.has(frame.id) || incomingProxyFrames.has(frame.id) || outgoingManagerFrames.has(frame.id)),

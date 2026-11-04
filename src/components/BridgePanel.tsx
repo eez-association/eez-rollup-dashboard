@@ -9,6 +9,7 @@ import { BridgeTokenPicker } from "./BridgeTokenPicker";
 import { BridgeAssetSwap } from "./BridgeAssetSwap";
 import { WalletIcon } from "./WalletIcon";
 import { BridgeFeeQuote } from "./BridgeFeeQuote";
+import { bridgeAmountError } from "../lib/bridgeLimits";
 
 interface Props {
   state: BridgeState;
@@ -63,6 +64,7 @@ export function BridgePanel({
     l1BridgeReady, l2BridgeReady, gas, destinationAddress, tokenNeedsApproval, tokenReadError,
   } = state;
 
+  const amountError = bridgeAmountError(L1_CHAIN.chainId, asset, amount);
   const nativeSymbol = (direction === "l1-to-l2" ? L1_CHAIN : L2_CHAIN).nativeCurrency.symbol;
   const feesEnabled = direction === "l1-to-l2" ? config.l1FeesEnabled : config.l2FeesEnabled;
   const ethereumSource = BigInt((direction === "l1-to-l2" ? L1_CHAIN : L2_CHAIN).chainId) === 1n;
@@ -100,10 +102,11 @@ export function BridgePanel({
     rawAmount > 0n &&
     !invalidRecipient &&
     !insufficientBalance &&
+    !amountError &&
     !needsApproval &&
     (asset === "eth" || tokenMeta !== null && !tokenMeta.predicted && tokenNeedsApproval !== null && sourceBalanceRaw !== null && /^0x[0-9a-fA-F]{40}$/.test(tokenAddress));
 
-  const disabledReason = !walletAddress ? null :
+  const disabledReason = !walletAddress || amountError ? null :
     !canBridge && !busy && sourceBridgeReady && rawAmount > 0n ?
       asset === "erc20" && tokenReadError ? `Unable to check the token: ${tokenReadError}. Retrying…` :
       asset === "erc20" && (tokenNeedsApproval === null || sourceBalanceRaw === null) ? "Checking token balance and approval…" :
@@ -148,7 +151,7 @@ export function BridgePanel({
       )}
 
       <BridgeAssetSwap
-        direction={direction} asset={asset} amount={amount}
+        direction={direction} asset={asset} amount={amount} amountError={amountError}
         received={rawAmount > 0n ? formatUnits(rawAmount, decimals) : ""}
         symbol={tokenMeta?.symbol || null} balance={sourceBalance} connected={!!walletAddress}
         tokens={selectedTokens}
@@ -199,19 +202,21 @@ export function BridgePanel({
       </div>}
       />
 
+      {amountError && <div id="bridge-amount-error" className={styles.errorBar} role="alert">{amountError}</div>}
+
       {asset === "erc20" && tokenMeta?.predicted && <p className={styles.sectionHint}>This token will be deployed when it is first bridged to this network.</p>}
 
       {/* Gas settings are already collapsed; keep estimation errors visible. */}
-      {gas.status === "unsupported" && gas.errorMessage && <div className={styles.validationHint} role="status">{gas.errorMessage}</div>}
-      {!needsApproval && phase !== "confirmed" && gas.status === "error" && gas.errorMessage && (
+      {!amountError && gas.status === "unsupported" && gas.errorMessage && <div className={styles.validationHint} role="status">{gas.errorMessage}</div>}
+      {!amountError && !needsApproval && phase !== "confirmed" && gas.status === "error" && gas.errorMessage && (
         <div className={styles.errorBar} role="alert">{feesEnabled ? "Fee quote failed" : "Gas estimation failed"}: {gas.errorMessage}</div>
       )}
-      {feesEnabled && phase !== "confirmed" && !needsApproval && amount && rawAmount > 0n && sourceBridgeReady && (
+      {!amountError && feesEnabled && phase !== "confirmed" && !needsApproval && amount && rawAmount > 0n && sourceBridgeReady && (
         <BridgeFeeQuote fees={state.fees} sentToWallet={phase === "sending" || phase === "tx-pending"}
           disabled={busy || needsApproval}
           onRefresh={onRefreshFees} />
       )}
-      {amount && rawAmount > 0n && sourceBridgeReady && (
+      {!amountError && amount && rawAmount > 0n && sourceBridgeReady && (
         <details className={styles.gasSettings}>
           <summary>Gas settings</summary>
           <GasLimitEditor
@@ -245,7 +250,7 @@ export function BridgePanel({
         </>
       )}
 
-      {walletAddress && composerBlocked && !busy && !verifyingComposer ? <div className={styles.validationHint} role="status">
+      {!amountError && walletAddress && composerBlocked && !busy && !verifyingComposer ? <div className={styles.validationHint} role="status">
         Your wallet is not sending through the EEZ Composer RPC for this network yet. Click {actionLabel} to see the setup steps.
       </div> : disabledReason && <div className={!walletAddress ? styles.sectionHint : styles.validationHint} role="status">{disabledReason}</div>}
 
@@ -264,7 +269,7 @@ export function BridgePanel({
         ref={connectButton}
         onClick={walletAddress ? onBridge : () => setChoosingWallet(!choosingWallet)}
         aria-expanded={!walletAddress ? choosingWallet : undefined}
-        disabled={!!walletAddress && (busy || verifyingComposer || (!composerBlocked && !canBridge))}
+        disabled={!!walletAddress && (!!amountError || busy || verifyingComposer || (!composerBlocked && !canBridge))}
       >
         {!walletAddress ? "Connect wallet" : verifyingComposer ? "Checking Composer…" : busy ? (
           <><span className="btn-spinner" /> Bridging...</>

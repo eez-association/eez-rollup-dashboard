@@ -25,7 +25,7 @@ export interface TraceTokenTransfer {
 export interface TraceNode {
   id: number; kind: "call" | "ghost"; frameId: string | null; chain: TraceChain;
   recordedParent?: number | null;
-  role: string; protocol: boolean; inFlow?: boolean; callType: string; contract: string;
+  role: string; protocol: boolean; inFlow?: boolean; callType: string; contract: string; proxyContract?: string;
   flowAttempt?: "related" | "other";
   accountType?: "eoa";
   address: string | null; from?: string | null; fn: string; signature?: string | null;

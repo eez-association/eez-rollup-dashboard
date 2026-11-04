@@ -217,7 +217,7 @@
   const cidStyle = i => `--cid:var(--c${i % PALETTE})`;
   const tagHtml = b => b && b.tag != null ? `<span class="cid" style="${cidStyle(b.cid)}">${b.tag}</span>` : '';
   const isMap = () => view !== 'timeline';
-  const nameOf = n => n.impl && n.impl.contract !== 'Unknown contract' ? n.impl.contract : n.contract;
+  const nameOf = n => n.proxyContract ? n.contract : n.impl && n.impl.contract !== 'Unknown contract' ? n.impl.contract : n.contract;
   function graphModel() {
     kidsMemo = new Map();
     const roots = shownRoots(), root = roots[0];
@@ -792,10 +792,10 @@
       if (n.value && n.value !== '0') tags.push(`<span class="tag chain">${esc(ether(n.value))}</span>`);
       if (n.kind === 'ghost') tags.push(`<span class="tag warn">${esc(n.crossing?.status || 'unresolved')} · not observed</span>`);
       if (n.reverted && !n.failed) tags.push('<span class="tag bad">rolled back</span>');
-      if (n.impl && n.impl.contract !== n.contract) tags.push(`<span class="tag">via ${esc(n.contract)}</span>`);
+      if (n.impl && n.impl.contract !== n.contract) tags.push(`<span class="tag">via ${esc(n.proxyContract || n.contract)}</span>`);
       if (n.protocol) tags.push('<span class="tag">EEZ</span>');
       if (n.callType.startsWith('CREATE')) tags.push('<span class="tag">deploy</span>');
-      const name = n.impl && n.impl.contract !== 'Unknown contract' ? n.impl.contract : n.contract;
+      const name = nameOf(n);
       const fn = argsText(n);
       const cls = ['card', c, n.kind === 'ghost' ? 'ghost' : '', n.protocol ? 'proto' : '', n.failed ? 'rev' : '', isSel('node', row.id) ? 'sel' : '', matches.includes(row.id) ? 'hit' : ''].join(' ');
       parts.push(`<button type="button" class="${cls}" data-node="${row.id}" style="left:${row.x}px;top:${row.y}px;width:${row.w}px;--card-h:${CARD_H}px" title="${esc(`${name} · ${short(n.address)}\n${fn}`)}"><span class="c-name">${esc(name)}</span><span class="c-fn">${esc(fn)}</span>${tags.join('')}${status ? `<span class="c-status ${status[0]}" aria-label="${n.failed ? 'reverted' : n.kind === 'ghost' ? 'not observed' : 'rolled back'}">${status[1]}</span>` : ''}</button>`);
@@ -946,11 +946,11 @@
     const status = n.kind === 'ghost' ? '<span class="badge warn">Remote trace missing</span>' : n.failed ? '<span class="badge bad">Reverted</span>' : n.reverted ? '<span class="badge warn">Rolled back by an outer revert</span>' : '<span class="badge ok">Succeeded</span>';
     const responseLabel = n.preparedResponse ? '<span class="badge">L2 request · prepared response from loaded table</span>' : n.preparedResult ? '<span class="badge">Prepared result · no L2 delivery expected</span>' : '';
 
-    const name = n.impl && n.impl.contract !== 'Unknown contract' ? n.impl.contract : n.contract;
+    const name = nameOf(n);
     $('inspector').innerHTML = `<div>${status} ${responseLabel}</div><div><h2 class="i-title">${esc(name)}</h2><div class="i-fn ${c}">${esc(tableOf(n) ? argsText(n) : n.signature || n.fn)}</div></div>
       ${field('Contract', n.address, { copy: true })}
       ${n.preparedResponse ? `<p class="note">This is the observed L2 proxy request. Its result comes from the loaded table; the linked L1 entry contains the remote execution.</p>${field('Remote contract on ' + n.remoteChain, n.remoteAddress, { copy: true })}` : ''}
-      ${n.impl ? field(`Implementation (DELEGATECALL from ${n.contract})`, n.impl.address, { copy: true }) : ''}
+      ${n.impl ? field(`Implementation (DELEGATECALL from ${n.proxyContract || n.contract})`, n.impl.address, { copy: true }) : ''}
       ${M.chains[n.chain]?.explorer ? `<div class="links">${n.address ? explorerLink(n.chain, 'address', n.impl?.address || n.address, 'Contract on explorer ↗') : ''}${n.tx ? explorerLink(n.chain, 'tx', n.tx, 'Transaction on explorer ↗') : ''}</div>` : ''}
       ${tableSection(n)}
       ${sameContractSection(n, id)}
@@ -968,7 +968,7 @@
     const n = M.nodes[id], parent = parentMap().get(id), p = parent != null ? M.nodes[parent] : null;
     const cross = p && p.chain !== n.chain;
     $('i-kind').className = `badge ${n.ret.status === 'revert' ? 'bad' : 'ok'}`; $('i-kind').textContent = cross ? `${n.chain} → ${p.chain} return` : 'Return';
-    $('inspector').innerHTML = `<div><h2 class="i-title">${p ? `Back to ${esc(p.impl?.contract && p.impl.contract !== 'Unknown contract' ? p.impl.contract : p.contract)}` : 'Back to the transaction sender'}</h2><div class="i-fn ${n.chain.toLowerCase()}">${esc(n.contract)}.${esc(n.fn)}</div></div>
+    $('inspector').innerHTML = `<div><h2 class="i-title">${p ? `Back to ${esc(nameOf(p))}` : 'Back to the transaction sender'}</h2><div class="i-fn ${n.chain.toLowerCase()}">${esc(n.contract)}.${esc(n.fn)}</div></div>
       <div class="sec"><h3>${n.ret.status === 'revert' ? 'Revert' : 'Returned value'}</h3>${retSection(n)}</div>
       ${cross ? `<div class="sec"><h3>How this value crosses chains</h3><p class="note">The ${esc(p.chain)} caller received this result from EEZ's pre-proven execution table during its own transaction. The ${esc(n.chain)} trace shows the matching execution${n.crossing?.status === 'matched' ? ', and its return bytes match' : ''}. The arrow joins the two; it is not a network round trip.</p></div>` : ''}
       ${n.ret.raw ? `<details${n.ret.status === 'raw' ? ' open' : ''}><summary>Return bytes</summary><pre class="box">${esc(n.ret.raw)}</pre></details>` : ''}`;

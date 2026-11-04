@@ -537,7 +537,7 @@ try {
       await page.getByText('Estimated cost without EEZ', { exact: true }).waitFor();
       await page.waitForFunction(() => document.querySelector('[data-testid="cost-without-eez"]')?.textContent === 'Waiting for L1 settlement…');
       assert.equal(await page.getByTestId('cost-without-eez').getAttribute('data-estimated'), 'true');
-      assert.equal(await page.getByTestId('cost-actual').textContent(), '2.20e-9¢', 'the actual cost still uses the paid L2 receipt fee');
+      assert.equal(await page.getByTestId('cost-actual').textContent(), '$2.20e-11', 'the actual cost still uses the paid L2 receipt fee');
       assert.equal(observationCalls.filter(call => call.method === 'eth_gasPrice' && call.path.endsWith('/rpc/l1')).length, l1PriceReadsBefore, 'cost comparison never substitutes the 7-wei RPC suggestion');
       assert.equal(await setupSteps.count(), 0, 'a normal transaction does not re-show setup steps');
       assert.match(await page.locator('#safe-send').textContent(), /Waiting for confirmation/);
@@ -567,9 +567,9 @@ try {
       await status('Transfer confirmed on');
       assert.equal(await page.locator('#safe-settlement-checking').count(), 0);
       assert(await page.locator('#safe-settlement-tx').isVisible());
-      await page.waitForFunction(() => document.querySelector('[data-testid="cost-without-eez"]')?.textContent === '0.55¢');
+      await page.waitForFunction(() => document.querySelector('[data-testid="cost-without-eez"]')?.textContent === '$0.0055');
       assert.equal(await page.getByTestId('cost-without-eez').getAttribute('data-estimated'), 'true', 'same-gas comparison uses the verified settlement price');
-      assert.equal(await page.getByTestId('cost-actual').textContent(), '2.20e-9¢');
+      assert.equal(await page.getByTestId('cost-actual').textContent(), '$2.20e-11');
       assert.equal(sends.length, attemptsBeforeSuccess + 2, 'one creation and one Falcon-authorized transfer');
       for (const gasWallet of ['0x'+'99'.repeat(20), account]) {
         await page.evaluate(account => { const w = window.falconWalletTest; w.account = account; w.emit('accountsChanged', [account]); }, gasWallet);
@@ -577,8 +577,8 @@ try {
         assert.equal(await page.locator('#safe-cost-comparison').count(), gasWallet === account ? 1 : 0, 'transfer costs follow their wallet and key');
         assert.equal(await page.locator('#safe-settlement-tx').count(), gasWallet === account ? 1 : 0, 'L1 links follow their source transaction scope');
       }
-      assert.match(await page.getByTestId('cost-actual').textContent(), /¢/);
-      await page.waitForFunction(() => document.querySelector('[data-testid="cost-without-eez"]')?.textContent === '0.55¢');
+      assert.match(await page.getByTestId('cost-actual').textContent(), /^\$/);
+      await page.waitForFunction(() => document.querySelector('[data-testid="cost-without-eez"]')?.textContent === '$0.0055');
       assert.equal(observationCalls.filter(call => call.method === 'eth_gasPrice' && call.path.endsWith('/rpc/l1')).length,
         l1PriceReadsBefore, 'the verified receipt price is retained without querying RPC gas suggestions');
       assert(!f.requests.some(request => request.url.startsWith('https://api.coinbase.com/')), 'xDAI costs must not fetch or multiply by ETH/USD');
@@ -639,7 +639,8 @@ try {
       await page.locator('#safe-send').click(); await status('Transfer confirmed on Ethereum');
       assert.equal(sends.length, attemptsBeforeSuccess + 2);
       assert.equal(sends.at(-1).type, type); assert.equal(sends.at(-1).chainId, toHex(d.l2.chainId));
-      await page.waitForFunction(() => document.querySelector('[data-testid="cost-actual"]')?.textContent === '0.000004¢');
+      // Receipt: 5,500,000 gas * 4 wei; fixture quote: $2,000/ETH => $0.000000044.
+      await page.waitForFunction(() => document.querySelector('[data-testid="cost-actual"]')?.textContent === '$4.40e-8');
       assert(f.requests.some(request => request.url.startsWith('https://api.coinbase.com/')), 'Ethereum costs use the configured ETH/USD price path');
     }
     await f.close();
