@@ -581,3 +581,47 @@ test('transparent proxy labels use only one named implementation observed in the
     }
   }
 });
+
+
+test('settlement forwarding wrappers follow the protocol toggle without hiding application calls', async () => {
+  const wrapper = address(555);
+  const { f, trace } = await decode({ direction: 'L2' }, fixture => {
+    const post = fixture.txs.L1.get(fixture.posting), manager = post.trace;
+    post.trace = frame(manager.from, wrapper, manager.input, [manager]);
+    manager.from = wrapper;
+    post.transaction.to = wrapper; post.receipt.to = wrapper;
+  });
+  const posting = trace.frames.find(frame => frame.chain === 'L1' && frame.transactionHash === f.posting && frame.path === '0');
+  posting.decoded = { ...posting.decoded, contractName: 'EEZPostBatcher', functionName: 'postAndVerifyBatch' };
+  trace.logicalNodes.find(node => node.id === posting.id).decoded = posting.decoded;
+  physicalLinks(trace);
+  const original = structuredClone(trace);
+  for (const mode of ['combined', 'physical']) {
+    const model = buildFlowModel(trace, { mode });
+    const batcher = model.nodes.find(node => node.frameId === posting.id);
+    assert.equal(batcher.role, 'settlement-forwarder');
+    assert.equal(batcher.protocol, true);
+    assert.equal(batcher.address, wrapper);
+    // The physical view has no isolated L1 entry in this fixture: inspect its full batch explicitly.
+    const selection = mode === 'physical' ? { transaction: `L1:${f.posting}` } : {};
+    const hidden = traceRows(model, { ...selection, protocol: false });
+    assert.ok(!hidden.some(row => row.node.id === batcher.id));
+    assert.ok(traceRows(model, { ...selection, protocol: true }).some(row => row.node.id === batcher.id));
+    assert.ok(hidden.some(row => row.node.address === f.target && row.node.chain === 'L1'), 'the real L1 target is preserved');
+    if (mode === 'combined') {
+      assert.ok(hidden.some(row => row.node.address === f.source && row.node.chain === 'L2'));
+      const target = hidden.find(row => row.node.address === f.target && row.node.chain === 'L1');
+      assert.equal(target.node.crossing.status, 'matched');
+    }
+  }
+  assert.deepEqual(trace, original, 'filter classification leaves decoded execution evidence intact');
+  // A name or selector alone is not enough to classify an application as plumbing.
+  const unproven = structuredClone(trace);
+  for (const frame of unproven.frames) if (frame.chain === 'L1' && frame.protocol?.name === 'postAndVerifyBatch') frame.protocol = null;
+  assert.equal(buildFlowModel(unproven).nodes.find(node => node.frameId === posting.id).protocol, false);
+  const application = structuredClone(trace);
+  const appFrame = application.frames.find(frame => frame.id === posting.id);
+  appFrame.decoded.functionName = 'run';
+  application.logicalNodes.find(node => node.id === posting.id).decoded.functionName = 'run';
+  assert.equal(buildFlowModel(application).nodes.find(node => node.frameId === posting.id).protocol, false, 'ordinary application callers stay visible');
+});
